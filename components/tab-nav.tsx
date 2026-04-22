@@ -2,18 +2,23 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { MODULES, moduleFromPath } from "@/lib/modules";
 
 export function TabNav() {
   const pathname = usePathname();
   const active = moduleFromPath(pathname)?.id;
+  const { data: session } = useSession();
+  const isAdmin = Boolean(session?.isAdmin);
+
+  const visible = MODULES.filter((m) => !m.adminOnly || isAdmin);
 
   return (
     <nav
       style={{ display: "flex", height: "100%", alignItems: "stretch" }}
       aria-label="Modules"
     >
-      {MODULES.map((m) => {
+      {visible.map((m) => {
         const isActive = active === m.id;
         return (
           <Link

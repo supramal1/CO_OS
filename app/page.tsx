@@ -4,11 +4,12 @@ import { CropMarks } from "@/components/crop-marks";
 import { Monogram } from "@/components/monogram";
 import { SignInButton } from "@/components/sign-in-button";
 import { authOptions } from "@/lib/auth";
+import { DEFAULT_LANDING } from "@/lib/modules";
 
 export default async function SplashPage() {
   const session = await getServerSession(authOptions);
   if (session?.user?.email) {
-    redirect("/cookbook");
+    redirect(DEFAULT_LANDING);
   }
   return (
     <div

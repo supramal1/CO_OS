@@ -1,5 +1,10 @@
 export { default } from "next-auth/middleware";
 
 export const config = {
-  matcher: ["/cookbook/:path*", "/cornerstone/:path*", "/forge/:path*"],
+  matcher: [
+    "/cookbook/:path*",
+    "/forge/:path*",
+    "/speak-to-charlie/:path*",
+    "/kanban/:path*",
+  ],
 };
