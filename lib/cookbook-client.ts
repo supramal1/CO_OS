@@ -244,6 +244,37 @@ export async function exportSkills(apiKey: string): Promise<ExportPayload> {
   return callMcpTool<ExportPayload>(apiKey, "export_skills");
 }
 
+/**
+ * Export skills filtered to only those visible via list_skills.
+ *
+ * The MCP server's export_skills returns filesystem-raw results, including
+ * skills that list_skills silently filters out (e.g. client skills missing
+ * scope_type frontmatter). This ensures the PR only contains skills the
+ * admin can actually see in the UI.
+ */
+export async function exportVisibleSkills(
+  apiKey: string,
+): Promise<ExportPayload> {
+  const [listed, raw] = await Promise.all([
+    listSkills(apiKey),
+    exportSkills(apiKey),
+  ]);
+  const visibleNames = new Set(listed.map((s) => s.name));
+  const skills = raw.skills.filter((s) => {
+    const n = s.frontmatter.name;
+    const name =
+      typeof n === "string"
+        ? n
+        : s.path.replace(/\.md$/, "").split("/").pop() || s.path;
+    return visibleNames.has(name);
+  });
+  return {
+    exported_at: raw.exported_at,
+    count: skills.length,
+    skills,
+  };
+}
+
 export async function testSkill(
   apiKey: string,
   name: string,

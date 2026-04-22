@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { CookbookMcpError, exportSkills } from "@/lib/cookbook-client";
+import { CookbookMcpError, exportVisibleSkills } from "@/lib/cookbook-client";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +36,7 @@ export async function POST() {
   }
 
   try {
-    const payload = await exportSkills(session.apiKey);
+    const payload = await exportVisibleSkills(session.apiKey);
     return NextResponse.json({ ...payload, module: MODULE_JSON });
   } catch (err) {
     if (err instanceof CookbookMcpError) {

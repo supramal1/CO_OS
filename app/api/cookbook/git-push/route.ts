@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { CookbookMcpError, exportSkills } from "@/lib/cookbook-client";
+import { CookbookMcpError, exportVisibleSkills } from "@/lib/cookbook-client";
 import { GitPushError, pushExportAsPr } from "@/lib/cookbook-git-push";
 
 export const dynamic = "force-dynamic";
@@ -40,7 +40,7 @@ export async function POST() {
   const triggeredBy = session.user?.email || "unknown admin";
 
   try {
-    const raw = await exportSkills(session.apiKey);
+    const raw = await exportVisibleSkills(session.apiKey);
     const payload = { ...raw, module: MODULE_JSON };
     const result = await pushExportAsPr(payload, triggeredBy);
     return NextResponse.json({
