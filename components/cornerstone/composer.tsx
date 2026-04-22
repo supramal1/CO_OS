@@ -54,7 +54,7 @@ export function Composer({
               submit();
             }
           }}
-          placeholder="Ask Cornerstone…"
+          placeholder="Describe the problem…"
           rows={1}
           disabled={disabled}
           style={{
@@ -78,9 +78,9 @@ export function Composer({
           style={{
             alignSelf: "stretch",
             padding: "0 14px",
-            border: `1px solid ${value.trim() && !disabled ? "var(--c-cornerstone)" : "var(--rule-2)"}`,
+            border: `1px solid ${value.trim() && !disabled ? "var(--c-forge)" : "var(--rule-2)"}`,
             background: "transparent",
-            color: value.trim() && !disabled ? "var(--c-cornerstone)" : "var(--ink-faint)",
+            color: value.trim() && !disabled ? "var(--c-forge)" : "var(--ink-faint)",
             fontFamily: "var(--font-plex-mono)",
             fontSize: 10,
             letterSpacing: "0.14em",

@@ -124,7 +124,7 @@ export function ThreadList({
                 width: "100%",
                 textAlign: "left",
                 padding: "10px 16px 10px 14px",
-                borderLeft: `2px solid ${isActive ? "var(--c-cornerstone)" : "transparent"}`,
+                borderLeft: `2px solid ${isActive ? "var(--c-forge)" : "transparent"}`,
                 background: isActive ? "var(--panel-2)" : "transparent",
                 color: isActive ? "var(--ink)" : "var(--ink-dim)",
                 fontFamily: "var(--font-plex-sans)",

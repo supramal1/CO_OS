@@ -44,7 +44,7 @@ export function Conversation({
           style={{
             width: 8,
             height: 8,
-            background: "var(--c-cornerstone)",
+            background: "var(--c-forge)",
           }}
         />
         <h2
@@ -86,9 +86,9 @@ export function Conversation({
 
 function EmptyState() {
   const prompts = [
-    "What do we know about Unilever's Q3 brief?",
-    "Summarise the last client meeting notes.",
-    "Find all facts tagged with #measurement.",
+    "Our weekly reporting takes forever.",
+    "I keep doing the same competitor check by hand.",
+    "Onboarding new clients is painful.",
   ];
   return (
     <div
@@ -102,19 +102,20 @@ function EmptyState() {
     >
       <div
         style={{
-          width: 32,
+          minWidth: 64,
           height: 32,
-          border: "1px solid var(--c-cornerstone)",
-          display: "flex",
+          padding: "0 10px",
+          border: "1px solid var(--c-forge)",
+          display: "inline-flex",
           alignItems: "center",
           justifyContent: "center",
-          color: "var(--c-cornerstone)",
+          color: "var(--c-forge)",
           fontFamily: "var(--font-plex-mono)",
           fontSize: 11,
-          letterSpacing: "0.08em",
+          letterSpacing: "0.14em",
         }}
       >
-        C·S
+        CHARLIE
       </div>
       <div>
         <h1
@@ -128,7 +129,7 @@ function EmptyState() {
             lineHeight: 1.15,
           }}
         >
-          Ask Cornerstone.
+          Speak to Charlie.
         </h1>
         <p
           style={{
@@ -140,7 +141,7 @@ function EmptyState() {
             lineHeight: 1.55,
           }}
         >
-          Your long-term memory for Charlie Oscar. Facts, notes, conversations — all grounded in what the team has actually said and done.
+          Describe a pain point in your own words. Charlie turns it into a Forge brief the team can triage, build, and ship.
         </p>
       </div>
       <div

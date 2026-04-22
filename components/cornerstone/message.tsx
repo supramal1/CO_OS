@@ -29,11 +29,11 @@ export function Message({ message }: { message: ChatMessage }) {
           fontSize: 10,
           letterSpacing: "0.14em",
           textTransform: "uppercase",
-          color: isUser ? "var(--ink-dim)" : "var(--c-cornerstone)",
+          color: isUser ? "var(--ink-dim)" : "var(--c-forge)",
           paddingTop: 2,
         }}
       >
-        {isUser ? "You" : "C·S"}
+        {isUser ? "You" : "CHARLIE"}
       </div>
       <div
         style={{
@@ -55,7 +55,7 @@ export function Message({ message }: { message: ChatMessage }) {
               width: 6,
               height: 14,
               marginLeft: 2,
-              background: "var(--c-cornerstone)",
+              background: "var(--c-forge)",
               verticalAlign: "text-bottom",
               animation: "co-blink 1s steps(2) infinite",
             }}
