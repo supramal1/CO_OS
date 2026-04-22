@@ -5,6 +5,6 @@ export const config = {
     "/cookbook/:path*",
     "/forge/:path*",
     "/speak-to-charlie/:path*",
-    "/kanban/:path*",
+    "/agents/:path*",
   ],
 };

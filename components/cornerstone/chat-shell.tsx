@@ -6,7 +6,21 @@ import { Conversation } from "./conversation";
 import type { ChatMessage } from "./message";
 import { readNdjson } from "@/lib/cornerstone-stream";
 
-export function ChatShell() {
+export type ChatShellProps = {
+  endpoint?: string;
+  errorLabel?: string;
+  buildBody?: (args: {
+    text: string;
+    threadId: string;
+    history: { role: "user" | "assistant"; content: string }[];
+  }) => Record<string, unknown>;
+};
+
+export function ChatShell({
+  endpoint = "/api/cornerstone/query",
+  errorLabel = "Couldn't reach Cornerstone",
+  buildBody,
+}: ChatShellProps = {}) {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messagesByThread, setMessagesByThread] = useState<
@@ -113,14 +127,13 @@ export function ChatShell() {
     };
 
     try {
-      const res = await fetch("/api/cornerstone/query", {
+      const requestBody = buildBody
+        ? buildBody({ text, threadId: tid, history })
+        : { query: text, threadId: tid, history };
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: text,
-          threadId: tid,
-          history,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!res.ok || !res.body) {
@@ -167,7 +180,7 @@ export function ChatShell() {
               ? {
                   ...msg,
                   streaming: false,
-                  content: `Couldn't reach Cornerstone — ${message}`,
+                  content: `${errorLabel} — ${message}`,
                 }
               : msg,
           ),
