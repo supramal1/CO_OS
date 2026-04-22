@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Sans, IBM_Plex_Mono, IBM_Plex_Serif } from "next/font/google";
+import { AuthSessionProvider } from "@/components/session-provider";
 import "./globals.css";
 
 const plexSans = IBM_Plex_Sans({
@@ -36,7 +37,9 @@ export default function RootLayout({
       lang="en"
       className={`${plexSans.variable} ${plexMono.variable} ${plexSerif.variable}`}
     >
-      <body>{children}</body>
+      <body>
+        <AuthSessionProvider>{children}</AuthSessionProvider>
+      </body>
     </html>
   );
 }

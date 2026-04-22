@@ -60,3 +60,8 @@ a { color: inherit; text-decoration: none; }
   .font-mono  { font-family: var(--font-plex-mono),  ui-monospace, SFMono-Regular, monospace; }
   .font-serif { font-family: var(--font-plex-serif), ui-serif, Georgia, serif; }
 }
+
+@keyframes co-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0; }
+}

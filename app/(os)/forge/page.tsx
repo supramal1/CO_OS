@@ -15,36 +15,38 @@ export default function ForgePage() {
       <span
         style={{
           fontFamily: "var(--font-plex-mono)",
-          fontSize: 10,
+          fontSize: 11,
           letterSpacing: "0.18em",
           textTransform: "uppercase",
-          color: "var(--c-forge)",
+          color: "var(--ink-faint)",
         }}
       >
         Forge
       </span>
       <h1
         style={{
+          margin: 0,
           fontFamily: "var(--font-plex-serif)",
-          fontSize: 36,
+          fontSize: 32,
           fontWeight: 400,
+          fontStyle: "italic",
           color: "var(--ink)",
-          maxWidth: 560,
           lineHeight: 1.15,
         }}
       >
-        Agents are being built.
+        Coming soon.
       </h1>
       <p
         style={{
+          margin: 0,
           fontFamily: "var(--font-plex-sans)",
-          fontSize: 14,
+          fontSize: 15,
           color: "var(--ink-dim)",
-          maxWidth: 440,
-          lineHeight: 1.5,
+          maxWidth: "40ch",
+          lineHeight: 1.55,
         }}
       >
-        Submit a workflow — wired in Forge module step.
+        Forge agents are being designed. Check back in July.
       </p>
     </section>
   );

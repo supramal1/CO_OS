@@ -1,7 +1,15 @@
+import { redirect } from "next/navigation";
+import { getServerSession } from "next-auth";
 import { CropMarks } from "@/components/crop-marks";
 import { Monogram } from "@/components/monogram";
+import { SignInButton } from "@/components/sign-in-button";
+import { authOptions } from "@/lib/auth";
 
-export default function SplashPage() {
+export default async function SplashPage() {
+  const session = await getServerSession(authOptions);
+  if (session?.user?.email) {
+    redirect("/cookbook");
+  }
   return (
     <div
       style={{
@@ -47,22 +55,7 @@ export default function SplashPage() {
         >
           The operating system for Charlie Oscar. Sign in with your work account to continue.
         </p>
-        <button
-          type="button"
-          style={{
-            marginTop: 8,
-            border: "1px solid var(--rule-2)",
-            padding: "12px 22px",
-            fontFamily: "var(--font-plex-mono)",
-            fontSize: 11,
-            letterSpacing: "0.16em",
-            textTransform: "uppercase",
-            color: "var(--ink)",
-            transition: "background 120ms ease, border-color 120ms ease",
-          }}
-        >
-          Continue with Google
-        </button>
+        <SignInButton />
       </div>
 
       <span

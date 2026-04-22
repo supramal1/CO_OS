@@ -1,12 +1,14 @@
-type Props = {
-  email?: string;
-  isAdmin?: boolean;
-};
+"use client";
 
-export function UserBadge({
-  email = "operator@charlieoscar.com",
-  isAdmin = false,
-}: Props) {
+import { signOut, useSession } from "next-auth/react";
+
+export function UserBadge() {
+  const { data: session, status } = useSession();
+
+  const email = session?.user?.email ?? "—";
+  const isAdmin = session?.isAdmin ?? false;
+  const loading = status === "loading";
+
   return (
     <div
       style={{
@@ -20,7 +22,9 @@ export function UserBadge({
         color: "var(--ink-dim)",
       }}
     >
-      <span style={{ letterSpacing: "0.02em" }}>{email}</span>
+      <span style={{ letterSpacing: "0.02em" }}>
+        {loading ? "…" : email}
+      </span>
       <span
         style={{
           padding: "2px 6px",
@@ -35,6 +39,7 @@ export function UserBadge({
       </span>
       <button
         type="button"
+        onClick={() => signOut({ callbackUrl: "/" })}
         style={{
           fontSize: 11,
           color: "var(--ink-dim)",
