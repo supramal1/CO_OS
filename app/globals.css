@@ -3,25 +3,60 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg:         #0B0C0E;
+  --panel:      #101115;
+  --panel-2:    #14161B;
+
+  --ink:        #E9E7E1;
+  --ink-dim:    #8A8A85;
+  --ink-faint:  #4A4A47;
+
+  --rule:       #23252B;
+  --rule-2:     #2E3038;
+
+  --c-cookbook:    oklch(0.78 0.12 75);
+  --c-cornerstone: oklch(0.72 0.11 230);
+  --c-cowork:      oklch(0.88 0.02 110);
+  --c-forge:       oklch(0.72 0.15 30);
+
+  --shell-h: 52px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* { box-sizing: border-box; }
+
+html, body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-plex-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "ss01", "cv01";
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  min-height: 100vh;
 }
 
+::selection {
+  background: var(--ink-faint);
+  color: var(--ink);
+}
+
+input, textarea, button, select {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  outline: 0;
+}
+
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: 0.5; }
+
+a { color: inherit; text-decoration: none; }
+
 @layer utilities {
-  .text-balance {
-    text-wrap: balance;
-  }
+  .font-sans  { font-family: var(--font-plex-sans),  ui-sans-serif, system-ui, sans-serif; }
+  .font-mono  { font-family: var(--font-plex-mono),  ui-monospace, SFMono-Regular, monospace; }
+  .font-serif { font-family: var(--font-plex-serif), ui-serif, Georgia, serif; }
 }
