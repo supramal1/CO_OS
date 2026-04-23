@@ -1,30 +1,22 @@
 "use client";
 
 import { useSession } from "next-auth/react";
-import { AgentsBoard } from "@/components/agents/agents-board";
+import { ForgeKanban } from "@/components/forge/forge-kanban";
 
-export default function AgentsPage() {
+export default function ForgeKanbanPage() {
   const { data: session, status } = useSession();
-
-  if (status === "loading") {
-    return <Placeholder>Loading…</Placeholder>;
-  }
+  if (status === "loading") return <Gate>Loading…</Gate>;
   if (!session?.isAdmin) {
-    return (
-      <Placeholder>
-        Agents is admin-only. If you need access, ask an admin to enable your
-        role.
-      </Placeholder>
-    );
+    return <Gate>Forge Kanban is admin-only.</Gate>;
   }
-  return <AgentsBoard />;
+  return <ForgeKanban />;
 }
 
-function Placeholder({ children }: { children: React.ReactNode }) {
+function Gate({ children }: { children: React.ReactNode }) {
   return (
     <section
       style={{
-        height: "calc(100vh - var(--shell-h))",
+        height: "calc(100vh - var(--shell-h) - var(--forge-subnav-h, 44px))",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
