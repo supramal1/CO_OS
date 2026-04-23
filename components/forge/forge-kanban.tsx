@@ -85,7 +85,19 @@ export function ForgeKanban() {
     return groups;
   }, [state]);
 
-  const handleDragEnd = (event: DragEndEvent) => {
+  const applyLane = (taskId: string, lane: ForgeLane) => {
+    setState((s) => {
+      if (s.status !== "loaded") return s;
+      return {
+        status: "loaded",
+        tasks: s.tasks.map((t) =>
+          t.id === taskId ? { ...t, lane, updated_at: new Date().toISOString() } : t,
+        ),
+      };
+    });
+  };
+
+  const handleDragEnd = async (event: DragEndEvent) => {
     const taskId = String(event.active.id);
     const overLane = event.over?.id as ForgeLane | undefined;
     if (!overLane || state.status !== "loaded") return;
@@ -96,15 +108,36 @@ export function ForgeKanban() {
     if (!isAllowedTransition(fromLane, overLane)) {
       setToast({
         kind: "error",
-        message: `Can't move from ${LANE_LABEL[fromLane]} → ${LANE_LABEL[overLane]}. Drags are only allowed into Research, Production, or Done.`,
+        message: `Can't move from ${LANE_LABEL[fromLane]} → ${LANE_LABEL[overLane]}. Drags only open research (Backlog→Research), production (Research Review→Production), or close the task (Production Review→Done).`,
       });
       return;
     }
-    // KR-1: visual drag only — real transition wiring lands in KR-2.
-    setToast({
-      kind: "error",
-      message: `Transition ${LANE_LABEL[fromLane]} → ${LANE_LABEL[overLane]} not yet wired (KR-2).`,
-    });
+
+    // Optimistic: move the card now, revert if the transition API fails.
+    // The Realtime stream (KR-4) will re-converge the lane to whatever the
+    // backend ends up writing — a lane of research may flip to
+    // research_review within a few minutes as PM finishes scoping.
+    applyLane(taskId, overLane);
+    try {
+      const res = await fetch(`/api/forge/tasks/${taskId}/transition`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from_lane: fromLane, to_lane: overLane }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          detail?: string;
+        };
+        throw new Error(data.detail ?? data.error ?? `status ${res.status}`);
+      }
+    } catch (err) {
+      applyLane(taskId, fromLane);
+      setToast({
+        kind: "error",
+        message: err instanceof Error ? err.message : "transition failed",
+      });
+    }
   };
 
   return (
