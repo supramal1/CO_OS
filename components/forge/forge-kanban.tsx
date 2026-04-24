@@ -69,7 +69,8 @@ export function ForgeKanban() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+
+    const loadTasks = async (initial: boolean) => {
       try {
         const res = await fetch("/api/forge/tasks", { cache: "no-store" });
         if (!res.ok) {
@@ -79,18 +80,95 @@ export function ForgeKanban() {
           throw new Error(data.error ?? `status ${res.status}`);
         }
         const tasks = (await res.json()) as ForgeTask[];
-        if (!cancelled) setState({ status: "loaded", tasks });
+        if (cancelled) return;
+        setState((prev) => {
+          // Merge rather than replace so an optimistic lane change made
+          // mid-poll isn't clobbered before the backend catches up. For
+          // each incoming row, keep the newer updated_at.
+          if (initial || prev.status !== "loaded") {
+            return { status: "loaded", tasks };
+          }
+          const byId = new Map(prev.tasks.map((t) => [t.id, t]));
+          for (const t of tasks) {
+            const existing = byId.get(t.id);
+            if (!existing || t.updated_at >= existing.updated_at) {
+              byId.set(t.id, t);
+            }
+          }
+          return { status: "loaded", tasks: Array.from(byId.values()) };
+        });
       } catch (err) {
-        if (!cancelled) {
-          setState({
-            status: "error",
-            message: err instanceof Error ? err.message : "failed to load",
-          });
-        }
+        if (cancelled || !initial) return; // silent on poll failures
+        setState({
+          status: "error",
+          message: err instanceof Error ? err.message : "failed to load",
+        });
       }
-    })();
+    };
+
+    void loadTasks(true);
+    // Poll fallback — 10s cadence reconverges the board if a Realtime
+    // event gets dropped (network blip, Supabase reconnect). Cheap: one
+    // GET per 10s, already gated by admin session.
+    const pollId = window.setInterval(() => {
+      void loadTasks(false);
+    }, 10_000);
+
     return () => {
       cancelled = true;
+      window.clearInterval(pollId);
+    };
+  }, []);
+
+  // Supabase Realtime — lane changes written by cornerstone-agents
+  // (research → research_review, production → production_review,
+  // done on approval) arrive here without a page reload. We listen for
+  // INSERT (new tasks) and UPDATE (lane/metadata/status changes).
+  useEffect(() => {
+    const sb = getSupabaseBrowserClient();
+    if (!sb) return; // falls through to 10s poll in the loader above
+
+    const channel = sb
+      .channel("forge-tasks-realtime")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "forge_tasks",
+          filter: "namespace=eq.default",
+        },
+        (payload) => {
+          const row = (payload.new ?? payload.old) as ForgeTask | null;
+          if (!row?.id) return;
+          setState((prev) => {
+            if (prev.status !== "loaded") return prev;
+            if (payload.eventType === "DELETE") {
+              return {
+                status: "loaded",
+                tasks: prev.tasks.filter((t) => t.id !== row.id),
+              };
+            }
+            const idx = prev.tasks.findIndex((t) => t.id === row.id);
+            if (idx === -1) {
+              // INSERT of a task we don't yet have.
+              return { status: "loaded", tasks: [...prev.tasks, row] };
+            }
+            // Only apply the Realtime row if it's newer than what we
+            // have locally — prevents a stale event from stomping an
+            // optimistic update we just made.
+            const current = prev.tasks[idx];
+            if (row.updated_at < current.updated_at) return prev;
+            const next = [...prev.tasks];
+            next[idx] = row;
+            return { status: "loaded", tasks: next };
+          });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void sb.removeChannel(channel);
     };
   }, []);
 
