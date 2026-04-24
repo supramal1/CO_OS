@@ -18,11 +18,35 @@ import {
   LANE_ORDER,
   isAllowedTransition,
 } from "@/lib/agents-types";
+import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
+import {
+  costEstimateFor,
+  type CostRunRow,
+  type CostEstimate,
+} from "@/lib/cost-samples";
+import { CostConfirmDialog } from "./cost-confirm-dialog";
 
 type TasksState =
   | { status: "loading" }
   | { status: "loaded"; tasks: ForgeTask[] }
   | { status: "error"; message: string };
+
+// Transitions that should bypass the modal. production_review→done is a
+// pure gate-close on the paused PM run; no downstream /invoke, no spend.
+const SKIP_MODAL: Array<[ForgeLane, ForgeLane]> = [["production_review", "done"]];
+
+function shouldSkipModal(from: ForgeLane, to: ForgeLane): boolean {
+  return SKIP_MODAL.some(([f, t]) => f === from && t === to);
+}
+
+type PendingTransition = {
+  taskId: string;
+  taskTitle: string;
+  from: ForgeLane;
+  to: ForgeLane;
+  estimate: CostEstimate | null;
+  estimateError: boolean;
+};
 
 export function ForgeKanban() {
   const [state, setState] = useState<TasksState>({ status: "loading" });
@@ -30,6 +54,9 @@ export function ForgeKanban() {
     null,
   );
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [costRows, setCostRows] = useState<CostRunRow[] | null>(null);
+  const [costRowsError, setCostRowsError] = useState<boolean>(false);
+  const [pending, setPending] = useState<PendingTransition | null>(null);
 
   // PointerSensor with a small activation distance prevents click-vs-drag
   // ambiguity — clicking a card shouldn't initiate a drag, only a real
@@ -59,6 +86,35 @@ export function ForgeKanban() {
           });
         }
       }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Historical run costs — used for the p50/p90 estimate in the confirm
+  // modal. Best-effort: failure degrades the modal to "estimate unavailable"
+  // rather than blocking the drop.
+  useEffect(() => {
+    let cancelled = false;
+    const sb = getSupabaseBrowserClient();
+    if (!sb) {
+      setCostRowsError(true);
+      return;
+    }
+    (async () => {
+      const { data, error } = await sb
+        .from("forge_task_runs")
+        .select("task_id, run_type, actual_cost_usd")
+        .not("actual_cost_usd", "is", null)
+        .gt("actual_cost_usd", 0)
+        .limit(2000);
+      if (cancelled) return;
+      if (error || !data) {
+        setCostRowsError(true);
+        return;
+      }
+      setCostRows(data as CostRunRow[]);
     })();
     return () => {
       cancelled = true;
@@ -104,7 +160,39 @@ export function ForgeKanban() {
     setActiveId(String(event.active.id));
   };
 
-  const handleDragEnd = async (event: DragEndEvent) => {
+  const runTransition = async (
+    taskId: string,
+    fromLane: ForgeLane,
+    toLane: ForgeLane,
+  ) => {
+    // Optimistic: move the card now, revert if the transition API fails.
+    // The Realtime stream (KR-4) will re-converge the lane to whatever the
+    // backend ends up writing — a lane of research may flip to
+    // research_review within a few minutes as PM finishes scoping.
+    applyLane(taskId, toLane);
+    try {
+      const res = await fetch(`/api/forge/tasks/${taskId}/transition`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from_lane: fromLane, to_lane: toLane }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          detail?: string;
+        };
+        throw new Error(data.detail ?? data.error ?? `status ${res.status}`);
+      }
+    } catch (err) {
+      applyLane(taskId, fromLane);
+      setToast({
+        kind: "error",
+        message: err instanceof Error ? err.message : "transition failed",
+      });
+    }
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
     setActiveId(null);
     const taskId = String(event.active.id);
     const overLane = event.over?.id as ForgeLane | undefined;
@@ -121,31 +209,24 @@ export function ForgeKanban() {
       return;
     }
 
-    // Optimistic: move the card now, revert if the transition API fails.
-    // The Realtime stream (KR-4) will re-converge the lane to whatever the
-    // backend ends up writing — a lane of research may flip to
-    // research_review within a few minutes as PM finishes scoping.
-    applyLane(taskId, overLane);
-    try {
-      const res = await fetch(`/api/forge/tasks/${taskId}/transition`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ from_lane: fromLane, to_lane: overLane }),
-      });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as {
-          error?: string;
-          detail?: string;
-        };
-        throw new Error(data.detail ?? data.error ?? `status ${res.status}`);
-      }
-    } catch (err) {
-      applyLane(taskId, fromLane);
-      setToast({
-        kind: "error",
-        message: err instanceof Error ? err.message : "transition failed",
-      });
+    if (shouldSkipModal(fromLane, overLane)) {
+      void runTransition(taskId, fromLane, overLane);
+      return;
     }
+
+    // Compute estimate from whatever samples we have; failure degrades to
+    // estimateError so the modal still shows and the user can still proceed.
+    const estimate = costRows
+      ? costEstimateFor(costRows, fromLane, overLane)
+      : null;
+    setPending({
+      taskId,
+      taskTitle: task.title,
+      from: fromLane,
+      to: overLane,
+      estimate,
+      estimateError: costRowsError && !costRows,
+    });
   };
 
   return (
@@ -198,6 +279,22 @@ export function ForgeKanban() {
           </DragOverlay>
         </DndContext>
       )}
+
+      {pending ? (
+        <CostConfirmDialog
+          from={pending.from}
+          to={pending.to}
+          taskTitle={pending.taskTitle}
+          estimate={pending.estimate}
+          estimateError={pending.estimateError}
+          onCancel={() => setPending(null)}
+          onConfirm={() => {
+            const p = pending;
+            setPending(null);
+            void runTransition(p.taskId, p.from, p.to);
+          }}
+        />
+      ) : null}
 
       {toast ? (
         <div
