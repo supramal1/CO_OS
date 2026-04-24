@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import type { ForgeLane } from "@/lib/agents-types";
 import { LANE_LABEL } from "@/lib/agents-types";
 import type { CostEstimate } from "@/lib/cost-samples";
+import type { FxRate } from "@/lib/fx-rate";
 
 type Props = {
   from: ForgeLane;
@@ -11,6 +12,7 @@ type Props = {
   taskTitle: string;
   estimate: CostEstimate | null;
   estimateError: boolean;
+  fxRate: FxRate | null;
   onConfirm: () => void;
   onCancel: () => void;
 };
@@ -21,6 +23,7 @@ export function CostConfirmDialog({
   taskTitle,
   estimate,
   estimateError,
+  fxRate,
   onConfirm,
   onCancel,
 }: Props) {
@@ -90,7 +93,11 @@ export function CostConfirmDialog({
           {taskTitle}
         </h2>
 
-        <CostReadout estimate={estimate} estimateError={estimateError} />
+        <CostReadout
+          estimate={estimate}
+          estimateError={estimateError}
+          fxRate={fxRate}
+        />
 
         {hasSamples ? (
           <p
@@ -104,6 +111,12 @@ export function CostConfirmDialog({
             Based on {estimate!.sampleSize} completed{" "}
             {estimate!.sampleSize === 1 ? "task" : "tasks"}. Actual cost varies
             with brief complexity and retry behaviour.
+            {fxRate ? (
+              <>
+                {" "}
+                FX rate {fxRate.rate.toFixed(4)} GBP/USD (ECB, {fxRate.date}).
+              </>
+            ) : null}
           </p>
         ) : null}
 
@@ -157,9 +170,11 @@ export function CostConfirmDialog({
 function CostReadout({
   estimate,
   estimateError,
+  fxRate,
 }: {
   estimate: CostEstimate | null;
   estimateError: boolean;
+  fxRate: FxRate | null;
 }) {
   if (estimateError || !estimate) {
     return (
@@ -202,13 +217,22 @@ function CostReadout({
         border: "1px solid var(--rule)",
       }}
     >
-      <CostStat label="Typical (p50)" value={estimate.p50} />
-      <CostStat label="High-end (p90)" value={estimate.p90} />
+      <CostStat label="Typical (p50)" value={estimate.p50} fxRate={fxRate} />
+      <CostStat label="High-end (p90)" value={estimate.p90} fxRate={fxRate} />
     </div>
   );
 }
 
-function CostStat({ label, value }: { label: string; value: number }) {
+function CostStat({
+  label,
+  value,
+  fxRate,
+}: {
+  label: string;
+  value: number;
+  fxRate: FxRate | null;
+}) {
+  const gbp = fxRate ? value * fxRate.rate : null;
   return (
     <div>
       <div
@@ -223,9 +247,40 @@ function CostStat({ label, value }: { label: string; value: number }) {
       >
         {label}
       </div>
-      <div style={{ fontSize: 22, fontWeight: 500, fontVariantNumeric: "tabular-nums" }}>
-        ${value.toFixed(2)}
-      </div>
+      {gbp !== null ? (
+        <>
+          <div
+            style={{
+              fontSize: 22,
+              fontWeight: 500,
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            £{gbp.toFixed(2)}
+          </div>
+          <div
+            style={{
+              fontFamily: "var(--font-plex-mono)",
+              fontSize: 11,
+              color: "var(--ink-faint)",
+              fontVariantNumeric: "tabular-nums",
+              marginTop: 2,
+            }}
+          >
+            ${value.toFixed(2)} USD
+          </div>
+        </>
+      ) : (
+        <div
+          style={{
+            fontSize: 22,
+            fontWeight: 500,
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          ${value.toFixed(2)}
+        </div>
+      )}
     </div>
   );
 }

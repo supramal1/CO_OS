@@ -24,6 +24,7 @@ import {
   type CostRunRow,
   type CostEstimate,
 } from "@/lib/cost-samples";
+import { fetchUsdGbpRate, type FxRate } from "@/lib/fx-rate";
 import { CostConfirmDialog } from "./cost-confirm-dialog";
 
 type TasksState =
@@ -56,6 +57,7 @@ export function ForgeKanban() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [costRows, setCostRows] = useState<CostRunRow[] | null>(null);
   const [costRowsError, setCostRowsError] = useState<boolean>(false);
+  const [fxRate, setFxRate] = useState<FxRate | null>(null);
   const [pending, setPending] = useState<PendingTransition | null>(null);
 
   // PointerSensor with a small activation distance prevents click-vs-drag
@@ -87,6 +89,18 @@ export function ForgeKanban() {
         }
       }
     })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // USD→GBP rate for the confirm modal. Best-effort: if the fetch fails,
+  // the modal falls back to USD only.
+  useEffect(() => {
+    let cancelled = false;
+    fetchUsdGbpRate().then((rate) => {
+      if (!cancelled && rate) setFxRate(rate);
+    });
     return () => {
       cancelled = true;
     };
@@ -287,6 +301,7 @@ export function ForgeKanban() {
           taskTitle={pending.taskTitle}
           estimate={pending.estimate}
           estimateError={pending.estimateError}
+          fxRate={fxRate}
           onCancel={() => setPending(null)}
           onConfirm={() => {
             const p = pending;
