@@ -3,12 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   DndContext,
+  DragOverlay,
   PointerSensor,
   useDraggable,
   useDroppable,
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragStartEvent,
 } from "@dnd-kit/core";
 import type { ForgeLane, ForgeTask } from "@/lib/agents-types";
 import {
@@ -27,6 +29,7 @@ export function ForgeKanban() {
   const [toast, setToast] = useState<{ kind: "error"; message: string } | null>(
     null,
   );
+  const [activeId, setActiveId] = useState<string | null>(null);
 
   // PointerSensor with a small activation distance prevents click-vs-drag
   // ambiguity — clicking a card shouldn't initiate a drag, only a real
@@ -97,7 +100,12 @@ export function ForgeKanban() {
     });
   };
 
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveId(String(event.active.id));
+  };
+
   const handleDragEnd = async (event: DragEndEvent) => {
+    setActiveId(null);
     const taskId = String(event.active.id);
     const overLane = event.over?.id as ForgeLane | undefined;
     if (!overLane || state.status !== "loaded") return;
@@ -154,7 +162,12 @@ export function ForgeKanban() {
       ) : state.status === "error" ? (
         <Empty>Couldn&rsquo;t load — {state.message}</Empty>
       ) : (
-        <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+        <DndContext
+          sensors={sensors}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onDragCancel={() => setActiveId(null)}
+        >
           <div
             style={{
               flex: 1,
@@ -169,9 +182,20 @@ export function ForgeKanban() {
                 key={lane}
                 lane={lane}
                 tasks={grouped[lane]}
+                activeId={activeId}
               />
             ))}
           </div>
+          {/* Portaled clone — renders outside the per-column scroll
+              container so it floats above neighbouring lanes during drag. */}
+          <DragOverlay dropAnimation={null}>
+            {activeId && state.status === "loaded"
+              ? (() => {
+                  const t = state.tasks.find((x) => x.id === activeId);
+                  return t ? <KanbanCardPresentational task={t} dragging /> : null;
+                })()
+              : null}
+          </DragOverlay>
         </DndContext>
       )}
 
@@ -203,9 +227,11 @@ export function ForgeKanban() {
 function LaneColumn({
   lane,
   tasks,
+  activeId,
 }: {
   lane: ForgeLane;
   tasks: ForgeTask[];
+  activeId: string | null;
 }) {
   const { isOver, setNodeRef } = useDroppable({ id: lane });
   return (
@@ -273,22 +299,39 @@ function LaneColumn({
             —
           </div>
         ) : (
-          tasks.map((task) => <KanbanCard key={task.id} task={task} />)
+          tasks.map((task) => (
+            <KanbanCard key={task.id} task={task} hidden={task.id === activeId} />
+          ))
         )}
       </div>
     </div>
   );
 }
 
-function KanbanCard({ task }: { task: ForgeTask }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } =
-    useDraggable({ id: task.id });
+function KanbanCard({ task, hidden }: { task: ForgeTask; hidden: boolean }) {
+  const { attributes, listeners, setNodeRef } = useDraggable({ id: task.id });
+  // While dragging, the source card leaves a transparent placeholder so the
+  // column doesn't collapse. The floating clone is rendered by DragOverlay.
   const style: React.CSSProperties = {
-    transform: transform
-      ? `translate3d(${transform.x}px, ${transform.y}px, 0)`
-      : undefined,
-    opacity: isDragging ? 0.5 : 1,
-    cursor: isDragging ? "grabbing" : "grab",
+    visibility: hidden ? "hidden" : "visible",
+    cursor: "grab",
+    touchAction: "none",
+  };
+  return (
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      <KanbanCardPresentational task={task} />
+    </div>
+  );
+}
+
+function KanbanCardPresentational({
+  task,
+  dragging = false,
+}: {
+  task: ForgeTask;
+  dragging?: boolean;
+}) {
+  const style: React.CSSProperties = {
     padding: "10px 12px",
     background: "var(--panel)",
     border: "1px solid var(--rule)",
@@ -297,9 +340,14 @@ function KanbanCard({ task }: { task: ForgeTask }) {
     lineHeight: 1.35,
     color: "var(--ink)",
     userSelect: "none",
+    cursor: dragging ? "grabbing" : "grab",
+    boxShadow: dragging
+      ? "0 10px 24px rgba(0, 0, 0, 0.25), 0 2px 4px rgba(0, 0, 0, 0.15)"
+      : "none",
+    transform: dragging ? "rotate(1.5deg)" : undefined,
   };
   return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+    <div style={style}>
       <div style={{ fontWeight: 500 }}>{task.title}</div>
       {task.description ? (
         <div
