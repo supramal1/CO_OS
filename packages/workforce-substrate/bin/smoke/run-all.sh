@@ -21,9 +21,14 @@ TS="$(date -u +%Y%m%dT%H%M%SZ)"
 RESULTS_DIR="$RESULTS_ROOT/$TS"
 mkdir -p "$RESULTS_DIR"
 
-# ---- Load env if not already populated ----
-if [[ -z "${MEMORY_API_KEY:-}" && -f "$COOS_DIR/.env.local" ]]; then
-  echo "[smoke] sourcing $COOS_DIR/.env.local for MEMORY_API_KEY"
+# ---- Load env from .env.local (authoritative for the smoke run) ----
+# We always source .env.local when it exists, even if Cornerstone keys are
+# already in the parent shell. Sticky exports from prior sessions can hold
+# stale csk_* keys that point at principals without the team:ai-ops grant,
+# which produces a confusing "skill_out_of_scope" failure several layers
+# down. Smoke results must be reproducible from the file on disk.
+if [[ -f "$COOS_DIR/.env.local" ]]; then
+  echo "[smoke] sourcing $COOS_DIR/.env.local (overrides sticky shell env)"
   set -a
   # shellcheck disable=SC1091
   source "$COOS_DIR/.env.local"
@@ -34,8 +39,8 @@ if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
   echo "[smoke] FATAL: ANTHROPIC_API_KEY not set" >&2
   exit 2
 fi
-if [[ -z "${MEMORY_API_KEY:-}" ]]; then
-  echo "[smoke] FATAL: MEMORY_API_KEY not set" >&2
+if [[ -z "${CORNERSTONE_API_KEY:-}" && -z "${MEMORY_API_KEY:-}" ]]; then
+  echo "[smoke] FATAL: CORNERSTONE_API_KEY or MEMORY_API_KEY required" >&2
   exit 2
 fi
 

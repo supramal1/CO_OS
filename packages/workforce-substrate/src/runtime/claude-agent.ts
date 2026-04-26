@@ -143,7 +143,11 @@ export async function invokeAgent(
 
   // ---- Resolve API keys / config ----
   const anthropicApiKey = options.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY ?? "";
-  const cornerstoneApiKey = options.cornerstoneApiKey ?? process.env.MEMORY_API_KEY ?? "";
+  const cornerstoneApiKey =
+    options.cornerstoneApiKey ??
+    process.env.CORNERSTONE_API_KEY ??
+    process.env.MEMORY_API_KEY ??
+    "";
   const cornerstoneApiBaseUrl =
     options.cornerstoneApiBaseUrl ??
     process.env.CORNERSTONE_API_URL ??

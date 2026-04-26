@@ -121,26 +121,21 @@ Options: `--target-workspace=<ws>`, `--max-cost=<dollars>`, `--output=json|text`
 
 ## Smoke suite
 
-Two drivers live in `bin/smoke/`:
+`bin/smoke/run-all.sh` is the production-shaped smoke driver. It invokes each
+scenario via the CLI (`bin/invoke.ts`) and loads every agent's system prompt
+from Cookbook by `systemPromptSkill` — the same path that runs in production.
+Prompts are NOT duplicated in code.
 
-- **`run-all.sh`** — production-shaped run via the CLI. Loads each agent's
-  system prompt from Cookbook by `systemPromptSkill`. This is the runtime
-  contract — prompts are NOT duplicated in code.
-- **`run-direct.ts`** — direct `invokeAgent` driver that overrides
-  `systemPromptLoader` with tiny inline scenario prompts. Exists ONLY to give
-  us live-network verification of the runtime, Cornerstone tool dispatch, and
-  the `delegate_task` recursion loop while a Cookbook scope grant is being
-  sorted out. NOT used by anything in production. Delete once the production
-  roster can load prompts cleanly.
+The script always sources `co-os/.env.local` to make the file authoritative
+for the run, even if the parent shell already exports `CORNERSTONE_API_KEY`.
+This is deliberate: stale shell exports from prior sessions would otherwise
+silently override the project's canonical config and produce confusing
+`skill_out_of_scope` failures several layers down.
 
-### Cookbook scope-grant gap (deployment blocker)
-
-The v0 agent prompts are scoped to `team:ai-ops` on Cookbook. The substrate's
-caller principal must hold a grant for that scope or `get_skill` returns
-`skill_out_of_scope`. The CLI / `run-all.sh` path will fail until either
-(a) the running principal is granted `team:ai-ops`, or (b) the prompts are
-moved to `global` scope, or (c) we deploy with a service-account principal
-that already has the grant. `run-direct.ts` is the bypass we have until then.
+The substrate principal must hold a `team:ai-ops` grant on Cookbook for
+`get_skill` to resolve the agent prompts. Mal's principal is granted via
+`principal_teams` — see `cli_admin.py create-key` and the Supabase admin path
+for how this was provisioned on 2026-04-26.
 
 ## Required env
 

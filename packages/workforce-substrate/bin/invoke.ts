@@ -207,10 +207,11 @@ async function main(): Promise<number> {
 
   if (
     (agent.canUseCornerstoneRead || agent.canUseCornerstoneWrite) &&
+    !process.env.CORNERSTONE_API_KEY &&
     !process.env.MEMORY_API_KEY
   ) {
     process.stderr.write(
-      `error: agent '${agent.id}' uses Cornerstone — set MEMORY_API_KEY (csk_*).\n`,
+      `error: agent '${agent.id}' uses Cornerstone — set CORNERSTONE_API_KEY (csk_*) or MEMORY_API_KEY.\n`,
     );
     return 2;
   }

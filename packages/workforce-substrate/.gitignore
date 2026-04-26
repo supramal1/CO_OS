@@ -4,7 +4,6 @@ dist/
 
 # smoke run outputs (timestamped result trees)
 bin/smoke/results/
-bin/smoke/results-direct/
 
 # logs / scratch
 *.log
