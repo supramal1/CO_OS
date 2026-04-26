@@ -18,6 +18,7 @@
   --c-cornerstone: oklch(0.72 0.11 230);
   --c-cowork:      oklch(0.88 0.02 110);
   --c-forge:       oklch(0.72 0.15 30);
+  --c-admin:       var(--ink-dim);
 
   --shell-h: 52px;
 }

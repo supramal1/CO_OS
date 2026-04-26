@@ -2,7 +2,8 @@ export type ModuleId =
   | "speak-to-charlie"
   | "forge"
   | "cookbook"
-  | "agents";
+  | "agents"
+  | "admin";
 
 export type ModuleDef = {
   id: ModuleId;
@@ -37,6 +38,13 @@ export const MODULES: ModuleDef[] = [
     label: "Agents",
     path: "/agents",
     accentVar: "var(--c-forge)",
+    adminOnly: true,
+  },
+  {
+    id: "admin",
+    label: "Admin",
+    path: "/admin",
+    accentVar: "var(--c-admin)",
     adminOnly: true,
   },
 ];
