@@ -266,9 +266,10 @@ export async function invokeAgent(
       // both compose the user-facing summary AND emit terminal tool calls
       // (save_conversation, etc.). Hitting max_tokens mid-summary previously
       // caused tasks to "complete" with their persistence step silently
-      // skipped — a class-A correctness bug. Specialists stop after one
-      // focused output, so they keep the smaller cap.
-      const maxTokensForTurn = agent.canDelegate ? 8192 : 4096;
+      // skipped — a class-A correctness bug. Specialists default to the
+      // smaller cap but can opt in via `outputHeavy` (e.g. researchers
+      // whose deliverable is long structured output).
+      const maxTokensForTurn = agent.canDelegate || agent.outputHeavy ? 8192 : 4096;
 
       const requestParams: Anthropic.Messages.MessageCreateParamsNonStreaming = {
         model: agent.model,

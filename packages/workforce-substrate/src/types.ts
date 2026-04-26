@@ -36,6 +36,13 @@ export interface Agent {
   readonly canUseCornerstoneRead: boolean;
   /** Whether the agent gets Cornerstone write tools mounted. */
   readonly canUseCornerstoneWrite: boolean;
+  /**
+   * Opt-in flag for agents whose role naturally produces long structured
+   * output (e.g. research briefings). Raises per-turn `max_tokens` from 4096
+   * to 8192. Lead agents already get 8192 unconditionally — this flag is
+   * for specialists. Default false.
+   */
+  readonly outputHeavy?: boolean;
   /** Optional reportsTo agent id. Undefined for the Lead. */
   readonly reportsTo?: string;
   /** Default workspace name. Used as fallback when Task lacks targetWorkspace. */

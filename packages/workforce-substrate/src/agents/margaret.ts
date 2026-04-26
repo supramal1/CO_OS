@@ -18,6 +18,9 @@ export const margaret: Agent = {
   canDelegate: false,
   canUseCornerstoneRead: false,
   canUseCornerstoneWrite: false,
+  // Research deliverables are long structured output by design — needs
+  // the larger per-turn cap so the briefing isn't truncated mid-section.
+  outputHeavy: true,
   reportsTo: "ada",
   defaultWorkspace: AI_OPS_WORKSPACE,
   toolBuilders: [buildWebSearchTool()],
