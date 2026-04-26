@@ -15,5 +15,6 @@ declare module "next-auth/jwt" {
     principalName?: string;
     apiKey?: string;
     isAdmin?: boolean;
+    resolvedAt?: number;
   }
 }
