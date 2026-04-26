@@ -6,5 +6,6 @@ export const config = {
     "/forge/:path*",
     "/speak-to-charlie/:path*",
     "/agents/:path*",
+    "/workforce/:path*",
   ],
 };

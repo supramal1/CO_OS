@@ -1,4 +1,4 @@
-export type ModuleId = "speak-to-charlie" | "forge" | "cookbook";
+export type ModuleId = "speak-to-charlie" | "forge" | "cookbook" | "workforce";
 
 export type ModuleDef = {
   id: ModuleId;
@@ -27,6 +27,13 @@ export const MODULES: ModuleDef[] = [
     label: "Cookbook",
     path: "/cookbook",
     accentVar: "var(--c-cookbook)",
+  },
+  {
+    id: "workforce",
+    label: "Workforce",
+    path: "/workforce",
+    accentVar: "var(--c-forge)",
+    adminOnly: true,
   },
 ];
 

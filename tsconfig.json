@@ -18,7 +18,9 @@
       }
     ],
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "@workforce/substrate": ["./packages/workforce-substrate/src/index.ts"],
+      "@workforce/substrate/*": ["./packages/workforce-substrate/src/*"]
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
