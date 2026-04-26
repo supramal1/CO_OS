@@ -1,10 +1,11 @@
 // Grace — Implementer specialist.
 //
-// Reports to Ada. v0 ships without real coding tools — Grace gets the
-// Cornerstone read/write surface so she can record findings and decisions,
-// but the file/git/test/PR toolchain lands in a follow-up sprint. The
-// grace-system-prompt skill flags this constraint to the model so it knows
-// not to hallucinate file edits.
+// Reports to Ada. v0 ships with the GitHub tool surface in addition to the
+// Cornerstone read/write tools so Grace can create repos, work on Grace-
+// namespace branches, and open PRs that Mal merges via the GitHub UI. The
+// grace-system-prompt skill stays in Cookbook and will be updated as a draft
+// in `docs/grace-github-tools-decisions.md` until Mal approves the prompt
+// addition.
 
 import type { Agent } from "../types.js";
 import { AI_OPS_WORKSPACE } from "../types.js";
@@ -12,6 +13,7 @@ import {
   cornerstoneToolBuilders,
   cornerstoneTool,
 } from "../integrations/cornerstone.js";
+import { githubToolBuilders } from "../integrations/github.js";
 
 export const grace: Agent = {
   id: "grace",
@@ -27,5 +29,6 @@ export const grace: Agent = {
     ...cornerstoneToolBuilders("read-only"),
     cornerstoneTool("add_fact"),
     cornerstoneTool("save_conversation"),
+    ...githubToolBuilders("grace"),
   ],
 };

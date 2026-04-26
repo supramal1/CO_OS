@@ -157,3 +157,57 @@ until Mal approves.
 ---
 
 *Written 2026-04-26 evening. Mal: please ack or counter on wakeup.*
+
+---
+
+## Phase 6 implementation deviation (2026-04-27 early hours)
+
+The pure-API model removed two tools and added two. Net surface still
+satisfies the brief's "additive, granular, restartable" principle.
+
+| Brief tool | Status | Rationale |
+|---|---|---|
+| `create_repo` | Shipped as `github_create_repo` (private + auto_init default) | Same intent, prefixed for event-log clarity |
+| `clone_repo` | Dropped | Pure-API model has no working dir. Reading is via `github_read_file` at any ref; Grace doesn't need a checkout. |
+| `create_branch` | Shipped as `github_create_branch` | Enforces `grace/` namespace at the tool layer (rejects `main`, rejects unprefixed) |
+| `read_file` | Shipped as `github_read_file` | At any ref/sha |
+| `write_file` | Replaced by `github_commit_files` | One commit per logical change instead of one commit per file (cleaner history) |
+| `delete_file` | Subsumed into `github_commit_files.deletions` | Same atomic-commit benefit |
+| `commit_changes` | Implicit in `github_commit_files` | Single multi-file commit via git-data API (blob → tree → commit → ref). Author is `co-os-bot <co-os-bot@charlieoscar.com>`. |
+| `push` | Dropped | Implicit in `github_commit_files` (PATCH refs/heads/<branch> at the end) |
+| `open_pr` | Shipped as `github_open_pr` | Defaults `base` to repo's default branch via lookup |
+| `read_pr_status` | Shipped as `github_read_pr_status` | Returns merged/draft/mergeable + last-update timestamp |
+| `comment_on_pr` | Shipped as `github_comment_on_pr` | Issues comments endpoint (PRs are issues for comment purposes) |
+| `list_branches` | Shipped as `github_list_branches` | The flagged addition — pure read, helps Grace avoid collisions |
+| **`github_get_repo`** (new) | Shipped | Cheap pre-flight for default branch / push state. Used internally by create_branch/open_pr and exposed for Grace. |
+| `merge_pr` | Mounted as `github_merge_pr`, returns `permission_denied` | Mal-only |
+| `delete_repo` | Mounted as `github_delete_repo`, returns `permission_denied` | Destructive, never |
+| `force_push` | Mounted as `github_force_push`, returns `permission_denied` | Destructive, never |
+| `modify_branch_protection` | Mounted as `github_modify_branch_protection`, returns `permission_denied` | Mal-only |
+
+Forbidden tools are mounted-but-blocked (same pattern Donald uses for
+`steward_apply`). The model sees the tool name in its tool catalog,
+calls it once, sees `permission_denied`, and learns the boundary — beats
+having Grace hallucinate a workaround for a tool she "doesn't have".
+
+**Total surface:** 14 tools (10 allowed + 4 forbidden).
+
+**Author identity:** All commits Grace makes carry
+`co-os-bot <co-os-bot@charlieoscar.com>` as the git author. The PAT
+itself surfaces under `supramal1` for API attribution; combining the
+two means the audit trail reads "supramal1's PAT, co-os-bot's commit",
+which matches the dogfood reality.
+
+**Branch namespace:** Default `grace/` prefix; configurable via
+`GRACE_BRANCH_PREFIX`. Enforced in `github_create_branch.branch`,
+`github_commit_files.branch`, and `github_open_pr.head`. Rejection
+shows up locally as `errorCode: branch_namespace_violation` (or
+`branch_protected` for `main`/`master`), so the audit log explains
+why Grace was stopped without the model having to interpret a remote 403.
+
+**Test coverage:** `__tests__/integrations/github.test.ts` — 12 tests,
+all passing. Covers surface registry, env-var resolution failure,
+forbidden-tool blocking, and namespace guards on every mutating tool,
+plus happy-path mocked fetch for `github_create_repo` and the base-
+defaulting `github_open_pr` flow. Live API hits land in P7 smoke.
+

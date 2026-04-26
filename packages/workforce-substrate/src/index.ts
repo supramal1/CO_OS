@@ -36,6 +36,12 @@ export {
   buildAllCornerstoneTools,
 } from "./integrations/cornerstone.js";
 
+export {
+  githubTool,
+  githubToolBuilders,
+  GRACE_GITHUB_TOOL_NAMES,
+} from "./integrations/github.js";
+
 export { buildDelegateTaskTool } from "./integrations/delegation.js";
 
 export { ada } from "./agents/ada.js";
