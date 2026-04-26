@@ -21,9 +21,16 @@ import {
 } from "@workforce/substrate";
 import { publishEnd, publishEvent } from "./bus";
 import {
+  fetchEvents,
+  fetchRecentTasks,
+  fetchResult,
+  fetchTask,
   persistEvent,
   persistTaskCreated,
   persistTaskFinal,
+  type PersistedEventRow,
+  type PersistedResultRow,
+  type PersistedTaskRow,
 } from "./persistence";
 import type {
   CreateTaskRequest,
@@ -43,6 +50,8 @@ interface InflightRecord {
   result?: TaskResult;
   events: EventLogEntry[];
   parentTaskId?: string;
+  parentAgentId?: string;
+  targetWorkspace?: string;
   error?: { code: string; message: string };
   ownerPrincipalId: string;
   apiKey: string;
@@ -102,6 +111,7 @@ export function startTask(
     state: "running",
     abortController,
     events: [],
+    targetWorkspace: req.targetWorkspace ?? agent.defaultWorkspace,
     ownerPrincipalId: ctx.principalId,
     apiKey: ctx.apiKey,
   };
@@ -178,22 +188,42 @@ export function cancelTask(taskId: string, principalId: string): boolean {
   return true;
 }
 
-export function getTaskDetail(
+export async function getTaskDetail(
   taskId: string,
   principalId: string,
-): TaskDetail | null {
+): Promise<TaskDetail | null> {
   const record = REGISTRY.get(taskId);
-  if (!record) return null;
-  if (record.ownerPrincipalId !== principalId) return null;
-  return recordToDetail(record);
+  if (record) {
+    if (record.ownerPrincipalId !== principalId) return null;
+    return recordToDetail(record);
+  }
+  // Process restart / older task — read from Supabase.
+  const row = await fetchTask(taskId, principalId);
+  if (!row) return null;
+  const [result, events] = await Promise.all([
+    fetchResult(taskId),
+    fetchEvents(taskId),
+  ]);
+  return rowToDetail(row, result, events);
 }
 
-export function listRecentTasks(principalId: string, limit = 50): TaskSummary[] {
-  const all = [...REGISTRY.values()]
+export async function listRecentTasks(
+  principalId: string,
+  limit = 50,
+): Promise<TaskSummary[]> {
+  const inMemory = [...REGISTRY.values()]
     .filter((r) => r.ownerPrincipalId === principalId && !r.parentTaskId)
+    .map(recordToSummary);
+  const inMemoryIds = new Set(inMemory.map((s) => s.taskId));
+  const persisted = await fetchRecentTasks(principalId, limit);
+  const merged: TaskSummary[] = [...inMemory];
+  for (const row of persisted) {
+    if (inMemoryIds.has(row.id)) continue;
+    merged.push(rowToSummary(row));
+  }
+  return merged
     .sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1))
     .slice(0, limit);
-  return all.map(recordToSummary);
 }
 
 export function inflightCount(): number {
@@ -251,6 +281,42 @@ function recordToDetail(record: InflightRecord): TaskDetail {
     error: record.error,
     events: record.events.map((e) => ({ ...e })),
     children,
+  };
+}
+
+function rowToSummary(row: PersistedTaskRow): TaskSummary {
+  return {
+    taskId: row.id,
+    agentId: row.agent_id,
+    description: row.description,
+    state: row.state as InvocationState,
+    startedAt: row.started_at,
+    completedAt: row.completed_at ?? undefined,
+    costUsd: Number(row.cost_usd ?? 0),
+    durationMs: row.duration_ms ?? 0,
+    parentTaskId: row.parent_task_id ?? undefined,
+  };
+}
+
+function rowToDetail(
+  row: PersistedTaskRow,
+  result: PersistedResultRow | null,
+  events: PersistedEventRow[],
+): TaskDetail {
+  const summary = rowToSummary(row);
+  return {
+    ...summary,
+    output: result?.output ?? "",
+    error: row.error ?? undefined,
+    events: events.map((e) => ({
+      type: e.type as EventLogEntry["type"],
+      timestamp: e.timestamp,
+      seq: e.seq,
+      taskId: e.task_id,
+      agentId: e.agent_id,
+      payload: e.payload,
+    })),
+    children: [],
   };
 }
 

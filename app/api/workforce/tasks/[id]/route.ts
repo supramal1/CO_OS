@@ -16,7 +16,7 @@ export async function GET(
   if (!session.isAdmin) {
     return NextResponse.json({ error: "admin_only" }, { status: 403 });
   }
-  const detail = getTaskDetail(params.id, session.principalId);
+  const detail = await getTaskDetail(params.id, session.principalId);
   if (!detail) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }

@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   }
   const limitParam = req.nextUrl.searchParams.get("limit");
   const limit = limitParam ? Math.min(Number(limitParam) || 50, 200) : 50;
-  const tasks = listRecentTasks(session.principalId, limit);
+  const tasks = await listRecentTasks(session.principalId, limit);
   return NextResponse.json({ tasks });
 }
 

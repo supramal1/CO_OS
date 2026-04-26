@@ -24,7 +24,7 @@ export async function GET(
   if (!session.isAdmin) {
     return NextResponse.json({ error: "admin_only" }, { status: 403 });
   }
-  const detail = getTaskDetail(params.id, session.principalId);
+  const detail = await getTaskDetail(params.id, session.principalId);
   if (!detail) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
@@ -32,6 +32,8 @@ export async function GET(
   const taskId = params.id;
   const seenSeqs = new Set<number>();
   const encoder = new TextEncoder();
+
+  let cleanup: (() => void) | null = null;
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -44,13 +46,11 @@ export async function GET(
         }
       };
 
-      // Replay cached events for late subscribers.
       for (const entry of getCachedEvents(taskId)) {
         seenSeqs.add(entry.seq);
         send("event", entry);
       }
 
-      // If already terminal, send an end frame and close.
       if (isTerminal(taskId)) {
         send("end", { state: detail.state });
         controller.close();
@@ -64,7 +64,7 @@ export async function GET(
           send("event", msg.entry);
         } else if (msg.kind === "end") {
           send("end", { state: msg.state });
-          unsubscribe();
+          if (cleanup) cleanup();
           try {
             controller.close();
           } catch {
@@ -84,16 +84,13 @@ export async function GET(
         }
       }, 15_000);
 
-      const cleanup = () => {
+      cleanup = () => {
         clearInterval(hb);
         unsubscribe();
       };
-      // @ts-expect-error attach cleanup so cancel() can find it
-      controller._cleanup = cleanup;
     },
-    cancel(controller) {
-      // @ts-expect-error read attached cleanup
-      controller._cleanup?.();
+    cancel() {
+      if (cleanup) cleanup();
     },
   });
 
