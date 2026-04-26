@@ -572,7 +572,10 @@ async function runSaveConversation(
   const body: Record<string, unknown> = { topic, messages, namespace: writeNs };
   const source = asOptStr(input.source);
   if (source) body.source = source;
-  const res = await callApi(rt, "POST", "/ingest", { body });
+  // Cornerstone's /ingest endpoint takes flat user_message/assistant_response;
+  // /ingest/conversation is the multi-turn entrypoint that flattens messages
+  // server-side and writes the explicit topic onto the session row.
+  const res = await callApi(rt, "POST", "/ingest/conversation", { body });
   if (!res.ok) return mapApiError(res, writeNs, rt.taskWorkspace);
   return { status: "ok", output: res.body };
 }

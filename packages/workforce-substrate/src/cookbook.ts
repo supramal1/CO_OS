@@ -157,11 +157,15 @@ export interface SkillDetail {
  * v0 fetches on every invocation. Caching is a v0.1 concern; on Cloud Run
  * we'll cache per-process.
  */
-export async function loadSystemPrompt(skillName: string): Promise<string> {
+export async function loadSystemPrompt(
+  skillName: string,
+  explicitApiKey?: string,
+): Promise<string> {
   const apiKey =
-    process.env.COOKBOOK_API_KEY ??
-    process.env.CORNERSTONE_API_KEY ??
-    process.env.MEMORY_API_KEY ??
+    explicitApiKey ||
+    process.env.COOKBOOK_API_KEY ||
+    process.env.CORNERSTONE_API_KEY ||
+    process.env.MEMORY_API_KEY ||
     "";
   if (!apiKey) {
     throw new CookbookError(

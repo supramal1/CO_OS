@@ -216,7 +216,13 @@ export async function invokeAgent(
   });
 
   // ---- Resolve system prompt from Cookbook ----
-  const promptLoader = options.systemPromptLoader ?? defaultSystemPromptLoader;
+  // Thread the per-invocation cornerstoneApiKey into the loader so the
+  // skill fetch runs as the calling principal — not whoever happens to
+  // own process.env.CORNERSTONE_API_KEY. Test seam still receives just
+  // the skill name to keep the seam ergonomic.
+  const promptLoader =
+    options.systemPromptLoader ??
+    ((name: string) => loadSystemPrompt(name, cornerstoneApiKey));
   let systemPrompt: string;
   try {
     systemPrompt = await promptLoader(agent.systemPromptSkill);

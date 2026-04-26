@@ -12,6 +12,7 @@
 import {
   createEventLog,
   getAgent,
+  getRoster,
   invokeAgent,
   newTask,
   validateRoster,
@@ -25,9 +26,11 @@ import {
   fetchRecentTasks,
   fetchResult,
   fetchTask,
+  persistChildTaskFromEvent,
   persistEvent,
   persistTaskCreated,
   persistTaskFinal,
+  persistTaskResultRecursively,
   type PersistedEventRow,
   type PersistedResultRow,
   type PersistedTaskRow,
@@ -118,16 +121,37 @@ export function startTask(
   REGISTRY.set(taskId, record);
   trimRegistry();
 
-  // Fire-and-forget persistence — never let a write failure crash the
-  // invocation. The persistence layer logs and swallows errors.
-  void persistTaskCreated(record);
+  // Per-runner write chain: serialises persistence writes so that
+  //   1. the parent task row is committed BEFORE its task_started event
+  //      (otherwise the FK on workforce_task_events.task_id violates), and
+  //   2. each child task row is committed BEFORE its first event
+  //      (children spawned via delegate_task fire task_started through the
+  //      same EventLog.onEmit hook — without this, every child event
+  //      silently FK-fails and is lost from the DB).
+  // The chain is per-startTask because cross-task ordering doesn't matter;
+  // only intra-task ordering does.
+  const persistedTasks = new Set<string>([taskId]);
+  let writeChain: Promise<void> = persistTaskCreated(record);
 
   const eventLog = createEventLog(
     { taskId, agentId: agent.id },
     (entry) => {
       record.events.push(entry);
-      publishEvent(taskId, entry);
-      void persistEvent(taskId, entry);
+      // Bus channels are keyed by the entry's own taskId so a child's
+      // detail page (if Mal navigates to /workforce/tasks/<child>) can
+      // get its own SSE stream — the parent's stream still receives all
+      // descendant events because the substrate routes them through the
+      // shared EventLog.
+      publishEvent(entry.taskId, entry);
+      if (entry.taskId !== taskId) publishEvent(taskId, entry);
+
+      writeChain = writeChain.then(async () => {
+        if (!persistedTasks.has(entry.taskId) && entry.type === "task_started") {
+          persistedTasks.add(entry.taskId);
+          await persistChildTaskFromEvent(entry, ctx.principalId);
+        }
+        await persistEvent(entry.taskId, entry);
+      });
     },
   );
 
@@ -157,6 +181,8 @@ async function runInvocation(
       cornerstoneApiKey: ctx.apiKey,
       eventLog,
       abortSignal: record.abortController.signal,
+      roster: getRoster(),
+      depth: 0,
     });
     record.result = result;
     record.state = result.status as InvocationState;
@@ -174,6 +200,14 @@ async function runInvocation(
   } finally {
     publishEnd(record.taskId, record.state);
     void persistTaskFinal(record);
+    if (record.result) {
+      // Walk the substrate's children tree and persist each child's final
+      // state + output. Children's task rows were inserted lazily by the
+      // event-log hook above; this populates their cost/duration/output
+      // (the actual delegated agent's report) into workforce_task_results
+      // so the UI can render it on the child's detail page.
+      void persistTaskResultRecursively(record.result);
+    }
   }
 }
 

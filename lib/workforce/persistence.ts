@@ -6,7 +6,7 @@
 // silently no-op — the in-memory registry in runner.ts keeps the system
 // dogfood-able.
 
-import type { EventLogEntry } from "@workforce/substrate";
+import type { EventLogEntry, TaskResult } from "@workforce/substrate";
 import { getWorkforceSupabase } from "./supabase";
 
 interface InflightLike {
@@ -71,6 +71,102 @@ export async function persistEvent(
     }
   } catch (err) {
     console.warn("[workforce] persistEvent threw:", String(err));
+  }
+}
+
+/**
+ * Insert a child-task row when a `task_started` event arrives for a taskId
+ * we haven't seen before (i.e. spawned via delegate_task by a parent agent).
+ *
+ * The substrate's recursive invocation routes child events through the same
+ * EventLog onEmit hook the runner installed for the parent, so we never get
+ * a chance to call persistTaskCreated for children directly. Instead, we
+ * synthesise the row from the task_started payload and inherit the parent's
+ * principal_id (children always run under the same owner).
+ */
+export async function persistChildTaskFromEvent(
+  entry: EventLogEntry,
+  ownerPrincipalId: string,
+): Promise<void> {
+  const sb = getWorkforceSupabase();
+  if (!sb) return;
+  const p = entry.payload as Record<string, unknown>;
+  try {
+    const { error } = await sb.from("workforce_tasks").insert({
+      id: entry.taskId,
+      agent_id: entry.agentId,
+      description: typeof p.description === "string" ? p.description : "",
+      target_workspace: typeof p.targetWorkspace === "string" ? p.targetWorkspace : null,
+      parent_task_id: typeof p.parentTaskId === "string" ? p.parentTaskId : null,
+      parent_agent_id: typeof p.parentAgentId === "string" ? p.parentAgentId : null,
+      state: "running",
+      principal_id: ownerPrincipalId,
+      started_at: entry.timestamp,
+    });
+    // 23505 = unique violation; harmless if the same task_started raced past us.
+    if (error && error.code !== "23505") {
+      console.warn("[workforce] persistChildTaskFromEvent failed:", error.message);
+    }
+  } catch (err) {
+    console.warn("[workforce] persistChildTaskFromEvent threw:", String(err));
+  }
+}
+
+/**
+ * After the top-level invocation returns, walk the substrate's TaskResult
+ * children tree and persist each child's final state + output to
+ * workforce_tasks + workforce_task_results.
+ *
+ * This is the read-back path for "what did Donald actually return to Ada?":
+ * children's `output` is the only place that markdown report exists.
+ */
+export async function persistTaskResultRecursively(
+  result: TaskResult,
+): Promise<void> {
+  for (const child of result.children) {
+    await persistChildResult(child);
+    if (child.children.length > 0) {
+      await persistTaskResultRecursively(child);
+    }
+  }
+}
+
+async function persistChildResult(child: TaskResult): Promise<void> {
+  const sb = getWorkforceSupabase();
+  if (!sb) return;
+  const completedAt = new Date().toISOString();
+  const errPayload = child.error
+    ? { code: child.error.code, message: child.error.message }
+    : null;
+  try {
+    const { error: updateErr } = await sb
+      .from("workforce_tasks")
+      .update({
+        state: child.status,
+        completed_at: completedAt,
+        cost_usd: child.costUsd,
+        duration_ms: child.durationMs,
+        error: errPayload,
+      })
+      .eq("id", child.taskId);
+    if (updateErr)
+      console.warn("[workforce] persistChildResult update failed:", updateErr.message);
+
+    const { error: insertErr } = await sb.from("workforce_task_results").upsert(
+      {
+        task_id: child.taskId,
+        agent_id: child.agentId,
+        output: child.output,
+        cost_usd: child.costUsd,
+        duration_ms: child.durationMs,
+        completed_at: completedAt,
+      },
+      { onConflict: "task_id" },
+    );
+    if (insertErr)
+      console.warn("[workforce] persistChildResult upsert failed:", insertErr.message);
+  } catch (err) {
+    console.warn("[workforce] persistChildResult threw:", String(err));
   }
 }
 

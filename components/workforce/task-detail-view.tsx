@@ -210,37 +210,47 @@ function EventLogList({
         border: "1px solid var(--rule)",
       }}
     >
-      {events.map((e) => (
-        <li
-          key={`${e.taskId}:${e.seq}`}
-          style={{
-            padding: "6px 12px",
-            borderBottom: "1px solid var(--rule)",
-            fontFamily: "var(--font-plex-mono)",
-            fontSize: 11,
-            color: "var(--ink-dim)",
-            display: "flex",
-            gap: 12,
-          }}
-        >
-          <span style={{ color: "var(--ink-faint)", flexShrink: 0, width: 80 }}>
-            {fmtTimeShort(e.timestamp)}
-          </span>
-          <span
+      {events.map((e) => {
+        const link = eventLink(e);
+        const summary = summariseEvent(e, childMap);
+        return (
+          <li
+            key={`${e.taskId}:${e.seq}`}
             style={{
-              color: typeColor(e.type),
-              flexShrink: 0,
-              width: 140,
-              letterSpacing: "0.08em",
+              padding: "6px 12px",
+              borderBottom: "1px solid var(--rule)",
+              fontFamily: "var(--font-plex-mono)",
+              fontSize: 11,
+              color: "var(--ink-dim)",
+              display: "flex",
+              gap: 12,
             }}
           >
-            {e.type}
-          </span>
-          <span style={{ color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {summariseEvent(e, childMap)}
-          </span>
-        </li>
-      ))}
+            <span style={{ color: "var(--ink-faint)", flexShrink: 0, width: 80 }}>
+              {fmtTimeShort(e.timestamp)}
+            </span>
+            <span
+              style={{
+                color: typeColor(e.type),
+                flexShrink: 0,
+                width: 140,
+                letterSpacing: "0.08em",
+              }}
+            >
+              {e.type}
+            </span>
+            <span style={{ color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {link ? (
+                <Link href={link} style={{ color: "var(--ink)", textDecoration: "underline" }}>
+                  {summary} ↗
+                </Link>
+              ) : (
+                summary
+              )}
+            </span>
+          </li>
+        );
+      })}
     </ol>
   );
 }
@@ -357,33 +367,46 @@ function summariseEvent(
   e: PublicEventLogEntry,
   childMap: Map<string, TaskSummary>,
 ): string {
+  // Substrate emits camelCase payloads (see packages/workforce-substrate/src/runtime/claude-agent.ts).
+  // The earlier snake_case reads were dead code; the substrate has never used those keys.
   const p = e.payload as Record<string, unknown>;
   switch (e.type) {
     case "task_started":
       return String(p.description ?? "");
     case "task_completed":
-      return `cost $${Number(p.costUsd ?? 0).toFixed(4)} · ${p.duration_ms ?? p.durationMs ?? "?"}ms`;
+      return `cost $${Number(p.costUsd ?? 0).toFixed(4)} · ${fmtDuration(Number(p.durationMs ?? 0))}`;
     case "task_failed":
-      return String(p.message ?? p.error ?? "failed");
+    case "task_cancelled":
+      return String(p.errorCode ?? p.message ?? p.error ?? e.type);
     case "model_turn":
-      return `tokens in/out ${p.input_tokens ?? "?"} / ${p.output_tokens ?? "?"}`;
+      return `turn ${p.turn ?? "?"} · tokens in/out ${p.inputTokens ?? "?"} / ${p.outputTokens ?? "?"} · stop ${p.stopReason ?? "?"}`;
     case "tool_called":
-      return String(p.name ?? p.tool_name ?? "");
+      return String(p.toolName ?? "");
     case "tool_returned": {
       const status = p.status ?? "ok";
-      const name = p.name ?? p.tool_name ?? "";
-      return `${name} → ${status}`;
+      const name = p.toolName ?? "";
+      const errCode = p.errorCode ? ` (${p.errorCode})` : "";
+      return `${name} → ${status}${errCode}`;
     }
     case "delegate_initiated": {
-      const target = p.targetAgentId ?? p.target_agent_id ?? "?";
-      const child = childMap.get(String(p.childTaskId ?? p.child_task_id ?? ""));
+      const target = p.assignee ?? "?";
+      const child = childMap.get(String(p.childTaskId ?? ""));
       return `→ ${target}${child ? ` (${child.state})` : ""}`;
     }
     case "delegate_completed":
-      return `${p.targetAgentId ?? p.target_agent_id ?? "?"} ← ${p.status ?? "?"}`;
+      return `${p.assignee ?? "?"} ← ${p.status ?? "?"}${p.errorCode ? ` (${p.errorCode})` : ""}`;
     default:
       return "";
   }
+}
+
+function eventLink(e: PublicEventLogEntry): string | null {
+  if (e.type === "delegate_initiated" || e.type === "delegate_completed") {
+    const p = e.payload as Record<string, unknown>;
+    const childId = p.childTaskId;
+    return typeof childId === "string" ? `/workforce/tasks/${childId}` : null;
+  }
+  return null;
 }
 
 const cancelButtonStyle: React.CSSProperties = {
