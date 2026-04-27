@@ -2,11 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { adminFetch } from "@/lib/admin-api";
-import type {
-  AuditEvent,
-  Namespace,
-  Principal,
-} from "@/lib/admin-types";
+import type { AuditEvent, Principal } from "@/lib/admin-types";
+import { useAdminWorkspace } from "@/components/admin/workspace-selector";
 import { StatusPill } from "@/components/admin/status-pill";
 import { Empty } from "@/components/admin/modal";
 
@@ -15,16 +12,11 @@ type ListState =
   | { status: "loaded"; events: AuditEvent[] }
   | { status: "error"; message: string };
 
-type NamespacesState =
-  | { status: "loading" }
-  | { status: "loaded"; namespaces: Namespace[] }
-  | { status: "error" };
-
 type Decision = "all" | "allow" | "deny";
 type Preset = "all" | "status_changes";
 
 const PAGE_SIZE = 25;
-const FETCH_LIMIT = 500;
+const FETCH_LIMIT = 200;
 
 const ENDPOINT_LABELS: Record<string, string> = {
   "GET /connection/workspaces": "Viewed workspaces",
@@ -136,21 +128,21 @@ function formatDateTime(iso: string) {
   });
 }
 
-const WORKSPACE_ALL = "__all__";
-
 export default function AdminAuditLogPage() {
+  const { selectedWorkspace } = useAdminWorkspace();
   const [state, setState] = useState<ListState>({ status: "loading" });
-  const [nsState, setNsState] = useState<NamespacesState>({ status: "loading" });
   const [decision, setDecision] = useState<Decision>("all");
   const [preset, setPreset] = useState<Preset>("all");
-  const [workspace, setWorkspace] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [principalMap, setPrincipalMap] = useState<Map<string, Principal>>(
     new Map(),
   );
 
   useEffect(() => {
-    void adminFetch<Principal[]>("/admin/principals")
+    if (!selectedWorkspace) return;
+    void adminFetch<Principal[]>("/admin/principals", {
+      namespace: selectedWorkspace,
+    })
       .then((list) => {
         const map = new Map<string, Principal>();
         for (const p of list) map.set(p.id, p);
@@ -159,35 +151,15 @@ export default function AdminAuditLogPage() {
       .catch(() => {
         /* non-critical */
       });
-    void adminFetch<Namespace[]>("/admin/namespaces?include_archived=true")
-      .then((namespaces) => {
-        setNsState({ status: "loaded", namespaces });
-        setWorkspace((cur) => {
-          if (cur !== null) return cur;
-          const firstActive =
-            namespaces.find((n) => n.status === "active") ?? namespaces[0];
-          return firstActive ? firstActive.name : WORKSPACE_ALL;
-        });
-      })
-      .catch(() => {
-        setNsState({ status: "error" });
-        setWorkspace(WORKSPACE_ALL);
-      });
-  }, []);
+  }, [selectedWorkspace]);
 
   useEffect(() => {
-    if (workspace === null) return;
+    if (!selectedWorkspace) return;
     let cancelled = false;
     setState({ status: "loading" });
     const params = new URLSearchParams();
     if (decision !== "all") params.set("decision", decision);
-    // Status-changes preset spans admin-context events whose audit rows
-    // carry namespace=NULL (e.g. invitation revoke/resend, principal-status
-    // flips). Scoping the fetch to a workspace would hide them. When the
-    // preset is active, fetch globally and let the client-side filter narrow.
-    if (workspace !== WORKSPACE_ALL && preset !== "status_changes") {
-      params.set("namespace", workspace);
-    }
+    params.set("namespace", selectedWorkspace);
     params.set("limit", String(FETCH_LIMIT));
     adminFetch<AuditEvent[]>(`/admin/audit?${params}`)
       .then((events) => {
@@ -205,10 +177,9 @@ export default function AdminAuditLogPage() {
     return () => {
       cancelled = true;
     };
-  }, [decision, workspace, preset]);
+  }, [decision, selectedWorkspace, preset]);
 
   const allEvents = state.status === "loaded" ? state.events : [];
-  const namespaces = nsState.status === "loaded" ? nsState.namespaces : [];
 
   const filtered = useMemo(() => {
     if (preset === "status_changes") return allEvents.filter(isStatusChange);
@@ -245,12 +216,6 @@ export default function AdminAuditLogPage() {
           setPreset(p);
           setPage(1);
         }}
-        workspace={workspace ?? WORKSPACE_ALL}
-        setWorkspace={(w) => {
-          setWorkspace(w);
-          setPage(1);
-        }}
-        namespaces={namespaces}
       />
 
       <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
@@ -363,17 +328,11 @@ function Toolbar({
   setDecision,
   preset,
   setPreset,
-  workspace,
-  setWorkspace,
-  namespaces,
 }: {
   decision: Decision;
   setDecision: (d: Decision) => void;
   preset: Preset;
   setPreset: (p: Preset) => void;
-  workspace: string;
-  setWorkspace: (w: string) => void;
-  namespaces: Namespace[];
 }) {
   return (
     <div
@@ -416,42 +375,6 @@ function Toolbar({
           label="Status changes"
         />
       </ChipGroup>
-
-      <div style={{ flex: 1 }} />
-
-      <label
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 8,
-          fontFamily: "var(--font-plex-mono)",
-          fontSize: 10,
-          letterSpacing: "0.14em",
-          textTransform: "uppercase",
-          color: "var(--ink-faint)",
-        }}
-      >
-        <span>Workspace</span>
-        <select
-          value={workspace}
-          onChange={(e) => setWorkspace(e.target.value)}
-          style={{
-            fontFamily: "var(--font-plex-mono)",
-            fontSize: 12,
-            padding: "5px 8px",
-            background: "var(--bg)",
-            color: "var(--ink)",
-            border: "1px solid var(--rule)",
-          }}
-        >
-          <option value={WORKSPACE_ALL}>All workspaces</option>
-          {namespaces.map((n) => (
-            <option key={n.id} value={n.name}>
-              {n.display_name || n.name}
-            </option>
-          ))}
-        </select>
-      </label>
     </div>
   );
 }
