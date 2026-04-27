@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { estimateDispatchCost } from "@/lib/workforce/cost-estimator";
 import type { PublicAgent } from "@/lib/workforce/types";
 
 const DEFAULT_WORKSPACES = [
@@ -41,6 +42,22 @@ export function TaskInput({ agents, defaultAgentId, onDispatch }: Props) {
   const [maxCostUsd, setMaxCostUsd] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [errMsg, setErrMsg] = useState<string | null>(null);
+  const selectedAgent = useMemo(
+    () => agents.find((a) => a.id === agentId),
+    [agents, agentId],
+  );
+  const costEstimate = useMemo(
+    () =>
+      selectedAgent
+        ? estimateDispatchCost({
+            agentId: selectedAgent.id,
+            model: selectedAgent.model,
+            promptChars: description.length,
+            canDelegate: selectedAgent.canDelegate,
+          })
+        : null,
+    [description.length, selectedAgent],
+  );
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -120,6 +137,15 @@ export function TaskInput({ agents, defaultAgentId, onDispatch }: Props) {
         />
       </Field>
 
+      {costEstimate && selectedAgent ? (
+        <div aria-live="polite" style={estimateStyle}>
+          <strong style={estimateValueStyle}>{costEstimate.label}</strong>
+          <span style={estimateMetaStyle}>
+            {selectedAgent.name} / {modelLabel(selectedAgent.model)} / rough range
+          </span>
+        </div>
+      ) : null}
+
       {errMsg ? (
         <p style={{ margin: 0, fontSize: 12, color: "var(--c-forge)" }}>{errMsg}</p>
       ) : null}
@@ -190,6 +216,33 @@ const textareaStyle: React.CSSProperties = {
   resize: "vertical",
   minHeight: 110,
 };
+
+const estimateStyle: React.CSSProperties = {
+  padding: "10px 12px",
+  background: "var(--panel)",
+  border: "1px solid var(--rule)",
+  display: "flex",
+  flexDirection: "column",
+  gap: 4,
+};
+
+const estimateValueStyle: React.CSSProperties = {
+  fontFamily: "var(--font-plex-mono)",
+  fontSize: 13,
+  color: "var(--ink)",
+};
+
+const estimateMetaStyle: React.CSSProperties = {
+  fontSize: 11,
+  color: "var(--ink-dim)",
+};
+
+function modelLabel(model: string): string {
+  const normalized = model.toLowerCase();
+  if (normalized.includes("opus")) return "Opus";
+  if (normalized.includes("haiku")) return "Haiku";
+  return "Sonnet";
+}
 
 function primaryButtonStyle(disabled: boolean): React.CSSProperties {
   return {
