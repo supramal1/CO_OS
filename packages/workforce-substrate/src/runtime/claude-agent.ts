@@ -178,6 +178,7 @@ export async function invokeAgent(
     anthropicApiKey,
     cornerstoneApiKey,
     cornerstoneApiBaseUrl,
+    requestApproval: options.requestApproval,
   };
 
   let tools: Tool[];

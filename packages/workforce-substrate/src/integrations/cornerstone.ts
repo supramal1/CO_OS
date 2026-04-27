@@ -9,10 +9,17 @@
 // - Writes always force the resolved write namespace (task → AI_OPS fallback).
 //   The agent cannot override via tool input — closes prompt-injection on
 //   cross-namespace writes.
-// - Reads accept agent-supplied namespace as an escape hatch ONLY when the
-//   task has no targetWorkspace pinned.
-// - steward_apply returns { status: "blocked", errorCode: "approval_queue_not_available" }
-//   for v0 — the approval-queue UI hasn't shipped.
+// - Reads honour the agent-supplied namespace when present, falling back to
+//   the task's targetWorkspace (or AI_OPS_WORKSPACE) when not. Cross-namespace
+//   reads are still gated by Cornerstone's grant model — passing a namespace
+//   the principal lacks a grant for surfaces a 403 → `target_workspace_grant_missing`
+//   to the agent. The reason for not pinning reads: audit-style flows (steward,
+//   compliance review, cross-workspace recall) need explicit escape hatches,
+//   and the API enforces the real boundary anyway.
+// - steward_apply now goes through the runner's `requestApproval` hook
+//   (WF-6 inbox). When the hook is absent (CLI / unit-test contexts) the
+//   call falls back to a `blocked / approval_queue_not_available` result so
+//   the agent sees a deterministic refusal instead of an indefinite hang.
 
 import {
   AI_OPS_WORKSPACE,
@@ -38,14 +45,28 @@ const READ_TOOL_NAMES = [
   "steward_status",
 ] as const;
 
+// steward_preview is a /preview endpoint — read-only — and lives in the
+// read-namespace policy with the rest of the inspect/advise/recall family.
+// steward_apply is the only mutating steward tool and stays pinned to the
+// task workspace.
 const WRITE_TOOL_NAMES = [
   "add_fact",
   "save_conversation",
-  "steward_preview",
   "steward_apply",
 ] as const;
 
-const BLOCKED_TOOL_NAMES = ["steward_apply"] as const;
+// steward_apply mirrors steward_preview's operation set — same shapes, same
+// parameters, just the live endpoint instead of /preview. The runner-side
+// approval hook gates each call before it lands.
+const STEWARD_APPLY_OPERATIONS: Readonly<Record<string, string>> = {
+  "merge-duplicates": "/ops/steward/mutate/merge-duplicates/apply",
+  "merge-notes": "/ops/steward/mutate/merge-notes/apply",
+  "archive-stale": "/ops/steward/mutate/archive-stale/apply",
+  "delete-by-filter": "/ops/steward/mutate/delete-by-filter/apply",
+  "consolidate-facts": "/ops/steward/mutate/consolidate-facts/apply",
+  "reembed-stale": "/ops/steward/mutate/reembed-stale/apply",
+  "rename-keys": "/ops/steward/mutate/rename-keys/apply",
+};
 
 // ---------------------------------------------------------------------------
 // Steward sub-operation routing tables (mirrors paperclip src).
@@ -92,7 +113,7 @@ function readNamespaceField(): { type: "string"; description: string } {
   return {
     type: "string",
     description:
-      "Defaults to your task's target workspace; pass namespace explicitly to override (only honoured when the task has no target workspace pinned).",
+      "Defaults to your task's target workspace. Pass an explicit namespace to scope the read elsewhere (e.g. for audits or cross-workspace recall) — honoured if your principal has a grant for it; surfaces target_workspace_grant_missing otherwise.",
   };
 }
 
@@ -260,11 +281,31 @@ function buildSpecs(): Record<string, ToolSpec> {
     steward_apply: {
       name: "steward_apply",
       description:
-        "Apply a mutating steward operation. Currently BLOCKED in v0 — every call returns 'pending_approval'. Use steward_preview instead and surface the audit as a recommendation.",
+        "Apply a mutating steward operation. Gated by human approval — your call will pause until an operator confirms via the workforce inbox. Always run steward_preview first and include the audit summary in your reasoning so the approver has context.",
       input_schema: {
         type: "object",
         properties: {
-          operation: { type: "string", description: "Blocked in v0; see steward_preview." },
+          operation: {
+            type: "string",
+            description: `Which mutation to apply. One of: ${Object.keys(STEWARD_APPLY_OPERATIONS).join(", ")}.`,
+          },
+          confirmation_token: {
+            type: "string",
+            description:
+              "Confirmation token returned by steward_preview. Required by Cornerstone's /apply endpoints; if omitted, the dispatcher uses the token from its approval preview when available.",
+          },
+          similarity_threshold: { type: "number", description: "merge-duplicates / merge-notes (default 0.85)." },
+          limit: { type: "integer", description: "Max candidates scanned." },
+          days_threshold: { type: "integer", description: "archive-stale: rows untouched for N days." },
+          source_type: { type: "string", description: "delete-by-filter: 'fact' or 'note'." },
+          item_ids: { type: "array", description: "delete-by-filter: ids to delete." },
+          keys: { type: "array", description: "delete-by-filter: fact keys to delete." },
+          confidence_below: { type: "number", description: "delete-by-filter: confidence threshold." },
+          created_before: { type: "string", description: "delete-by-filter: ISO date." },
+          content_filter: { type: "string", description: "delete-by-filter: substring match." },
+          tags: { type: "array", description: "delete-by-filter: tag match." },
+          fact_ids: { type: "array", description: "consolidate-facts: ids to merge." },
+          mappings: { type: "array", description: "rename-keys: [{from, to}]." },
         },
         required: ["operation"],
       },
@@ -295,6 +336,14 @@ interface CornerstoneRuntime {
   readonly apiKey: string;
   readonly writeNamespace: string;
   readonly taskWorkspace: string | null;
+  /** WF-6 approval hook. Undefined in CLI / unit-test contexts. */
+  readonly requestApproval?: ToolBuildContext["requestApproval"];
+  /**
+   * Bound event log — used to emit approval_requested / approval_resolved
+   * events around steward_apply. Always present for production runtimes;
+   * test seams that bypass makeRuntime can leave this undefined.
+   */
+  readonly eventLog?: ToolBuildContext["eventLog"];
 }
 
 interface ApiOk {
@@ -416,27 +465,19 @@ async function dispatch(
   name: string,
   input: Record<string, unknown>,
 ): Promise<ToolCallResult> {
-  if (BLOCKED_TOOL_NAMES.includes(name as (typeof BLOCKED_TOOL_NAMES)[number])) {
-    return {
-      status: "blocked",
-      output: {
-        status: "pending_approval",
-        message: `Destructive Cornerstone tool ${name} is gated pending the approval-queue UI. Use steward_preview and surface the audit as a recommendation.`,
-      },
-      errorCode: "approval_queue_not_available",
-      errorMessage: `Tool ${name} is blocked in v0 substrate.`,
-    };
-  }
-
   const isWrite = (WRITE_TOOL_NAMES as readonly string[]).includes(name);
   const agentSuppliedNs = asOptStr(input.namespace);
 
-  // Resolution rules (matches paperclip cornerstone-tools.ts):
-  //   Writes:  taskWorkspace ?? AI_OPS_WORKSPACE  (agent IGNORED)
-  //   Reads:   taskWorkspace ?? agentSupplied ?? AI_OPS_WORKSPACE
+  // Resolution rules:
+  //   Writes:  rt.writeNamespace  (taskWorkspace ?? AI_OPS_WORKSPACE; agent IGNORED)
+  //   Reads:   agentSupplied ?? taskWorkspace ?? writeNamespace
+  // Reads prefer the agent-supplied namespace because audit/compliance flows
+  // legitimately need to scope outside the pinned workspace. Cornerstone's
+  // grant model is the actual security boundary — a principal without a grant
+  // for the requested namespace gets 403 → target_workspace_grant_missing.
   const resolvedNs = isWrite
     ? rt.writeNamespace
-    : (rt.taskWorkspace ?? agentSuppliedNs ?? rt.writeNamespace);
+    : (agentSuppliedNs ?? rt.taskWorkspace ?? rt.writeNamespace);
 
   try {
     switch (name) {
@@ -472,6 +513,8 @@ async function dispatch(
         );
       case "steward_preview":
         return await runStewardPreview(rt, input);
+      case "steward_apply":
+        return await runStewardApply(rt, input);
       case "steward_status":
         return await runStewardStatus(rt, input);
       default:
@@ -632,10 +675,163 @@ async function runStewardPreview(
       errorCode: "unsupported_operation",
       errorMessage: `steward_preview does not support ${operation}. Supported: ${Object.keys(STEWARD_PREVIEW_OPERATIONS).join(", ")}`,
     };
-  const body: Record<string, unknown> = { ...input, namespace: rt.writeNamespace };
+  // Preview is read-only — honour the agent-supplied namespace the same way
+  // recall/list_facts/search do. Cornerstone's grant model is the security
+  // boundary (403 if the principal lacks a grant for the requested ns).
+  const agentSuppliedNs = asOptStr(input.namespace);
+  const previewNs =
+    agentSuppliedNs ?? rt.taskWorkspace ?? rt.writeNamespace;
+  const body: Record<string, unknown> = { ...input, namespace: previewNs };
   const res = await callApi(rt, "POST", path, { body });
+  if (!res.ok) return mapApiError(res, previewNs, rt.taskWorkspace);
+  return { status: "ok", output: res.body };
+}
+
+// Gated steward apply. Runs preview first to surface a deterministic
+// summary for the approver, hands the request to ctx.requestApproval, and
+// only calls the live /apply endpoint after a human approves. When no
+// approval hook is present (CLI / unit tests), returns the same blocked
+// payload the v0 dispatcher returned so behaviour is unchanged outside
+// the production runner.
+async function runStewardApply(
+  rt: CornerstoneRuntime,
+  input: Record<string, unknown>,
+): Promise<ToolCallResult> {
+  const operation = asStr(input.operation);
+  if (!operation)
+    return {
+      status: "error",
+      output: null,
+      errorCode: "invalid_input",
+      errorMessage: "steward_apply requires operation",
+    };
+  const applyPath = STEWARD_APPLY_OPERATIONS[operation];
+  if (!applyPath)
+    return {
+      status: "error",
+      output: null,
+      errorCode: "unsupported_operation",
+      errorMessage: `steward_apply does not support ${operation}. Supported: ${Object.keys(STEWARD_APPLY_OPERATIONS).join(", ")}`,
+    };
+
+  // Always namespace writes to the task workspace — agent-supplied
+  // namespace is intentionally ignored here, matching the steward_preview
+  // contract.
+  const body: Record<string, unknown> = { ...input, namespace: rt.writeNamespace };
+  const callerConfirmationToken = asStr(input.confirmation_token);
+
+  if (!rt.requestApproval) {
+    return {
+      status: "blocked",
+      output: {
+        status: "pending_approval",
+        message:
+          "steward_apply is gated by human approval. The runner is not configured with an approval hook in this environment — call steward_preview and surface the audit as a recommendation instead.",
+      },
+      errorCode: "approval_queue_not_available",
+      errorMessage: "steward_apply requested without an approval hook present.",
+    };
+  }
+
+  // Run preview first so the approver sees the exact change set and so we
+  // can harvest Cornerstone's single-use confirmation token when Donald did
+  // not provide one from an earlier steward_preview call.
+  const previewPath = STEWARD_PREVIEW_OPERATIONS[operation];
+  let previewDetail: unknown = null;
+  let previewConfirmationToken: string | null = null;
+  if (previewPath) {
+    const previewBody: Record<string, unknown> = { ...body };
+    delete previewBody.confirmation_token;
+    const previewRes = await callApi(rt, "POST", previewPath, { body: previewBody });
+    if (previewRes.ok) {
+      previewDetail = previewRes.body;
+      previewConfirmationToken = confirmationTokenFromPreview(previewRes.body);
+    }
+  }
+
+  const confirmationToken = previewConfirmationToken ?? callerConfirmationToken;
+  if (!confirmationToken) {
+    return {
+      status: "error",
+      output: {
+        status: "missing_confirmation_token",
+        preview: previewDetail,
+      },
+      errorCode: "confirmation_token_missing",
+      errorMessage:
+        "steward_apply requires confirmation_token. Run steward_preview first, or ensure the approval preview returns a confirmation_token.",
+    };
+  }
+
+  const approvedBody: Record<string, unknown> = {
+    ...body,
+    confirmation_token: confirmationToken,
+  };
+  const previewSummary = summariseStewardPreview(operation, previewDetail);
+
+  rt.eventLog?.emit("approval_requested", {
+    toolName: "steward_apply",
+    operation,
+    preview: previewSummary,
+  });
+
+  const decision = await rt.requestApproval({
+    toolName: "steward_apply",
+    input: approvedBody,
+    preview: previewSummary,
+    detail: previewDetail,
+  });
+
+  rt.eventLog?.emit("approval_resolved", {
+    toolName: "steward_apply",
+    operation,
+    approved: decision.approved,
+    reason: decision.reason ?? null,
+  });
+
+  if (!decision.approved) {
+    return {
+      status: "blocked",
+      output: {
+        status: "rejected",
+        reason: decision.reason ?? "operator_rejected",
+      },
+      errorCode: "approval_rejected",
+      errorMessage: decision.reason ?? "Operator rejected steward_apply.",
+    };
+  }
+
+  const res = await callApi(rt, "POST", applyPath, { body: approvedBody });
   if (!res.ok) return mapApiError(res, rt.writeNamespace, rt.taskWorkspace);
   return { status: "ok", output: res.body };
+}
+
+function confirmationTokenFromPreview(preview: unknown): string | null {
+  if (!preview || typeof preview !== "object") return null;
+  const token = (preview as Record<string, unknown>).confirmation_token;
+  return asStr(token);
+}
+
+// Cheap one-line description for the approval modal — the full audit
+// JSON travels in `detail`. Falls back to the operation name when the
+// preview body shape is unfamiliar.
+function summariseStewardPreview(operation: string, preview: unknown): string {
+  if (preview && typeof preview === "object") {
+    const p = preview as Record<string, unknown>;
+    const counts: string[] = [];
+    for (const key of ["candidates", "merges", "deletes", "renames", "items"]) {
+      const v = p[key];
+      if (Array.isArray(v)) counts.push(`${v.length} ${key}`);
+      else if (typeof v === "number") counts.push(`${v} ${key}`);
+    }
+    if (counts.length > 0) {
+      return `steward_apply / ${operation} — ${counts.join(", ")}`;
+    }
+    if (typeof p.summary === "string") {
+      return `steward_apply / ${operation} — ${p.summary}`;
+    }
+  }
+  return `steward_apply / ${operation}`;
 }
 
 async function runStewardStatus(
@@ -677,6 +873,8 @@ function makeRuntime(ctx: ToolBuildContext, fetchImpl?: typeof fetch): Cornersto
     apiKey: ctx.cornerstoneApiKey,
     writeNamespace,
     taskWorkspace,
+    requestApproval: ctx.requestApproval,
+    eventLog: ctx.eventLog,
   };
 }
 
@@ -723,8 +921,8 @@ export function cornerstoneToolBuilders(
       break;
     case "donald":
       // Donald owns hygiene — gets the steward family too. steward_apply is
-      // mounted but always blocked in v0 so the agent learns to call it and
-      // see the pending_approval, rather than not knowing it exists.
+      // gated by the runner-side approval hook (WF-6 inbox); when no hook
+      // is wired (CLI / tests) it returns the v0 blocked payload.
       names = [
         "get_context",
         "search",

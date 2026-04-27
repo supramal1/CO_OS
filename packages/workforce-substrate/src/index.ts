@@ -18,6 +18,8 @@ export type {
   EventLogEntry,
   EventType,
   InvocationOptions,
+  ApprovalRequest,
+  ApprovalDecision,
 } from "./types.js";
 
 export {

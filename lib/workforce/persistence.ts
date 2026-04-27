@@ -297,6 +297,83 @@ export async function fetchEvents(taskId: string): Promise<PersistedEventRow[]> 
   return (data as PersistedEventRow[]) ?? [];
 }
 
+// ---------------------------------------------------------------------------
+// Approval persistence — `tool_approvals` table.
+//
+// In-memory PENDING in lib/workforce/approvals.ts is the source of truth for
+// resolving deferred Promises. Supabase mirrors the queue so:
+//   1. The inbox UI can rebuild "what's pending" if the page reloads while
+//      the runner is still alive (UX cosmetic, not a recovery mechanism —
+//      the Promise survives in the same process).
+//   2. We have a permanent audit trail of who approved/rejected what.
+// ---------------------------------------------------------------------------
+
+interface PersistableApproval {
+  approvalId: string;
+  taskId: string;
+  agentId: string;
+  toolName: string;
+  preview: string;
+  detail?: unknown;
+  input: Record<string, unknown>;
+  createdAt: string;
+  ownerPrincipalId: string;
+}
+
+export async function persistApprovalRequested(
+  approval: PersistableApproval,
+): Promise<void> {
+  const sb = getWorkforceSupabase();
+  if (!sb) return;
+  try {
+    const { error } = await sb.from("tool_approvals").insert({
+      id: approval.approvalId,
+      task_id: approval.taskId,
+      agent_id: approval.agentId,
+      tool_name: approval.toolName,
+      tool_args: approval.input as object,
+      preview: approval.preview,
+      detail: (approval.detail ?? null) as object | null,
+      state: "pending",
+      principal_id: approval.ownerPrincipalId,
+      created_at: approval.createdAt,
+    });
+    if (error)
+      console.warn("[workforce] persistApprovalRequested failed:", error.message);
+  } catch (err) {
+    console.warn("[workforce] persistApprovalRequested threw:", String(err));
+  }
+}
+
+export async function persistApprovalResolved(
+  approvalId: string,
+  decision: {
+    approved: boolean;
+    state?: "approved" | "rejected" | "cancelled";
+    reason?: string;
+    resolvedBy?: string;
+  },
+): Promise<void> {
+  const sb = getWorkforceSupabase();
+  if (!sb) return;
+  const state = decision.state ?? (decision.approved ? "approved" : "rejected");
+  try {
+    const { error } = await sb
+      .from("tool_approvals")
+      .update({
+        state,
+        resolved_at: new Date().toISOString(),
+        resolved_by: decision.resolvedBy ?? null,
+        resolved_reason: decision.reason ?? null,
+      })
+      .eq("id", approvalId);
+    if (error)
+      console.warn("[workforce] persistApprovalResolved failed:", error.message);
+  } catch (err) {
+    console.warn("[workforce] persistApprovalResolved threw:", String(err));
+  }
+}
+
 export async function fetchRecentTasks(
   principalId: string,
   limit = 50,

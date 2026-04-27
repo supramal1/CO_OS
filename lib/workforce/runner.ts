@@ -20,6 +20,7 @@ import {
   type Task,
   type TaskResult,
 } from "@workforce/substrate";
+import { makeApprovalHook } from "./approvals";
 import { publishEnd, publishEvent } from "./bus";
 import {
   fetchEvents,
@@ -175,6 +176,18 @@ async function runInvocation(
   ctx: RunnerContext,
 ): Promise<void> {
   if (!agent) return;
+  // Bind one approval hook per top-level task. The hook closes over the
+  // owner's principal so approve/reject endpoints can authorise resolution
+  // back to the same operator that started the task. agentId tracks the
+  // *invoking* agent on the parent invocation; tools running deeper in the
+  // delegation tree still get this same hook (substrate's child invoker
+  // spreads ...options) and the substrate writes the per-call agentId on
+  // the resulting `approval_requested` event for the inbox to display.
+  const requestApproval = makeApprovalHook({
+    taskId: record.taskId,
+    agentId: agent.id,
+    ownerPrincipalId: record.ownerPrincipalId,
+  });
   try {
     const result = await invokeAgent(agent, task, {
       anthropicApiKey: ctx.anthropicApiKey,
@@ -183,6 +196,7 @@ async function runInvocation(
       abortSignal: record.abortController.signal,
       roster: getRoster(),
       depth: 0,
+      requestApproval,
     });
     record.result = result;
     record.state = result.status as InvocationState;

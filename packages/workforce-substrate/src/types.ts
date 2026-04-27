@@ -145,6 +145,41 @@ export interface ToolCallInput {
 
 export type ToolCallResultStatus = "ok" | "error" | "blocked";
 
+// ---------------------------------------------------------------------------
+// Approval hook (Path Y — see docs/superpowers/specs/2026-04-26-wf6-approval-inbox-design.md)
+//
+// A tool dispatcher that wants human gating calls ctx.requestApproval(...)
+// before performing the destructive action. The runtime returns a Promise
+// that resolves when an operator approves/rejects via the inbox UI. While
+// the Promise is pending, the substrate's invocation loop is parked on
+// `await dispatch(...)` — no checkpointing required because the in-memory
+// closure (messages array, AbortSignal, EventLog) stays alive.
+// ---------------------------------------------------------------------------
+
+export interface ApprovalRequest {
+  /** Tool name presenting the request (e.g. "steward_apply"). */
+  readonly toolName: string;
+  /** The exact tool input that will be replayed if approved. */
+  readonly input: Record<string, unknown>;
+  /** Human-readable summary of what will happen — rendered in the modal. */
+  readonly preview: string;
+  /**
+   * Optional structured detail surfaced alongside the preview (e.g. the
+   * raw steward_preview audit). Keep it JSON-serialisable.
+   */
+  readonly detail?: unknown;
+}
+
+export interface ApprovalDecision {
+  readonly approved: boolean;
+  /** Persisted audit state. Defaults to approved/rejected from `approved`. */
+  readonly state?: "approved" | "rejected" | "cancelled";
+  /** Optional operator-supplied reason. Always populated on rejection. */
+  readonly reason?: string;
+  /** Operator identifier if available (principalId, "system", etc.). */
+  readonly resolvedBy?: string;
+}
+
 export interface ToolCallResult {
   readonly status: ToolCallResultStatus;
   /** JSON-serialisable output returned to the model as tool_result content. */
@@ -181,6 +216,14 @@ export interface ToolBuildContext {
   readonly cornerstoneApiKey: string;
   /** Cornerstone API base URL. Defaults to prod endpoint. */
   readonly cornerstoneApiBaseUrl: string;
+  /**
+   * Human-approval hook. Tool dispatchers call this before a destructive
+   * action and await the operator's decision. Optional — when undefined,
+   * tools that require approval should fall back to a "blocked" result
+   * (preserves the current v0 behaviour for environments without the
+   * inbox UI wired up, e.g. CLI / unit tests).
+   */
+  readonly requestApproval?: (req: ApprovalRequest) => Promise<ApprovalDecision>;
 }
 
 // ---------------------------------------------------------------------------
@@ -196,7 +239,9 @@ export type EventType =
   | "tool_called"
   | "tool_returned"
   | "delegate_initiated"
-  | "delegate_completed";
+  | "delegate_completed"
+  | "approval_requested"
+  | "approval_resolved";
 
 export interface EventLogEntry {
   readonly type: EventType;
@@ -241,6 +286,13 @@ export interface InvocationOptions {
   readonly roster?: ReadonlyMap<string, Agent>;
   /** Recursion depth — incremented automatically by delegate_task. */
   readonly depth?: number;
+  /**
+   * Human-approval hook. The runner provides an implementation that
+   * persists the request, registers a deferred Promise, and waits for the
+   * inbox UI to resolve it. Absent in CLI / unit-test contexts where the
+   * default "blocked" fallback is the desired behaviour.
+   */
+  readonly requestApproval?: (req: ApprovalRequest) => Promise<ApprovalDecision>;
 }
 
 // ---------------------------------------------------------------------------
