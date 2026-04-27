@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { WorkspaceSelector } from "@/components/admin/workspace-selector";
 
 const NAV: Array<{ href: string; label: string }> = [
   { href: "/admin/workspaces", label: "Workspaces" },
@@ -50,6 +51,7 @@ export function AdminSubNav() {
           </Link>
         );
       })}
+      <WorkspaceSelector />
     </nav>
   );
 }
