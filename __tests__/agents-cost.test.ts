@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAgentsCostTransition,
+  displayCostUsdForTask,
   shouldSkipAgentsCostConfirm,
 } from "@/lib/agents-cost";
 import type { CostRunRow } from "@/lib/cost-samples";
@@ -70,5 +71,31 @@ describe("agents cost transition modal helpers", () => {
 
     expect(pending?.estimate).toBeNull();
     expect(pending?.estimateError).toBe(true);
+  });
+});
+
+describe("displayCostUsdForTask", () => {
+  it("prefers an explicit totalCostUsd from task metadata", () => {
+    expect(
+      displayCostUsdForTask({
+        ...task,
+        metadata: { totalCostUsd: 12.345 },
+      }),
+    ).toBe(12.345);
+  });
+
+  it("falls back to summing actual run costs for the task", () => {
+    const rows: CostRunRow[] = [
+      { task_id: "task-1", run_type: "pm_orchestration", actual_cost_usd: 1.25 },
+      { task_id: "task-1", run_type: "research", actual_cost_usd: "2.75" },
+      { task_id: "other", run_type: "research", actual_cost_usd: 99 },
+      { task_id: "task-1", run_type: "build", actual_cost_usd: null },
+    ];
+
+    expect(displayCostUsdForTask(task, rows)).toBe(4);
+  });
+
+  it("returns null when the task has no recorded cost", () => {
+    expect(displayCostUsdForTask(task, [])).toBeNull();
   });
 });

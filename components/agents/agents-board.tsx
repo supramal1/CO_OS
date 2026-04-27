@@ -9,6 +9,7 @@ import {
 import { CostConfirmDialog } from "@/components/forge/cost-confirm-dialog";
 import {
   buildAgentsCostTransition,
+  displayCostUsdForTask,
   shouldSkipAgentsCostConfirm,
   type AgentsCostTransition,
 } from "@/lib/agents-cost";
@@ -293,6 +294,7 @@ export function AgentsBoard() {
                 key={col}
                 columnId={col}
                 tasks={grouped[col]}
+                costRows={costRows}
                 activeId={activeId}
                 isDragOver={dragOver === col}
                 onSelect={setActiveId}
@@ -400,6 +402,7 @@ export function AgentsBoard() {
 function Column({
   columnId,
   tasks,
+  costRows,
   activeId,
   isDragOver,
   onSelect,
@@ -409,6 +412,7 @@ function Column({
 }: {
   columnId: BoardColumnId;
   tasks: ForgeTask[];
+  costRows: CostRunRow[] | null;
   activeId: string | null;
   isDragOver: boolean;
   onSelect: (id: string) => void;
@@ -487,6 +491,7 @@ function Column({
             <TaskCard
               key={task.id}
               task={task}
+              costUsd={displayCostUsdForTask(task, costRows)}
               active={task.id === activeId}
               onSelect={() => onSelect(task.id)}
               onDragStart={(e) => {

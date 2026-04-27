@@ -6,11 +6,13 @@ import { STATUS_LABEL } from "@/lib/agents-types";
 
 export function TaskCard({
   task,
+  costUsd,
   active,
   onSelect,
   onDragStart,
 }: {
   task: ForgeTask;
+  costUsd: number | null;
   active: boolean;
   onSelect: () => void;
   onDragStart: (e: DragEvent<HTMLDivElement>) => void;
@@ -79,6 +81,20 @@ export function TaskCard({
       >
         {task.title}
       </div>
+      {costUsd !== null ? (
+        <div
+          aria-label="Task cost"
+          style={{
+            marginTop: 8,
+            fontFamily: "var(--font-plex-mono)",
+            fontSize: 10,
+            color: "var(--ink-faint)",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          ${costUsd.toFixed(2)}
+        </div>
+      ) : null}
     </div>
   );
 }

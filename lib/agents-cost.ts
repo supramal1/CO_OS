@@ -47,3 +47,28 @@ export function buildAgentsCostTransition({
     estimateError: costRowsError && !costRows,
   };
 }
+
+function numericMetadataCost(metadata: ForgeTask["metadata"]): number | null {
+  const value = metadata?.totalCostUsd ?? metadata?.costUsd;
+  const cost = typeof value === "number" || typeof value === "string"
+    ? Number(value)
+    : NaN;
+  return Number.isFinite(cost) && cost > 0 ? cost : null;
+}
+
+export function displayCostUsdForTask(
+  task: ForgeTask,
+  costRows: CostRunRow[] | null = null,
+): number | null {
+  const metadataCost = numericMetadataCost(task.metadata);
+  if (metadataCost !== null) return metadataCost;
+  if (!costRows) return null;
+
+  let total = 0;
+  for (const row of costRows) {
+    if (row.task_id !== task.id) continue;
+    const cost = row.actual_cost_usd == null ? 0 : Number(row.actual_cost_usd);
+    if (Number.isFinite(cost) && cost > 0) total += cost;
+  }
+  return total > 0 ? total : null;
+}
