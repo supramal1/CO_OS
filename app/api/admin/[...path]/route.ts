@@ -23,8 +23,10 @@ async function handler(
 
   const { path } = await params;
   const adminPath = `/admin/${path.join("/")}`;
-  const qs = req.nextUrl.search;
-  const fullPath = qs ? `${adminPath}${qs}` : adminPath;
+  const upstreamUrl = new URL(`${CORNERSTONE_URL}${adminPath}`);
+  req.nextUrl.searchParams.forEach((value, key) => {
+    upstreamUrl.searchParams.append(key, value);
+  });
 
   const init: RequestInit = {
     method: req.method,
@@ -47,7 +49,7 @@ async function handler(
   }
 
   try {
-    const upstream = await fetch(`${CORNERSTONE_URL}${fullPath}`, init);
+    const upstream = await fetch(upstreamUrl, init);
     const responseBody = await upstream.text();
     return new NextResponse(responseBody, {
       status: upstream.status,
