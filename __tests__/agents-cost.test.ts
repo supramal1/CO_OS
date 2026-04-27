@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAgentsCostTransition,
   displayCostUsdForTask,
+  formatTaskCostSummary,
   shouldSkipAgentsCostConfirm,
 } from "@/lib/agents-cost";
 import type { CostRunRow } from "@/lib/cost-samples";
@@ -97,5 +98,15 @@ describe("displayCostUsdForTask", () => {
 
   it("returns null when the task has no recorded cost", () => {
     expect(displayCostUsdForTask(task, [])).toBeNull();
+  });
+});
+
+describe("formatTaskCostSummary", () => {
+  it("formats recorded task spend for the detail panel", () => {
+    expect(formatTaskCostSummary(12.345)).toBe("$12.35 USD");
+  });
+
+  it("returns an explicit empty state when no task spend is recorded", () => {
+    expect(formatTaskCostSummary(null)).toBe("No recorded spend");
   });
 });

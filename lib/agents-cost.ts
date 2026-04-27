@@ -72,3 +72,7 @@ export function displayCostUsdForTask(
   }
   return total > 0 ? total : null;
 }
+
+export function formatTaskCostSummary(costUsd: number | null): string {
+  return costUsd === null ? "No recorded spend" : `$${costUsd.toFixed(2)} USD`;
+}

@@ -324,6 +324,7 @@ export function AgentsBoard() {
           <TaskDetail
             task={activeTask}
             namespace={selectedWorkspace}
+            costUsd={displayCostUsdForTask(activeTask, costRows)}
             onUpdated={applyTaskUpdate}
             onDeleted={(id) => {
               setState((s) => {

@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { formatTaskCostSummary } from "@/lib/agents-cost";
 import type { ForgeTask, TaskStatus } from "@/lib/agents-types";
 import { ALL_STATUSES, STATUS_LABEL } from "@/lib/agents-types";
 
 type Props = {
   task: ForgeTask;
   namespace: string | null;
+  costUsd: number | null;
   onUpdated: (next: ForgeTask) => void;
   onDeleted: (id: string) => void;
   onError: (message: string) => void;
@@ -16,6 +18,7 @@ type Props = {
 export function TaskDetail({
   task,
   namespace,
+  costUsd,
   onUpdated,
   onDeleted,
   onError,
@@ -176,6 +179,48 @@ export function TaskDetail({
           </button>
         </div>
       </div>
+
+      <section
+        style={{
+          padding: "16px 24px",
+          borderTop: "1px solid var(--rule)",
+        }}
+      >
+        <div
+          style={{
+            fontFamily: "var(--font-plex-mono)",
+            fontSize: 10,
+            letterSpacing: "0.18em",
+            textTransform: "uppercase",
+            color: "var(--ink-faint)",
+            marginBottom: 8,
+          }}
+        >
+          Cost
+        </div>
+        <div
+          aria-label="Task cost summary"
+          style={{
+            fontFamily: "var(--font-plex-mono)",
+            fontSize: 18,
+            color: costUsd === null ? "var(--ink-dim)" : "var(--ink)",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {formatTaskCostSummary(costUsd)}
+        </div>
+        <p
+          style={{
+            margin: "8px 0 0",
+            fontFamily: "var(--font-plex-sans)",
+            fontSize: 12,
+            lineHeight: 1.45,
+            color: "var(--ink-faint)",
+          }}
+        >
+          Sum of completed Forge runs recorded for this task.
+        </p>
+      </section>
 
       <div
         style={{
