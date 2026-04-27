@@ -3,16 +3,16 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { adminFetch } from "@/lib/admin-api";
-import type {
-  AdminStatus,
-  Invitation,
-  Namespace,
-  Principal,
-} from "@/lib/admin-types";
+import type { AdminStatus, Invitation, Principal } from "@/lib/admin-types";
 import { useAdminWorkspace } from "@/components/admin/workspace-selector";
 import { StatusPill } from "@/components/admin/status-pill";
 import { TabBar } from "@/components/admin/tab-bar";
 import { BulkBar } from "@/components/admin/bulk-bar";
+import {
+  buildInvitationRequest,
+  initialInviteWorkspaceSelection,
+  isRoleInvitableFromAdminPanel,
+} from "@/components/admin/invite-state";
 import {
   Empty,
   Field,
@@ -82,7 +82,7 @@ function formatRelative(iso: string) {
 }
 
 export default function AdminTeamPage() {
-  const { selectedWorkspace } = useAdminWorkspace();
+  const { selectedWorkspace, workspaces } = useAdminWorkspace();
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [tab, setTab] = useState<TabId>("active");
   const [search, setSearch] = useState("");
@@ -494,6 +494,7 @@ export default function AdminTeamPage() {
       {inviteOpen ? (
         <InviteDialog
           namespace={selectedWorkspace}
+          workspaces={workspaces}
           onClose={() => setInviteOpen(false)}
           onCreated={onInviteCreated}
           onError={(m) => setToast(m)}
@@ -1098,11 +1099,13 @@ function RowAction({
 
 function InviteDialog({
   namespace,
+  workspaces,
   onClose,
   onCreated,
   onError,
 }: {
   namespace: string | null;
+  workspaces: string[];
   onClose: () => void;
   onCreated: () => void;
   onError: (m: string) => void;
@@ -1113,19 +1116,15 @@ function InviteDialog({
   const [jobTitle, setJobTitle] = useState("");
   const [organization, setOrganization] = useState("Charlie Oscar");
   const [teams, setTeams] = useState("");
-  const [isCoOsAdmin, setIsCoOsAdmin] = useState(false);
-  const [namespaces, setNamespaces] = useState<Namespace[]>([]);
-  const [selectedNs, setSelectedNs] = useState<Set<string>>(new Set());
+  const [selectedNs, setSelectedNs] = useState<Set<string>>(() =>
+    initialInviteWorkspaceSelection(workspaces, namespace),
+  );
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    void adminFetch<Namespace[]>("/admin/namespaces", { namespace })
-      .then((ns) =>
-        setNamespaces(ns.filter((n) => n.status === "active")),
-      )
-      .catch(() => setNamespaces([]));
-  }, [namespace]);
+    setSelectedNs(initialInviteWorkspaceSelection(workspaces, namespace));
+  }, [namespace, workspaces]);
 
   const toggleNs = (name: string) => {
     setSelectedNs((prev) => {
@@ -1140,24 +1139,21 @@ function InviteDialog({
     if (!email.trim() || selectedNs.size === 0) return;
     setBusy(true);
     try {
-      const team_slugs = teams
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
       await adminFetch("/admin/invitations", {
         method: "POST",
         namespace,
-        body: JSON.stringify({
-          email: email.trim().toLowerCase(),
-          role_template: role,
-          namespaces: Array.from(selectedNs),
-          notes: notes.trim() || null,
-          pronouns,
-          job_title: jobTitle.trim(),
-          organization: organization.trim() || "Charlie Oscar",
-          team_slugs,
-          is_co_os_admin: isCoOsAdmin,
-        }),
+        body: JSON.stringify(
+          buildInvitationRequest({
+            email,
+            role,
+            namespaces: Array.from(selectedNs),
+            notes,
+            pronouns,
+            jobTitle,
+            organization,
+            teams,
+          }),
+        ),
       });
       onCreated();
     } catch (err) {
@@ -1189,9 +1185,11 @@ function InviteDialog({
           style={modalInputStyle}
         >
           {ROLE_OPTIONS.map((r) => (
-            <option key={r.value} value={r.value}>
-              {r.label}
-            </option>
+            isRoleInvitableFromAdminPanel(r.value) ? (
+              <option key={r.value} value={r.value}>
+                {r.label}
+              </option>
+            ) : null
           ))}
         </select>
         {roleDescription ? (
@@ -1247,33 +1245,8 @@ function InviteDialog({
         />
       </Field>
 
-      <label
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 8,
-          cursor: "pointer",
-        }}
-      >
-        <input
-          type="checkbox"
-          checked={isCoOsAdmin}
-          onChange={(e) => setIsCoOsAdmin(e.target.checked)}
-        />
-        <span
-          style={{
-            fontFamily: "var(--font-plex-mono)",
-            fontSize: 11,
-            letterSpacing: "0.08em",
-            color: "var(--ink)",
-          }}
-        >
-          CO OS admin
-        </span>
-      </label>
-
       <Field label="Workspaces (required)">
-        {namespaces.length === 0 ? (
+        {workspaces.length === 0 ? (
           <span
             style={{
               fontFamily: "var(--font-plex-sans)",
@@ -1296,9 +1269,9 @@ function InviteDialog({
               background: "var(--bg)",
             }}
           >
-            {namespaces.map((ns) => (
+            {workspaces.map((workspace) => (
               <label
-                key={ns.id}
+                key={workspace}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -1309,8 +1282,8 @@ function InviteDialog({
               >
                 <input
                   type="checkbox"
-                  checked={selectedNs.has(ns.name)}
-                  onChange={() => toggleNs(ns.name)}
+                  checked={selectedNs.has(workspace)}
+                  onChange={() => toggleNs(workspace)}
                 />
                 <span
                   style={{
@@ -1319,18 +1292,7 @@ function InviteDialog({
                     color: "var(--ink)",
                   }}
                 >
-                  {ns.display_name || ns.name}
-                </span>
-                <span
-                  style={{
-                    marginLeft: "auto",
-                    fontFamily: "var(--font-plex-mono)",
-                    fontSize: 10,
-                    color: "var(--ink-faint)",
-                    letterSpacing: "0.08em",
-                  }}
-                >
-                  {ns.type}
+                  {workspace}
                 </span>
               </label>
             ))}
