@@ -7,5 +7,6 @@ export const config = {
     "/speak-to-charlie/:path*",
     "/agents/:path*",
     "/workforce/:path*",
+    "/admin/:path*",
   ],
 };

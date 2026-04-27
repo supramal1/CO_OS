@@ -60,6 +60,45 @@ export const LANE_LABEL: Record<ForgeLane, string> = {
   done: "Done",
 };
 
+export type BoardColumnId = "backlog" | "in_progress" | "review" | "done";
+
+export const COLUMN_ORDER: BoardColumnId[] = [
+  "backlog",
+  "in_progress",
+  "review",
+  "done",
+];
+
+export const COLUMN_LABEL: Record<BoardColumnId, string> = {
+  backlog: "Backlog",
+  in_progress: "In progress",
+  review: "Review",
+  done: "Done",
+};
+
+// Default target status when moving a task into a build-board column.
+export const COLUMN_DEFAULT_STATUS: Record<BoardColumnId, TaskStatus> = {
+  backlog: "submitted",
+  in_progress: "building",
+  review: "ready",
+  done: "completed",
+};
+
+const STATUS_TO_COLUMN: Record<TaskStatus, BoardColumnId> = {
+  submitted: "backlog",
+  scoping: "backlog",
+  building: "in_progress",
+  running: "in_progress",
+  ready: "review",
+  completed: "done",
+  failed: "done",
+  cancelled: "done",
+};
+
+export function columnFor(status: TaskStatus): BoardColumnId {
+  return STATUS_TO_COLUMN[status];
+}
+
 // Human-gated drags allowed in the UI. Any transition not listed here
 // is rejected before the modal appears — skipping lanes, backward drags,
 // and drags out of review gates all fail with a clear error. Automated
