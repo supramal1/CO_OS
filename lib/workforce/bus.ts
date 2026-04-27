@@ -12,7 +12,13 @@ type BusEvent =
   | { kind: "event"; entry: EventLogEntry }
   | { kind: "end"; state: string };
 
-const channels = new Map<string, EventEmitter>();
+declare global {
+  // eslint-disable-next-line no-var
+  var __wf_channels: Map<string, EventEmitter> | undefined;
+}
+
+const channels: Map<string, EventEmitter> =
+  (globalThis.__wf_channels ??= new Map());
 
 function getChannel(taskId: string): EventEmitter {
   let ch = channels.get(taskId);

@@ -1,10 +1,15 @@
 "use client";
 
-import Link from "next/link";
 import type { TaskSummary } from "@/lib/workforce/types";
 import { StateChip } from "./state-chip";
 
-export function RecentTasksList({ tasks }: { tasks: TaskSummary[] }) {
+interface Props {
+  tasks: TaskSummary[];
+  selectedTaskId: string | null;
+  onSelect: (taskId: string) => void;
+}
+
+export function RecentTasksList({ tasks, selectedTaskId, onSelect }: Props) {
   if (tasks.length === 0) {
     return (
       <p style={{ margin: 0, fontSize: 13, color: "var(--ink-dim)" }}>
@@ -14,14 +19,23 @@ export function RecentTasksList({ tasks }: { tasks: TaskSummary[] }) {
   }
   return (
     <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-      {tasks.map((t) => (
-        <li key={t.taskId}>
-          <Link href={`/workforce/tasks/${t.taskId}`} style={{ display: "block" }}>
-            <article
+      {tasks.map((t) => {
+        const selected = t.taskId === selectedTaskId;
+        return (
+          <li key={t.taskId}>
+            <button
+              type="button"
+              onClick={() => onSelect(t.taskId)}
               style={{
+                display: "block",
+                width: "100%",
+                textAlign: "left",
                 padding: 12,
-                background: "var(--panel)",
-                border: "1px solid var(--rule)",
+                background: selected ? "var(--ink)" : "var(--panel)",
+                color: selected ? "var(--panel)" : "var(--ink)",
+                border: `1px solid ${selected ? "var(--ink)" : "var(--rule)"}`,
+                cursor: "pointer",
+                fontFamily: "inherit",
               }}
             >
               <header
@@ -39,7 +53,8 @@ export function RecentTasksList({ tasks }: { tasks: TaskSummary[] }) {
                     fontSize: 10,
                     letterSpacing: "0.14em",
                     textTransform: "uppercase",
-                    color: "var(--ink-dim)",
+                    color: selected ? "var(--panel)" : "var(--ink-dim)",
+                    opacity: selected ? 0.75 : 1,
                   }}
                 >
                   {t.agentId} · {fmtTime(t.startedAt)}
@@ -50,7 +65,7 @@ export function RecentTasksList({ tasks }: { tasks: TaskSummary[] }) {
                 style={{
                   margin: 0,
                   fontSize: 13,
-                  color: "var(--ink)",
+                  color: "inherit",
                   display: "-webkit-box",
                   WebkitLineClamp: 2,
                   WebkitBoxOrient: "vertical",
@@ -66,17 +81,18 @@ export function RecentTasksList({ tasks }: { tasks: TaskSummary[] }) {
                   gap: 12,
                   fontFamily: "var(--font-plex-mono)",
                   fontSize: 10,
-                  color: "var(--ink-faint)",
+                  color: selected ? "var(--panel)" : "var(--ink-faint)",
+                  opacity: selected ? 0.7 : 1,
                   letterSpacing: "0.08em",
                 }}
               >
                 <span>cost ${t.costUsd.toFixed(4)}</span>
                 <span>dur {fmtDuration(t.durationMs)}</span>
               </footer>
-            </article>
-          </Link>
-        </li>
-      ))}
+            </button>
+          </li>
+        );
+      })}
     </ul>
   );
 }

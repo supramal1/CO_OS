@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -13,19 +12,46 @@ import { StateChip } from "./state-chip";
 
 interface Props {
   taskId: string;
+  // Reply re-uses the same dispatcher the compose form goes through.
+  // The pane synthesises `context` from the prior turn so the substrate
+  // can prepend it to the user message in claude-agent.ts.
+  onReply: (input: {
+    agentId: string;
+    description: string;
+    targetWorkspace?: string;
+    context: string;
+  }) => Promise<{ taskId: string }>;
+  onTaskTransition?: (newSummary: TaskDetail) => void;
 }
 
-export function TaskDetailView({ taskId }: Props) {
+export function TaskConversationPane({ taskId, onReply, onTaskTransition }: Props) {
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [liveEvents, setLiveEvents] = useState<PublicEventLogEntry[]>([]);
   const [streamState, setStreamState] = useState<"connecting" | "live" | "closed">("connecting");
+  const [replyText, setReplyText] = useState("");
+  const [sendingReply, setSendingReply] = useState(false);
+  const [replyError, setReplyError] = useState<string | null>(null);
+  const onTransitionRef = useRef(onTaskTransition);
   const detailRef = useRef<TaskDetail | null>(null);
+  onTransitionRef.current = onTaskTransition;
 
   useEffect(() => {
     detailRef.current = detail;
   }, [detail]);
+
+  // Reset transient state when the user switches tasks. Without this,
+  // an in-flight reply textarea on task A would leak into task B.
+  useEffect(() => {
+    setDetail(null);
+    setError(null);
+    setLoading(true);
+    setLiveEvents([]);
+    setReplyText("");
+    setReplyError(null);
+    setStreamState("connecting");
+  }, [taskId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -38,6 +64,7 @@ export function TaskDetailView({ taskId }: Props) {
           setDetail(body);
           setLoading(false);
           setLiveEvents(body.events);
+          onTransitionRef.current?.(body);
         }
       } catch (err) {
         if (!cancelled) {
@@ -73,11 +100,13 @@ export function TaskDetailView({ taskId }: Props) {
       if (closed) return;
       setStreamState("closed");
       es.close();
-      // Re-fetch final detail (cost / output / etc).
       void fetch(`/api/workforce/tasks/${taskId}`, { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : null))
         .then((b: TaskDetail | null) => {
-          if (b && !closed) setDetail(b);
+          if (b && !closed) {
+            setDetail(b);
+            onTransitionRef.current?.(b);
+          }
         });
     });
     es.onerror = () => {
@@ -99,50 +128,66 @@ export function TaskDetailView({ taskId }: Props) {
     }
     const latest = detailRef.current;
     if (latest?.state === "running") {
-      setDetail({
+      const cancelled: TaskDetail = {
         ...latest,
         state: "cancelled",
         completedAt: new Date().toISOString(),
-      });
+      };
+      setDetail(cancelled);
+      onTransitionRef.current?.(cancelled);
     }
   }
 
-  if (loading) return <PageNote>Loading task…</PageNote>;
-  if (error) return <PageNote tone="error">Failed: {error}</PageNote>;
-  if (!detail) return <PageNote>Task not found.</PageNote>;
+  async function handleSendReply(e: React.FormEvent) {
+    e.preventDefault();
+    if (!detail || !replyText.trim() || sendingReply) return;
+    setSendingReply(true);
+    setReplyError(null);
+    try {
+      const context = synthesiseReplyContext(detail);
+      await onReply({
+        agentId: detail.agentId,
+        description: replyText.trim(),
+        context,
+      });
+      setReplyText("");
+    } catch (err) {
+      setReplyError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSendingReply(false);
+    }
+  }
+
+  if (loading) return <PaneNote>Loading task…</PaneNote>;
+  if (error) return <PaneNote tone="error">Failed: {error}</PaneNote>;
+  if (!detail) return <PaneNote>Task not found.</PaneNote>;
+
+  const replyDisabled =
+    detail.state === "running" ||
+    detail.state === "queued" ||
+    detail.state === "blocked";
 
   return (
-    <div style={{ padding: 28, display: "flex", flexDirection: "column", gap: 20 }}>
-      <header style={{ display: "flex", justifyContent: "space-between", gap: 24, alignItems: "flex-start" }}>
-        <div>
-          <Link
-            href="/workforce"
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, minHeight: 0 }}>
+      <header style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start" }}>
+        <div style={{ minWidth: 0 }}>
+          <h2
             style={{
-              fontFamily: "var(--font-plex-mono)",
-              fontSize: 10,
-              letterSpacing: "0.14em",
-              textTransform: "uppercase",
-              color: "var(--ink-dim)",
-            }}
-          >
-            ← Workforce dispatch
-          </Link>
-          <h1
-            style={{
-              margin: "8px 0 0",
-              fontSize: 18,
+              margin: 0,
+              fontSize: 16,
               fontWeight: 500,
               color: "var(--ink)",
-              maxWidth: 720,
+              lineHeight: 1.4,
             }}
           >
             {detail.description}
-          </h1>
+          </h2>
           <div
             style={{
               display: "flex",
-              gap: 16,
-              marginTop: 8,
+              gap: 12,
+              marginTop: 6,
+              flexWrap: "wrap",
               fontFamily: "var(--font-plex-mono)",
               fontSize: 10,
               color: "var(--ink-dim)",
@@ -160,7 +205,7 @@ export function TaskDetailView({ taskId }: Props) {
             <span>stream {streamState}</span>
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
           <StateChip state={detail.state} />
           {detail.state === "running" ? (
             <button onClick={handleCancel} style={cancelButtonStyle}>
@@ -170,28 +215,106 @@ export function TaskDetailView({ taskId }: Props) {
         </div>
       </header>
 
-      {detail.error ? (
-        <ErrorPanel error={detail.error} />
-      ) : null}
+      {detail.error ? <ErrorPanel error={detail.error} /> : null}
 
       <section
         style={{
           display: "grid",
-          gridTemplateColumns: "minmax(0, 2fr) minmax(0, 3fr)",
-          gap: 24,
+          gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.4fr)",
+          gap: 16,
+          minHeight: 0,
         }}
       >
-        <div>
+        <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
           <PaneHeader>Event log</PaneHeader>
           <EventLogList events={liveEvents} childTasks={detail.children} />
         </div>
-        <div>
-          <PaneHeader>Final output</PaneHeader>
+        <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+          <PaneHeader>Output</PaneHeader>
           <DeliverableView output={detail.output} state={detail.state} />
         </div>
       </section>
+
+      <form
+        onSubmit={handleSendReply}
+        style={{ display: "flex", flexDirection: "column", gap: 8 }}
+      >
+        <PaneHeader>
+          {replyDisabled ? "Reply (waiting for response…)" : `Reply to ${detail.agentId}`}
+        </PaneHeader>
+        <textarea
+          value={replyText}
+          onChange={(e) => setReplyText(e.target.value)}
+          rows={3}
+          disabled={replyDisabled}
+          placeholder={
+            replyDisabled
+              ? "You can reply once the agent has responded."
+              : "Reply to this thread — answers Ada's clarifying questions, or asks a follow-up."
+          }
+          style={{
+            ...textareaStyle,
+            opacity: replyDisabled ? 0.6 : 1,
+          }}
+          onKeyDown={(e) => {
+            // Cmd/Ctrl+Enter sends, matching most chat-style UIs.
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+              void handleSendReply(e as unknown as React.FormEvent);
+            }
+          }}
+        />
+        {replyError ? (
+          <p style={{ margin: 0, fontSize: 12, color: "var(--c-forge)" }}>{replyError}</p>
+        ) : null}
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button
+            type="submit"
+            disabled={replyDisabled || sendingReply || !replyText.trim()}
+            style={primaryButtonStyle(replyDisabled || sendingReply || !replyText.trim())}
+          >
+            {sendingReply ? "Sending…" : "Send reply"}
+          </button>
+          <span
+            style={{
+              fontFamily: "var(--font-plex-mono)",
+              fontSize: 10,
+              letterSpacing: "0.12em",
+              textTransform: "uppercase",
+              color: "var(--ink-faint)",
+            }}
+          >
+            ⌘↩ to send · prior turn is threaded as context
+          </span>
+        </div>
+      </form>
     </div>
   );
+}
+
+// Build the substrate `context` payload for a reply turn. The substrate
+// prepends this verbatim to the user message (claude-agent.ts:491), so
+// the agent reads it as "here's where we are in the conversation"
+// before the new instruction lands. We keep it human-readable and
+// trim hard so a long Ada response doesn't blow the prompt.
+function synthesiseReplyContext(prior: TaskDetail): string {
+  const priorOutput = prior.output?.trim() ?? "";
+  // Hard cap: 4000 chars is plenty for a clarifying-question turn,
+  // and well under model token limits even with overhead.
+  const clipped =
+    priorOutput.length > 4000
+      ? `${priorOutput.slice(0, 4000)}\n\n[…truncated for context…]`
+      : priorOutput;
+  return [
+    "This is a follow-up turn in an ongoing conversation.",
+    "",
+    "Original request from the user:",
+    prior.description,
+    "",
+    `Your previous response (as ${prior.agentId}):`,
+    clipped || "[no output captured]",
+    "",
+    "The user's reply follows below.",
+  ].join("\n");
 }
 
 function EventLogList({
@@ -219,15 +342,14 @@ function EventLogList({
         margin: 0,
         display: "flex",
         flexDirection: "column",
-        gap: 4,
-        maxHeight: "70vh",
+        gap: 0,
+        maxHeight: 320,
         overflowY: "auto",
         background: "var(--panel)",
         border: "1px solid var(--rule)",
       }}
     >
       {events.map((e) => {
-        const link = eventLink(e);
         const summary = summariseEvent(e, childMap);
         return (
           <li
@@ -242,27 +364,21 @@ function EventLogList({
               gap: 12,
             }}
           >
-            <span style={{ color: "var(--ink-faint)", flexShrink: 0, width: 80 }}>
+            <span style={{ color: "var(--ink-faint)", flexShrink: 0, width: 70 }}>
               {fmtTimeShort(e.timestamp)}
             </span>
             <span
               style={{
                 color: typeColor(e.type),
                 flexShrink: 0,
-                width: 140,
+                width: 130,
                 letterSpacing: "0.08em",
               }}
             >
               {e.type}
             </span>
             <span style={{ color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {link ? (
-                <Link href={link} style={{ color: "var(--ink)", textDecoration: "underline" }}>
-                  {summary} ↗
-                </Link>
-              ) : (
-                summary
-              )}
+              {summary}
             </span>
           </li>
         );
@@ -291,7 +407,7 @@ function DeliverableView({ output, state }: { output: string; state: string }) {
         fontSize: 14,
         lineHeight: 1.6,
         color: "var(--ink)",
-        maxHeight: "70vh",
+        maxHeight: 320,
         overflowY: "auto",
       }}
     >
@@ -321,10 +437,10 @@ function ErrorPanel({ error }: { error: { code: string; message: string } }) {
 
 function PaneHeader({ children }: { children: React.ReactNode }) {
   return (
-    <h2
+    <h3
       style={{
         margin: 0,
-        marginBottom: 12,
+        marginBottom: 8,
         fontFamily: "var(--font-plex-mono)",
         fontSize: 11,
         letterSpacing: "0.18em",
@@ -333,11 +449,11 @@ function PaneHeader({ children }: { children: React.ReactNode }) {
       }}
     >
       {children}
-    </h2>
+    </h3>
   );
 }
 
-function PageNote({
+function PaneNote({
   children,
   tone = "default",
 }: {
@@ -345,11 +461,9 @@ function PageNote({
   tone?: "default" | "error";
 }) {
   return (
-    <div style={{ padding: 28 }}>
-      <p style={{ margin: 0, fontSize: 14, color: tone === "error" ? "var(--c-forge)" : "var(--ink-dim)" }}>
-        {children}
-      </p>
-    </div>
+    <p style={{ margin: 0, fontSize: 14, color: tone === "error" ? "var(--c-forge)" : "var(--ink-dim)" }}>
+      {children}
+    </p>
   );
 }
 
@@ -383,8 +497,6 @@ function summariseEvent(
   e: PublicEventLogEntry,
   childMap: Map<string, TaskSummary>,
 ): string {
-  // Substrate emits camelCase payloads (see packages/workforce-substrate/src/runtime/claude-agent.ts).
-  // The earlier snake_case reads were dead code; the substrate has never used those keys.
   const p = e.payload as Record<string, unknown>;
   switch (e.type) {
     case "task_started":
@@ -416,15 +528,6 @@ function summariseEvent(
   }
 }
 
-function eventLink(e: PublicEventLogEntry): string | null {
-  if (e.type === "delegate_initiated" || e.type === "delegate_completed") {
-    const p = e.payload as Record<string, unknown>;
-    const childId = p.childTaskId;
-    return typeof childId === "string" ? `/workforce/tasks/${childId}` : null;
-  }
-  return null;
-}
-
 const cancelButtonStyle: React.CSSProperties = {
   padding: "6px 12px",
   background: "transparent",
@@ -434,4 +537,31 @@ const cancelButtonStyle: React.CSSProperties = {
   fontSize: 10,
   letterSpacing: "0.14em",
   textTransform: "uppercase",
+  cursor: "pointer",
 };
+
+const textareaStyle: React.CSSProperties = {
+  padding: 12,
+  background: "var(--panel)",
+  border: "1px solid var(--rule)",
+  color: "var(--ink)",
+  fontSize: 14,
+  lineHeight: 1.55,
+  fontFamily: "var(--font-plex-sans)",
+  resize: "vertical",
+  minHeight: 70,
+};
+
+function primaryButtonStyle(disabled: boolean): React.CSSProperties {
+  return {
+    padding: "10px 18px",
+    background: disabled ? "var(--rule)" : "var(--ink)",
+    color: disabled ? "var(--ink-dim)" : "var(--panel)",
+    border: "1px solid var(--ink)",
+    fontFamily: "var(--font-plex-mono)",
+    fontSize: 11,
+    letterSpacing: "0.14em",
+    textTransform: "uppercase",
+    cursor: disabled ? "not-allowed" : "pointer",
+  };
+}

@@ -39,7 +39,7 @@ export default function WorkforceLayout({
             color: "var(--ink-faint)",
           }}
         >
-          v0 functional · pixel office on Night 2
+          v0 functional · pixel office Phase 1
         </span>
       </nav>
       {children}

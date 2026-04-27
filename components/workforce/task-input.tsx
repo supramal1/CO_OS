@@ -11,18 +11,30 @@ const DEFAULT_WORKSPACES = [
 
 interface Props {
   agents: PublicAgent[];
+  /** Pre-select an agent. Used when the form is opened from the agent
+   *  panel via "+ Dispatch to X". Falls back to the first lead when the
+   *  pre-selection isn't a delegate-capable agent (the runner enforces
+   *  this — the UI just hides bad cases). */
+  defaultAgentId?: string;
+  // Return type is intentionally `unknown`-shaped: callers may return
+  // the new task id (so the parent can auto-select), or just void.
+  // The form itself doesn't read the result — it only awaits.
   onDispatch: (input: {
     agentId: string;
     description: string;
     targetWorkspace?: string;
-  }) => Promise<void>;
+  }) => Promise<unknown>;
 }
 
-export function TaskInput({ agents, onDispatch }: Props) {
+export function TaskInput({ agents, defaultAgentId, onDispatch }: Props) {
   // v0 only allows Lead-rooted dispatch; the runner enforces but the
   // UI hides the option to avoid a bad user experience.
   const leads = useMemo(() => agents.filter((a) => a.canDelegate), [agents]);
-  const [agentId, setAgentId] = useState<string>(leads[0]?.id ?? "");
+  const initialAgentId =
+    defaultAgentId && leads.some((a) => a.id === defaultAgentId)
+      ? defaultAgentId
+      : leads[0]?.id ?? "";
+  const [agentId, setAgentId] = useState<string>(initialAgentId);
   const [description, setDescription] = useState("");
   const [targetWorkspace, setTargetWorkspace] = useState("");
   const [submitting, setSubmitting] = useState(false);

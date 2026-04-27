@@ -64,7 +64,13 @@ interface InflightRecord {
 // In-process registry. Maps every task we've seen this process lifetime
 // (running OR completed) to its record. Phase 2 backs this with Postgres so
 // the registry survives process restarts.
-const REGISTRY = new Map<string, InflightRecord>();
+declare global {
+  // eslint-disable-next-line no-var
+  var __wf_registry: Map<string, InflightRecord> | undefined;
+}
+
+const REGISTRY: Map<string, InflightRecord> =
+  (globalThis.__wf_registry ??= new Map());
 
 const MAX_RECENT = 100;
 
@@ -158,7 +164,7 @@ export function startTask(
 
   // Run invocation in the background. The HTTP route returns immediately
   // with the taskId and the SSE URL.
-  void runInvocation(record, agent, task, eventLog, ctx);
+  void runInvocation(record, agent, task, eventLog, ctx, () => writeChain);
 
   return {
     taskId,
@@ -174,6 +180,7 @@ async function runInvocation(
   task: Task,
   eventLog: ReturnType<typeof createEventLog>,
   ctx: RunnerContext,
+  flushEventWrites: () => Promise<void>,
 ): Promise<void> {
   if (!agent) return;
   // Bind one approval hook per top-level task. The hook closes over the
@@ -205,23 +212,30 @@ async function runInvocation(
       record.error = { code: result.error.code, message: result.error.message };
     }
   } catch (err) {
-    record.state = "failed";
+    record.state = record.abortController.signal.aborted ? "cancelled" : "failed";
     record.completedAt = new Date().toISOString();
     record.error = {
-      code: "runner_exception",
-      message: err instanceof Error ? err.message : String(err),
+      code:
+        record.state === "cancelled" ? "cancelled" : "runner_exception",
+      message:
+        record.state === "cancelled"
+          ? "Task cancelled."
+          : err instanceof Error
+            ? err.message
+            : String(err),
     };
   } finally {
-    publishEnd(record.taskId, record.state);
-    void persistTaskFinal(record);
+    await flushEventWrites();
+    await persistTaskFinal(record);
     if (record.result) {
       // Walk the substrate's children tree and persist each child's final
       // state + output. Children's task rows were inserted lazily by the
       // event-log hook above; this populates their cost/duration/output
       // (the actual delegated agent's report) into workforce_task_results
       // so the UI can render it on the child's detail page.
-      void persistTaskResultRecursively(record.result);
+      await persistTaskResultRecursively(record.result);
     }
+    publishEnd(record.taskId, record.state);
   }
 }
 
@@ -262,11 +276,26 @@ export async function listRecentTasks(
   const inMemory = [...REGISTRY.values()]
     .filter((r) => r.ownerPrincipalId === principalId && !r.parentTaskId)
     .map(recordToSummary);
+  // Children spawned via delegate_task aren't separate REGISTRY entries
+  // — they run inline within the parent's invocation and share its
+  // event log. Walk each running parent's events to surface any active
+  // child tasks (task_started without a matching task_completed) so
+  // the pixel office can light up the delegate's sprite. The rail
+  // filters parentTaskId on the client so synthesised children don't
+  // clutter the recent list.
+  const inMemoryChildren: TaskSummary[] = [];
+  for (const record of REGISTRY.values()) {
+    if (record.ownerPrincipalId !== principalId) continue;
+    if (record.parentTaskId) continue;
+    if (record.state !== "running") continue;
+    inMemoryChildren.push(...synthesiseChildSummaries(record));
+  }
   const inMemoryIds = new Set(inMemory.map((s) => s.taskId));
+  const childIds = new Set(inMemoryChildren.map((s) => s.taskId));
   const persisted = await fetchRecentTasks(principalId, limit);
-  const merged: TaskSummary[] = [...inMemory];
+  const merged: TaskSummary[] = [...inMemory, ...inMemoryChildren];
   for (const row of persisted) {
-    if (inMemoryIds.has(row.id)) continue;
+    if (inMemoryIds.has(row.id) || childIds.has(row.id)) continue;
     merged.push(rowToSummary(row));
   }
   return merged
@@ -296,6 +325,18 @@ export function rosterStatus() {
 }
 
 function recordToSummary(record: InflightRecord): TaskSummary {
+  let toolCalledCount = 0;
+  let toolReturnedCount = 0;
+  let latestToolCalled: string | undefined;
+  for (const e of record.events) {
+    if (e.type === "tool_called") {
+      toolCalledCount++;
+      const tn = (e.payload as { toolName?: string }).toolName;
+      if (typeof tn === "string") latestToolCalled = tn;
+    } else if (e.type === "tool_returned") {
+      toolReturnedCount++;
+    }
+  }
   return {
     taskId: record.taskId,
     agentId: record.agentId,
@@ -306,7 +347,117 @@ function recordToSummary(record: InflightRecord): TaskSummary {
     costUsd: record.result?.costUsd ?? 0,
     durationMs: record.result?.durationMs ?? 0,
     parentTaskId: record.parentTaskId,
+    currentTool:
+      record.state === "running" ? currentToolForRecord(record) : undefined,
+    _debug: {
+      inMemory: true,
+      eventCount: record.events.length,
+      toolCalledCount,
+      toolReturnedCount,
+      latestToolCalled,
+    },
   };
+}
+
+// Walks the parent record's shared event log to surface any active
+// child tasks (delegate spawns whose task_started fired but whose
+// matching task_completed/task_failed/task_cancelled hasn't). Each
+// active child becomes a synthesised TaskSummary in "running" state
+// so the office can put the delegate's sprite into working / at_station.
+//
+// currentTool is computed by filtering the parent's events to the
+// child's taskId — same algorithm as currentToolForRecord but scoped
+// to a single delegate's frame.
+function synthesiseChildSummaries(record: InflightRecord): TaskSummary[] {
+  const childStarts = new Map<string, EventLogEntry>();
+  const finished = new Set<string>();
+  for (const e of record.events) {
+    if (e.taskId === record.taskId) continue;
+    if (e.type === "task_started") {
+      childStarts.set(e.taskId, e);
+    } else if (
+      e.type === "task_completed" ||
+      e.type === "task_failed" ||
+      e.type === "task_cancelled"
+    ) {
+      finished.add(e.taskId);
+    }
+  }
+  const summaries: TaskSummary[] = [];
+  for (const [childTaskId, startEvent] of childStarts) {
+    if (finished.has(childTaskId)) continue;
+    const childEvents = record.events.filter((e) => e.taskId === childTaskId);
+    summaries.push({
+      taskId: childTaskId,
+      agentId: startEvent.agentId,
+      description:
+        (startEvent.payload as { description?: string }).description ?? "",
+      state: "running",
+      startedAt: startEvent.timestamp,
+      costUsd: 0,
+      durationMs: 0,
+      parentTaskId: record.taskId,
+      currentTool: currentToolForEvents(childEvents),
+    });
+  }
+  return summaries;
+}
+
+// Same logic as currentToolForRecord but operating on a pre-filtered
+// event slice. Used by synthesiseChildSummaries to scope tool tracking
+// to a single delegate frame within the shared event log.
+function currentToolForEvents(
+  events: EventLogEntry[],
+): { name: string; agentId: string } | undefined {
+  const returned = new Set<string>();
+  for (const e of events) {
+    if (e.type === "tool_returned") {
+      const id = (e.payload as { toolUseId?: string }).toolUseId;
+      if (id) returned.add(id);
+    }
+  }
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e.type !== "tool_called") continue;
+    const payload = e.payload as { toolUseId?: string; toolName?: string };
+    if (payload.toolUseId && returned.has(payload.toolUseId)) continue;
+    if (typeof payload.toolName === "string") {
+      return { name: payload.toolName, agentId: e.agentId };
+    }
+  }
+  return undefined;
+}
+
+// Walks the cached events for the latest tool_called whose toolUseId
+// has not yet appeared in a tool_returned. That's the tool somebody
+// in the task tree is "in" right now. Returns undefined if no tool
+// is in-flight.
+//
+// We carry the agentId from the event itself, not the record's lead,
+// because parent + delegate share one EventLog: when Ada delegates a
+// web_search to Margaret, the tool_called event has agentId="margaret"
+// even though it lives on Ada's record. The office uses that agentId
+// to walk the right sprite.
+function currentToolForRecord(
+  record: InflightRecord,
+): { name: string; agentId: string } | undefined {
+  const returned = new Set<string>();
+  for (const e of record.events) {
+    if (e.type === "tool_returned") {
+      const id = (e.payload as { toolUseId?: string }).toolUseId;
+      if (id) returned.add(id);
+    }
+  }
+  for (let i = record.events.length - 1; i >= 0; i--) {
+    const e = record.events[i];
+    if (e.type !== "tool_called") continue;
+    const payload = e.payload as { toolUseId?: string; toolName?: string };
+    if (payload.toolUseId && returned.has(payload.toolUseId)) continue;
+    if (typeof payload.toolName === "string") {
+      return { name: payload.toolName, agentId: e.agentId };
+    }
+  }
+  return undefined;
 }
 
 function recordToDetail(record: InflightRecord): TaskDetail {
@@ -343,6 +494,12 @@ function rowToSummary(row: PersistedTaskRow): TaskSummary {
     costUsd: Number(row.cost_usd ?? 0),
     durationMs: row.duration_ms ?? 0,
     parentTaskId: row.parent_task_id ?? undefined,
+    _debug: {
+      inMemory: false,
+      eventCount: 0,
+      toolCalledCount: 0,
+      toolReturnedCount: 0,
+    },
   };
 }
 

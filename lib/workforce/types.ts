@@ -57,6 +57,31 @@ export interface TaskSummary {
   costUsd: number;
   durationMs: number;
   parentTaskId?: string;
+  /**
+   * If the task is running and there is an in-flight tool call (a
+   * tool_called whose tool_returned hasn't arrived yet), this carries
+   * the tool name AND the agentId of whoever fired it. The pixel
+   * office walks that specific agent's sprite to the matching
+   * station — which means delegation reads correctly: if Ada
+   * delegates a web_search to Margaret, Margaret's sprite walks to
+   * research while Ada stays at her desk.
+   *
+   * Only populated for in-memory tasks — DB-backed historical rows
+   * leave this undefined since we don't reconstruct in-flight state
+   * from persisted events.
+   */
+  currentTool?: { name: string; agentId: string };
+  /**
+   * Diagnostic only — strip back out once the office walking issue is
+   * resolved. Lets the LIVE strip show why currentTool is missing.
+   */
+  _debug?: {
+    inMemory: boolean;
+    eventCount: number;
+    toolCalledCount: number;
+    toolReturnedCount: number;
+    latestToolCalled?: string;
+  };
 }
 
 export interface TaskDetail extends TaskSummary {
