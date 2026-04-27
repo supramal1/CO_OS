@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { DragEvent } from "react";
 import {
   useAdminWorkspace,
@@ -20,6 +20,12 @@ import {
   boardColumnForLane,
   resolveBoardDrop,
 } from "@/lib/agents-types";
+import {
+  AGENTS_TASKS_POLL_MS,
+  applyRealtimeTaskEvent,
+  mergePolledTasks,
+  shouldPollAgentsTasks,
+} from "@/lib/agents-sync";
 import type { CostRunRow } from "@/lib/cost-samples";
 import { fetchUsdGbpRate, type FxRate } from "@/lib/fx-rate";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
@@ -29,7 +35,7 @@ import { CreateTaskForm } from "./create-task-form";
 
 type TasksState =
   | { status: "loading" }
-  | { status: "loaded"; tasks: ForgeTask[] }
+  | { status: "loaded"; tasks: ForgeTask[]; refreshing?: boolean }
   | { status: "error"; message: string };
 
 export function AgentsBoard() {
@@ -52,32 +58,115 @@ export function AgentsBoard() {
     ? `?namespace=${encodeURIComponent(selectedWorkspace)}`
     : "";
 
-  const loadTasks = useCallback(async () => {
+  useEffect(() => {
     if (!selectedWorkspace) return;
-    try {
-      const res = await fetch(`/api/forge/tasks${namespaceQuery}`, {
-        cache: "no-store",
-      });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error ?? `status ${res.status}`);
+    let cancelled = false;
+
+    const loadTasks = async (initial: boolean) => {
+      if (initial) {
+        setState({ status: "loading" });
+      } else {
+        setState((prev) =>
+          prev.status === "loaded" ? { ...prev, refreshing: true } : prev,
+        );
       }
-      setState({
-        status: "loaded",
-        tasks: (await res.json()) as ForgeTask[],
-      });
-    } catch (err) {
-      setState({
-        status: "error",
-        message: err instanceof Error ? err.message : "failed to load",
-      });
-    }
+
+      try {
+        const res = await fetch(`/api/forge/tasks${namespaceQuery}`, {
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as {
+            error?: string;
+          };
+          throw new Error(data.error ?? `status ${res.status}`);
+        }
+        const tasks = (await res.json()) as ForgeTask[];
+        if (cancelled) return;
+        setState((prev) => {
+          if (initial || prev.status !== "loaded") {
+            return { status: "loaded", tasks, refreshing: false };
+          }
+          return {
+            status: "loaded",
+            tasks: mergePolledTasks(prev.tasks, tasks),
+            refreshing: false,
+          };
+        });
+      } catch (err) {
+        if (cancelled) return;
+        if (initial) {
+          setState({
+            status: "error",
+            message: err instanceof Error ? err.message : "failed to load",
+          });
+          return;
+        }
+        setState((prev) =>
+          prev.status === "loaded" ? { ...prev, refreshing: false } : prev,
+        );
+      }
+    };
+
+    void loadTasks(true);
+
+    const refreshIfVisible = () => {
+      if (shouldPollAgentsTasks(document.visibilityState)) {
+        void loadTasks(false);
+      }
+    };
+    const pollId = window.setInterval(
+      refreshIfVisible,
+      AGENTS_TASKS_POLL_MS,
+    );
+    window.addEventListener("focus", refreshIfVisible);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(pollId);
+      window.removeEventListener("focus", refreshIfVisible);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+    };
   }, [namespaceQuery, selectedWorkspace]);
 
   useEffect(() => {
-    setState({ status: "loading" });
-    loadTasks();
-  }, [loadTasks]);
+    if (!selectedWorkspace) return;
+    const sb = getSupabaseBrowserClient();
+    if (!sb) return;
+
+    const channel = sb
+      .channel(`agents-tasks-realtime-${selectedWorkspace}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "forge_tasks",
+          filter: `namespace=eq.${selectedWorkspace}`,
+        },
+        (payload) => {
+          const row = (payload.new ?? payload.old) as ForgeTask | null;
+          if (!row?.id) return;
+          setState((prev) => {
+            if (prev.status !== "loaded") return prev;
+            return {
+              ...prev,
+              tasks: applyRealtimeTaskEvent(
+                prev.tasks,
+                row,
+                payload.eventType,
+              ),
+            };
+          });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void sb.removeChannel(channel);
+    };
+  }, [selectedWorkspace]);
 
   useEffect(() => {
     let cancelled = false;
@@ -138,6 +227,7 @@ export function AgentsBoard() {
     state.status === "loaded"
       ? state.tasks.find((t) => t.id === activeId) ?? null
       : null;
+  const isRefreshing = state.status === "loaded" && state.refreshing === true;
 
   const applyTaskUpdate = (next: ForgeTask) => {
     setState((s) => {
@@ -256,6 +346,20 @@ export function AgentsBoard() {
           </div>
           <div style={{ flex: 1 }} />
           <WorkspaceSelector />
+          {isRefreshing ? (
+            <span
+              aria-label="Refreshing tasks"
+              style={{
+                fontFamily: "var(--font-plex-mono)",
+                fontSize: 10,
+                letterSpacing: "0.12em",
+                textTransform: "uppercase",
+                color: "var(--ink-faint)",
+              }}
+            >
+              Syncing…
+            </span>
+          ) : null}
           <button
             type="button"
             onClick={() => setShowCreate(true)}
