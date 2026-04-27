@@ -142,7 +142,10 @@ function renderTextResult(result: TaskResult, debug: boolean): string {
   lines.push(`status:    ${result.status}`);
   lines.push(`agent:     ${result.agentId}`);
   lines.push(`task:      ${result.taskId}`);
-  lines.push(`cost:      $${result.costUsd.toFixed(6)}`);
+  lines.push(`cost:      $${result.totalCostUsd.toFixed(6)}`);
+  if (result.totalCostUsd !== result.costUsd) {
+    lines.push(`parent:    $${result.costUsd.toFixed(6)}`);
+  }
   lines.push(`duration:  ${result.durationMs}ms`);
   if (result.error) {
     lines.push(`error:     ${result.error.code} — ${result.error.message}`);
@@ -151,7 +154,7 @@ function renderTextResult(result: TaskResult, debug: boolean): string {
     lines.push(`children:  ${result.children.length} subordinate task(s)`);
     for (const child of result.children) {
       lines.push(
-        `  - ${child.agentId} (${child.status}, $${child.costUsd.toFixed(6)}, ${child.durationMs}ms)`,
+        `  - ${child.agentId} (${child.status}, $${child.totalCostUsd.toFixed(6)}, ${child.durationMs}ms)`,
       );
     }
   }

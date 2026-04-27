@@ -444,13 +444,29 @@ export async function invokeAgent(
     };
   }
 
+  const ownCostUsd = round6(totalCostUsd);
+  const childCostUsd = sumChildCosts(childResults);
+  const recursiveCostUsd = round6(ownCostUsd + childCostUsd);
+  const descendantCount = countDescendants(childResults);
+  const output =
+    status === "completed"
+      ? appendRuntimeCostSummary(finalText, {
+          enabled: !task.parentTaskId,
+          parentCostUsd: ownCostUsd,
+          childCostUsd,
+          totalCostUsd: recursiveCostUsd,
+          descendantCount,
+        })
+      : "";
+
   const result: TaskResult = {
     taskId,
     agentId: agent.id,
     status,
-    output: status === "completed" ? finalText : "",
+    output,
     eventLog: eventLog.entries(),
-    costUsd: round6(totalCostUsd),
+    costUsd: ownCostUsd,
+    totalCostUsd: recursiveCostUsd,
     durationMs: Date.now() - startedAt,
     children: childResults,
     error,
@@ -465,6 +481,8 @@ export async function invokeAgent(
     {
       status,
       costUsd: result.costUsd,
+      totalCostUsd: result.totalCostUsd,
+      childCostUsd,
       durationMs: result.durationMs,
       errorCode: error?.code,
     },
@@ -518,6 +536,47 @@ function round6(n: number): number {
   return Math.round(n * 1_000_000) / 1_000_000;
 }
 
+function sumChildCosts(children: readonly TaskResult[]): number {
+  return round6(
+    children.reduce((sum, child) => {
+      const childTotal =
+        typeof child.totalCostUsd === "number" ? child.totalCostUsd : child.costUsd;
+      return sum + childTotal;
+    }, 0),
+  );
+}
+
+function countDescendants(children: readonly TaskResult[]): number {
+  return children.reduce((count, child) => count + 1 + countDescendants(child.children), 0);
+}
+
+function formatCost(n: number): string {
+  return n.toFixed(6);
+}
+
+function appendRuntimeCostSummary(
+  output: string,
+  summary: {
+    enabled: boolean;
+    parentCostUsd: number;
+    childCostUsd: number;
+    totalCostUsd: number;
+    descendantCount: number;
+  },
+): string {
+  if (!summary.enabled) return output;
+  const childLabel = summary.descendantCount === 1 ? "task" : "tasks";
+  const footer = [
+    "---",
+    "Runtime cost summary (generated after model completion)",
+    `- Parent model: $${formatCost(summary.parentCostUsd)}`,
+    `- Delegated children: $${formatCost(summary.childCostUsd)} (${summary.descendantCount} ${childLabel})`,
+    `- Total recursive: $${formatCost(summary.totalCostUsd)}`,
+  ].join("\n");
+  const trimmed = output.trimEnd();
+  return trimmed.length > 0 ? `${trimmed}\n\n${footer}` : footer;
+}
+
 function finaliseError(
   agent: Agent,
   task: Task,
@@ -539,6 +598,7 @@ function finaliseError(
     output: "",
     eventLog: eventLog.entries(),
     costUsd: 0,
+    totalCostUsd: 0,
     durationMs: Date.now() - startedAt,
     children: [],
     error: { code, message, detail },

@@ -84,6 +84,7 @@ function successResult(agentId: string, taskId: string, output = "child output")
     output,
     eventLog: [],
     costUsd: 0.01,
+    totalCostUsd: 0.01,
     durationMs: 12,
     children: [],
   };
@@ -371,6 +372,7 @@ describe("delegate_task — child failure surfaces as error", () => {
           output: "",
           eventLog: [],
           costUsd: 0.001,
+          totalCostUsd: 0.001,
           durationMs: 5,
           children: [],
           error: { code: "anthropic_sdk_error", message: "rate-limited" },

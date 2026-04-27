@@ -55,6 +55,7 @@ export interface TaskSummary {
   startedAt: string;
   completedAt?: string;
   costUsd: number;
+  totalCostUsd: number;
   durationMs: number;
   parentTaskId?: string;
   /**

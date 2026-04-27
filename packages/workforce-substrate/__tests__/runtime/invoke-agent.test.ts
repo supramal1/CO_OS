@@ -15,6 +15,7 @@ import {
   type ToolBuilder,
   type ToolCallInput,
   type ToolCallResult,
+  type TaskResult,
 } from "../../src/types.js";
 import type Anthropic from "@anthropic-ai/sdk";
 
@@ -34,7 +35,7 @@ function makeAgent(overrides: Partial<Agent>): Agent {
   };
 }
 
-function makeTask(): Task {
+function makeTask(overrides: Partial<Task> = {}): Task {
   return {
     id: "task-test",
     description: "do the thing",
@@ -44,6 +45,7 @@ function makeTask(): Task {
     ancestry: [],
     context: undefined,
     maxCostUsd: undefined,
+    ...overrides,
   };
 }
 
@@ -112,9 +114,11 @@ describe("invokeAgent — happy path", () => {
       clientFactory: () => makeClient([textOnly("hello, world")]),
     });
     expect(result.status).toBe("completed");
-    expect(result.output).toBe("hello, world");
+    expect(result.output).toContain("hello, world");
+    expect(result.output).toContain("Runtime cost summary");
     expect(result.error).toBeUndefined();
     expect(result.costUsd).toBeGreaterThan(0);
+    expect(result.totalCostUsd).toBe(result.costUsd);
   });
 });
 
@@ -154,7 +158,8 @@ describe("invokeAgent — tool dispatch loop", () => {
     );
 
     expect(result.status).toBe("completed");
-    expect(result.output).toBe("done");
+    expect(result.output).toContain("done");
+    expect(result.output).toContain("Runtime cost summary");
     expect(calls.sort()).toEqual(["alpha", "beta"]);
     const toolReturns = result.eventLog.filter((e) => e.type === "tool_returned");
     expect(toolReturns).toHaveLength(2);
@@ -168,6 +173,7 @@ describe("invokeAgent — tool dispatch loop", () => {
       output: "child output",
       eventLog: [],
       costUsd: 0.001,
+      totalCostUsd: 0.001,
       durationMs: 1,
       children: [],
     };
@@ -199,6 +205,62 @@ describe("invokeAgent — tool dispatch loop", () => {
     expect(result.status).toBe("completed");
     expect(result.children).toHaveLength(1);
     expect(result.children[0]?.taskId).toBe("child-1");
+  });
+
+  it("computes recursive total cost and appends a root-only runtime footer", async () => {
+    const childTaskResult: TaskResult = {
+      taskId: "child-1",
+      agentId: "donald",
+      status: "completed",
+      output: "child output",
+      eventLog: [],
+      costUsd: 0.001,
+      totalCostUsd: 0.0015,
+      durationMs: 1,
+      children: [],
+    };
+    const fakeDelegate: ToolBuilder = () => ({
+      spec: {
+        name: "delegate_task",
+        description: "delegate",
+        input_schema: { type: "object", properties: {} },
+      },
+      dispatch: async () => ({
+        status: "ok",
+        output: { delegated: true },
+        childResult: childTaskResult,
+      } as ToolCallResult & { childResult?: TaskResult }),
+    });
+
+    const turn1 = turnWithToolUse([toolUse("u1", "delegate_task", {})]);
+    const turn2 = textOnly("synthesised");
+
+    const result = await invokeAgent(
+      makeAgent({ toolBuilders: [fakeDelegate] }),
+      makeTask(),
+      {
+        anthropicApiKey: "test",
+        systemPromptLoader: async () => "test",
+        clientFactory: () => makeClient([turn1, turn2]),
+      },
+    );
+
+    expect(result.costUsd).toBe(0.000045);
+    expect(result.totalCostUsd).toBe(0.001545);
+    expect(result.output).toContain("synthesised");
+    expect(result.output).toContain("Runtime cost summary");
+    expect(result.output).toContain("Parent model: $0.000045");
+    expect(result.output).toContain("Delegated children: $0.001500");
+    expect(result.output).toContain("Total recursive: $0.001545");
+
+    const childOnly = await invokeAgent(makeAgent({}), makeTask({ parentTaskId: "parent-1" }), {
+      anthropicApiKey: "test",
+      systemPromptLoader: async () => "test",
+      clientFactory: () => makeClient([textOnly("child final")]),
+    });
+
+    expect(childOnly.totalCostUsd).toBe(childOnly.costUsd);
+    expect(childOnly.output).toBe("child final");
   });
 });
 

@@ -23,6 +23,7 @@ interface InflightLike {
   result?: {
     output: string;
     costUsd: number;
+    totalCostUsd?: number;
     durationMs: number;
   };
   error?: { code: string; message: string };
@@ -144,7 +145,7 @@ async function persistChildResult(child: TaskResult): Promise<void> {
       .update({
         state: child.status,
         completed_at: completedAt,
-        cost_usd: child.costUsd,
+        cost_usd: child.totalCostUsd,
         duration_ms: child.durationMs,
         error: errPayload,
       })
@@ -157,7 +158,7 @@ async function persistChildResult(child: TaskResult): Promise<void> {
         task_id: child.taskId,
         agent_id: child.agentId,
         output: child.output,
-        cost_usd: child.costUsd,
+        cost_usd: child.totalCostUsd,
         duration_ms: child.durationMs,
         completed_at: completedAt,
       },
@@ -179,7 +180,7 @@ export async function persistTaskFinal(record: InflightLike): Promise<void> {
       .update({
         state: record.state,
         completed_at: record.completedAt ?? new Date().toISOString(),
-        cost_usd: record.result?.costUsd ?? 0,
+        cost_usd: record.result?.totalCostUsd ?? record.result?.costUsd ?? 0,
         duration_ms: record.result?.durationMs ?? 0,
         error: record.error ?? null,
       })
@@ -193,7 +194,7 @@ export async function persistTaskFinal(record: InflightLike): Promise<void> {
           task_id: record.taskId,
           agent_id: record.agentId,
           output: record.result.output,
-          cost_usd: record.result.costUsd,
+          cost_usd: record.result.totalCostUsd ?? record.result.costUsd,
           duration_ms: record.result.durationMs,
           completed_at: record.completedAt ?? new Date().toISOString(),
         },

@@ -215,7 +215,7 @@ export function AgentPanel({
                       letterSpacing: "0.08em",
                     }}
                   >
-                    <span>cost ${t.costUsd.toFixed(4)}</span>
+                    <span>cost ${t.totalCostUsd.toFixed(4)}</span>
                     <span>dur {fmtDuration(t.durationMs)}</span>
                   </footer>
                 </button>

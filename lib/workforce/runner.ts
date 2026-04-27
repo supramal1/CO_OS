@@ -345,6 +345,7 @@ function recordToSummary(record: InflightRecord): TaskSummary {
   let toolCalledCount = 0;
   let toolReturnedCount = 0;
   let latestToolCalled: string | undefined;
+  const costUsd = record.result?.totalCostUsd ?? record.result?.costUsd ?? 0;
   for (const e of record.events) {
     if (e.type === "tool_called") {
       toolCalledCount++;
@@ -361,7 +362,8 @@ function recordToSummary(record: InflightRecord): TaskSummary {
     state: record.state,
     startedAt: record.startedAt,
     completedAt: record.completedAt,
-    costUsd: record.result?.costUsd ?? 0,
+    costUsd,
+    totalCostUsd: costUsd,
     durationMs: record.result?.durationMs ?? 0,
     parentTaskId: record.parentTaskId,
     currentTool:
@@ -412,6 +414,7 @@ function synthesiseChildSummaries(record: InflightRecord): TaskSummary[] {
       state: "running",
       startedAt: startEvent.timestamp,
       costUsd: 0,
+      totalCostUsd: 0,
       durationMs: 0,
       parentTaskId: record.taskId,
       currentTool: currentToolForEvents(childEvents),
@@ -480,16 +483,20 @@ function currentToolForRecord(
 function recordToDetail(record: InflightRecord): TaskDetail {
   const summary = recordToSummary(record);
   const children: TaskSummary[] = (record.result?.children ?? []).map(
-    (child) => ({
-      taskId: child.taskId,
-      agentId: child.agentId,
-      description: "",
-      state: child.status as InvocationState,
-      startedAt: record.startedAt,
-      costUsd: child.costUsd,
-      durationMs: child.durationMs,
-      parentTaskId: record.taskId,
-    }),
+    (child) => {
+      const childCostUsd = child.totalCostUsd ?? child.costUsd;
+      return {
+        taskId: child.taskId,
+        agentId: child.agentId,
+        description: "",
+        state: child.status as InvocationState,
+        startedAt: record.startedAt,
+        costUsd: childCostUsd,
+        totalCostUsd: childCostUsd,
+        durationMs: child.durationMs,
+        parentTaskId: record.taskId,
+      };
+    },
   );
   return {
     ...summary,
@@ -509,6 +516,7 @@ function rowToSummary(row: PersistedTaskRow): TaskSummary {
     startedAt: row.started_at,
     completedAt: row.completed_at ?? undefined,
     costUsd: Number(row.cost_usd ?? 0),
+    totalCostUsd: Number(row.cost_usd ?? 0),
     durationMs: row.duration_ms ?? 0,
     parentTaskId: row.parent_task_id ?? undefined,
     _debug: {

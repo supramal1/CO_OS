@@ -109,6 +109,8 @@ export interface TaskResult {
   readonly eventLog: readonly EventLogEntry[];
   /** Total input + output token cost in USD for THIS invocation only. */
   readonly costUsd: number;
+  /** This invocation plus every descendant task spawned by delegate_task. */
+  readonly totalCostUsd: number;
   /** Wall-clock duration in milliseconds. */
   readonly durationMs: number;
   /** Populated when status is failed / cancelled / rejected / blocked. */

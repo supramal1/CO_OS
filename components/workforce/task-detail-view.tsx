@@ -153,7 +153,7 @@ export function TaskDetailView({ taskId }: Props) {
             <span>·</span>
             <span>{new Date(detail.startedAt).toLocaleString()}</span>
             <span>·</span>
-            <span>cost ${detail.costUsd.toFixed(4)}</span>
+            <span>cost ${detail.totalCostUsd.toFixed(4)}</span>
             <span>·</span>
             <span>dur {fmtDuration(detail.durationMs)}</span>
             <span>·</span>
@@ -390,7 +390,7 @@ function summariseEvent(
     case "task_started":
       return String(p.description ?? "");
     case "task_completed":
-      return `cost $${Number(p.costUsd ?? 0).toFixed(4)} · ${fmtDuration(Number(p.durationMs ?? 0))}`;
+      return `cost $${Number(p.totalCostUsd ?? p.costUsd ?? 0).toFixed(4)} · ${fmtDuration(Number(p.durationMs ?? 0))}`;
     case "task_failed":
     case "task_cancelled":
       return String(p.errorCode ?? p.message ?? p.error ?? e.type);

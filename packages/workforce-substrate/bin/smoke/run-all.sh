@@ -72,7 +72,7 @@ run_scenario() {
   echo "  log:  $err"
   if [[ -s "$out" ]]; then
     # Print summary line if JSON parses.
-    node -e 'try { const r = JSON.parse(require("fs").readFileSync(process.argv[1])); console.log(`  status=${r.status} cost=$${(r.costUsd ?? 0).toFixed(6)} duration=${r.durationMs}ms children=${(r.children||[]).length}`); if (r.error) console.log(`  error=${r.error.code}: ${r.error.message}`); } catch (e) { console.log("  (no JSON parsed)"); }' "$out"
+    node -e 'try { const r = JSON.parse(require("fs").readFileSync(process.argv[1])); console.log(`  status=${r.status} cost=$${(r.totalCostUsd ?? r.costUsd ?? 0).toFixed(6)} duration=${r.durationMs}ms children=${(r.children||[]).length}`); if (r.error) console.log(`  error=${r.error.code}: ${r.error.message}`); } catch (e) { console.log("  (no JSON parsed)"); }' "$out"
   fi
 }
 
