@@ -16,6 +16,7 @@ import {
 
 type AdminWorkspaceContextValue = {
   workspaces: string[];
+  adminWorkspaces: string[];
   selectedWorkspace: string | null;
   setSelectedWorkspace: (workspace: string) => void;
   registerWorkspace: (workspace: string) => void;
@@ -30,15 +31,22 @@ export function AdminWorkspaceProvider({
   children,
   principalId,
   workspaces,
+  adminWorkspaces,
 }: {
   children: ReactNode;
   principalId: string | null;
   workspaces: string[];
+  adminWorkspaces: string[];
 }) {
   const incomingWorkspacesKey = workspaces.join("\0");
   const incomingWorkspaces = useMemo(
     () => normalizeWorkspaces(workspaces),
     [incomingWorkspacesKey],
+  );
+  const incomingAdminWorkspacesKey = adminWorkspaces.join("\0");
+  const incomingAdminWorkspaces = useMemo(
+    () => normalizeWorkspaces(adminWorkspaces),
+    [incomingAdminWorkspacesKey],
   );
 
   const storageKey = `co-os:admin:selected-workspace:${principalId ?? "anonymous"}`;
@@ -97,13 +105,20 @@ export function AdminWorkspaceProvider({
   const value = useMemo<AdminWorkspaceContextValue>(
     () => ({
       workspaces: workspaceList,
+      adminWorkspaces: incomingAdminWorkspaces,
       selectedWorkspace,
       setSelectedWorkspace,
       registerWorkspace,
       hasWorkspaceAccess: workspaceList.length > 0,
       hasMultipleWorkspaces: workspaceList.length > 1,
     }),
-    [workspaceList, selectedWorkspace, setSelectedWorkspace, registerWorkspace],
+    [
+      workspaceList,
+      incomingAdminWorkspaces,
+      selectedWorkspace,
+      setSelectedWorkspace,
+      registerWorkspace,
+    ],
   );
 
   return (

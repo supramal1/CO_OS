@@ -6,7 +6,11 @@ import {
   AdminWorkspaceProvider,
 } from "@/components/admin/workspace-selector";
 import { authOptions } from "@/lib/auth";
-import { listWorkspaces } from "@/lib/cornerstone";
+import {
+  listWorkspaceAccess,
+  workspaceNamesForAdminInvites,
+  workspaceNamesForAdminPanel,
+} from "@/lib/cornerstone";
 
 export default async function AdminLayout({
   children,
@@ -17,13 +21,18 @@ export default async function AdminLayout({
   if (!session?.isAdmin) {
     redirect("/speak-to-charlie");
   }
-  const workspaces = session.apiKey ? await listWorkspaces(session.apiKey) : [];
+  const workspaceAccess = session.apiKey
+    ? await listWorkspaceAccess(session.apiKey)
+    : [];
+  const workspaces = workspaceNamesForAdminPanel(workspaceAccess);
+  const adminWorkspaces = workspaceNamesForAdminInvites(workspaceAccess);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
       <AdminWorkspaceProvider
         principalId={session.principalId}
         workspaces={workspaces}
+        adminWorkspaces={adminWorkspaces}
       >
         <AdminSubNav />
         <AdminWorkspaceGate>{children}</AdminWorkspaceGate>

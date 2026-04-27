@@ -87,13 +87,32 @@ export async function checkAdminCapability(principalId: string): Promise<boolean
   }
 }
 
-type Workspace = {
+export type Workspace = {
   name: string;
   namespace?: string;
   status?: string;
+  access_level?: string;
 };
 
-export async function listWorkspaces(apiKey: string): Promise<string[]> {
+function isActiveWorkspace(workspace: Workspace): boolean {
+  return workspace.status === undefined || workspace.status === "active";
+}
+
+export function workspaceNamesForAdminPanel(workspaces: Workspace[]): string[] {
+  return workspaces
+    .filter(isActiveWorkspace)
+    .map((w) => w.name)
+    .filter(Boolean);
+}
+
+export function workspaceNamesForAdminInvites(workspaces: Workspace[]): string[] {
+  return workspaces
+    .filter((w) => isActiveWorkspace(w) && w.access_level === "admin")
+    .map((w) => w.name)
+    .filter(Boolean);
+}
+
+export async function listWorkspaceAccess(apiKey: string): Promise<Workspace[]> {
   try {
     const res = await fetch(`${CORNERSTONE_API_URL}/connection/workspaces`, {
       headers: { "X-API-Key": apiKey, "Content-Type": "application/json" },
@@ -101,14 +120,19 @@ export async function listWorkspaces(apiKey: string): Promise<string[]> {
     });
     if (!res.ok) return [];
     const data = (await res.json()) as { workspaces?: Workspace[] };
-    return (data.workspaces ?? [])
-      .filter((w) => w.status === undefined || ["active"].includes(w.status))
-      .map((w) => w.name)
-      .filter(Boolean);
+    return data.workspaces ?? [];
   } catch (err) {
-    console.error("listWorkspaces failed:", err);
+    console.error("listWorkspaceAccess failed:", err);
     return [];
   }
+}
+
+export async function listWorkspaces(apiKey: string): Promise<string[]> {
+  return workspaceNamesForAdminPanel(await listWorkspaceAccess(apiKey));
+}
+
+export async function listAdminInviteWorkspaces(apiKey: string): Promise<string[]> {
+  return workspaceNamesForAdminInvites(await listWorkspaceAccess(apiKey));
 }
 
 export const CORNERSTONE_URL = CORNERSTONE_API_URL;
