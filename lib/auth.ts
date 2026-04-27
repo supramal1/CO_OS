@@ -1,12 +1,13 @@
 import type { AuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
-import { checkAdminCapability, resolveEmailToPrincipal } from "./cornerstone";
+import { canSignInEmail, parseAllowedEmails } from "./auth-access";
+import {
+  checkAdminCapability,
+  hasPendingInvitation,
+  resolveEmailToPrincipal,
+} from "./cornerstone";
 
-const CO_DOMAIN = "charlieoscar.com";
-const ALLOWED_EMAILS = (process.env.CO_OS_ALLOWED_EMAILS ?? "")
-  .split(",")
-  .map((e) => e.trim().toLowerCase())
-  .filter(Boolean);
+const ALLOWED_EMAILS = parseAllowedEmails(process.env.CO_OS_ALLOWED_EMAILS ?? "");
 
 export const authOptions: AuthOptions = {
   providers: [
@@ -18,11 +19,11 @@ export const authOptions: AuthOptions = {
   session: { strategy: "jwt" },
   callbacks: {
     async signIn({ profile }) {
-      const email = profile?.email?.toLowerCase();
-      if (!email) return false;
-      if (email.endsWith(`@${CO_DOMAIN}`)) return true;
-      if (ALLOWED_EMAILS.includes(email)) return true;
-      return false;
+      return canSignInEmail({
+        email: profile?.email,
+        allowedEmails: ALLOWED_EMAILS,
+        hasPendingInvitation,
+      });
     },
     async jwt({ token, profile }) {
       const now = Date.now();

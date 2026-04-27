@@ -1,3 +1,5 @@
+import { hasPendingInvitationForEmail } from "./auth-access";
+
 const CORNERSTONE_API_URL =
   process.env.CORNERSTONE_API_URL ?? "https://cornerstone-api-lymgtgeena-nw.a.run.app";
 
@@ -6,6 +8,11 @@ type ResolveEmailResponse = {
   principal_name: string;
   api_key: string;
   created: boolean;
+};
+
+type Invitation = {
+  email?: string | null;
+  status?: string | null;
 };
 
 export async function resolveEmailToPrincipal(
@@ -34,6 +41,30 @@ export async function resolveEmailToPrincipal(
   }
 
   return (await res.json()) as ResolveEmailResponse;
+}
+
+export async function hasPendingInvitation(email: string): Promise<boolean> {
+  const memoryApiKey = process.env.MEMORY_API_KEY;
+  if (!memoryApiKey) return false;
+
+  try {
+    const res = await fetch(
+      `${CORNERSTONE_API_URL}/admin/invitations?status=pending`,
+      {
+        headers: {
+          "X-API-Key": memoryApiKey,
+          "Content-Type": "application/json",
+        },
+        cache: "no-store",
+      },
+    );
+    if (!res.ok) return false;
+    const invitations = (await res.json()) as Invitation[];
+    return hasPendingInvitationForEmail(invitations, email);
+  } catch (err) {
+    console.error("hasPendingInvitation failed:", err);
+    return false;
+  }
 }
 
 export async function checkAdminCapability(principalId: string): Promise<boolean> {
