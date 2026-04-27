@@ -9,7 +9,9 @@ import type {
   TaskDetail,
   TaskSummary,
 } from "@/lib/workforce/types";
+import { runningCostUsdFromEvents } from "@/lib/workforce/cost-observability";
 import { StateChip } from "./state-chip";
+import { TaskCostMeter } from "./cost-observability";
 
 interface Props {
   taskId: string;
@@ -110,6 +112,10 @@ export function TaskDetailView({ taskId }: Props) {
   if (loading) return <PageNote>Loading task…</PageNote>;
   if (error) return <PageNote tone="error">Failed: {error}</PageNote>;
   if (!detail) return <PageNote>Task not found.</PageNote>;
+  const liveCostUsd =
+    detail.state === "running"
+      ? Math.max(detail.totalCostUsd, runningCostUsdFromEvents(liveEvents))
+      : detail.totalCostUsd;
 
   return (
     <div style={{ padding: 28, display: "flex", flexDirection: "column", gap: 20 }}>
@@ -153,7 +159,11 @@ export function TaskDetailView({ taskId }: Props) {
             <span>·</span>
             <span>{new Date(detail.startedAt).toLocaleString()}</span>
             <span>·</span>
-            <span>cost ${detail.totalCostUsd.toFixed(4)}</span>
+            <TaskCostMeter
+              currentUsd={liveCostUsd}
+              maxUsd={detail.maxCostUsd}
+              compact
+            />
             <span>·</span>
             <span>dur {fmtDuration(detail.durationMs)}</span>
             <span>·</span>

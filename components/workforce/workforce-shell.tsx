@@ -11,9 +11,11 @@ import { RecentTasksList } from "./recent-tasks-list";
 import { TaskConversationPane } from "./task-conversation-pane";
 import { AgentPanel } from "./agent-panel";
 import { ApprovalModal } from "./approval-modal";
+import { WorkforceCostBand } from "./cost-observability";
 import { PixelOffice } from "./office/pixel-office";
 import { deriveAgentStates, type AtStationHold } from "./office/derive-states";
 import { stationForTool } from "./office/tool-stations";
+import { workforceCostSummary } from "@/lib/workforce/cost-observability";
 
 // How long after a tool call appears in a poll snapshot we keep the
 // sprite at the station, even if the next snapshot shows no in-flight
@@ -172,6 +174,7 @@ export function WorkforceShell() {
     agentId: string;
     description: string;
     targetWorkspace?: string;
+    maxCostUsd?: number;
     context?: string;
   }): Promise<{ taskId: string }> {
     const res = await fetch("/api/workforce/tasks", {
@@ -241,6 +244,7 @@ export function WorkforceShell() {
           minHeight: 0,
         }}
       >
+        <WorkforceCostBand tasks={tasks} />
         <aside style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
           <button
             type="button"
@@ -386,6 +390,8 @@ function LiveStatusStrip({
   agents: PublicAgent[];
 }) {
   const running = tasks.filter((t) => t.state === "running");
+  const rootTasks = tasks.filter((t) => !t.parentTaskId);
+  const cost = workforceCostSummary(rootTasks);
   const nameById = new Map(agents.map((a) => [a.id, a.name]));
   return (
     <div
@@ -414,6 +420,9 @@ function LiveStatusStrip({
         }}
       >
         Live
+      </span>
+      <span style={{ color: cost.overrunCount > 0 ? "var(--c-forge)" : "var(--ink-dim)" }}>
+        running ${cost.runningUsd.toFixed(4)}
       </span>
       {running.length === 0 ? (
         <span style={{ color: "var(--ink-faint)" }}>no running tasks</span>

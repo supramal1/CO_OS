@@ -8,7 +8,9 @@ import type {
   TaskDetail,
   TaskSummary,
 } from "@/lib/workforce/types";
+import { runningCostUsdFromEvents } from "@/lib/workforce/cost-observability";
 import { StateChip } from "./state-chip";
+import { TaskCostMeter } from "./cost-observability";
 
 interface Props {
   taskId: string;
@@ -166,6 +168,10 @@ export function TaskConversationPane({ taskId, onReply, onTaskTransition }: Prop
     detail.state === "running" ||
     detail.state === "queued" ||
     detail.state === "blocked";
+  const liveCostUsd =
+    detail.state === "running"
+      ? Math.max(detail.totalCostUsd, runningCostUsdFromEvents(liveEvents))
+      : detail.totalCostUsd;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, minHeight: 0 }}>
@@ -198,7 +204,11 @@ export function TaskConversationPane({ taskId, onReply, onTaskTransition }: Prop
             <span>·</span>
             <span>{new Date(detail.startedAt).toLocaleString()}</span>
             <span>·</span>
-            <span>cost ${detail.totalCostUsd.toFixed(4)}</span>
+            <TaskCostMeter
+              currentUsd={liveCostUsd}
+              maxUsd={detail.maxCostUsd}
+              compact
+            />
             <span>·</span>
             <span>dur {fmtDuration(detail.durationMs)}</span>
             <span>·</span>

@@ -7,6 +7,7 @@ import type {
   EventType,
   TaskStatus,
 } from "@workforce/substrate";
+import type { CostAlert } from "./cost-observability";
 
 export type InvocationState =
   | "queued"
@@ -56,6 +57,10 @@ export interface TaskSummary {
   completedAt?: string;
   costUsd: number;
   totalCostUsd: number;
+  maxCostUsd?: number;
+  costAlert: CostAlert;
+  costRatio?: number;
+  costOverrunPct?: number;
   durationMs: number;
   parentTaskId?: string;
   /**

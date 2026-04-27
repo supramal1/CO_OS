@@ -23,6 +23,7 @@ interface Props {
     agentId: string;
     description: string;
     targetWorkspace?: string;
+    maxCostUsd?: number;
   }) => Promise<unknown>;
 }
 
@@ -37,6 +38,7 @@ export function TaskInput({ agents, defaultAgentId, onDispatch }: Props) {
   const [agentId, setAgentId] = useState<string>(initialAgentId);
   const [description, setDescription] = useState("");
   const [targetWorkspace, setTargetWorkspace] = useState("");
+  const [maxCostUsd, setMaxCostUsd] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [errMsg, setErrMsg] = useState<string | null>(null);
 
@@ -45,11 +47,22 @@ export function TaskInput({ agents, defaultAgentId, onDispatch }: Props) {
     if (!description.trim() || !agentId) return;
     setSubmitting(true);
     setErrMsg(null);
+    const parsedMaxCost =
+      maxCostUsd.trim() === "" ? undefined : Number(maxCostUsd);
+    if (
+      parsedMaxCost !== undefined &&
+      (!Number.isFinite(parsedMaxCost) || parsedMaxCost <= 0)
+    ) {
+      setSubmitting(false);
+      setErrMsg("Max cost must be a positive USD amount.");
+      return;
+    }
     try {
       await onDispatch({
         agentId,
         description: description.trim(),
         targetWorkspace: targetWorkspace || undefined,
+        maxCostUsd: parsedMaxCost,
       });
     } catch (err) {
       setErrMsg(err instanceof Error ? err.message : String(err));
@@ -85,6 +98,17 @@ export function TaskInput({ agents, defaultAgentId, onDispatch }: Props) {
             </option>
           ))}
         </select>
+      </Field>
+      <Field label="Max cost USD">
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          value={maxCostUsd}
+          onChange={(e) => setMaxCostUsd(e.target.value)}
+          placeholder="5.00"
+          style={inputStyle}
+        />
       </Field>
       <Field label="Task">
         <textarea
@@ -140,6 +164,14 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 const selectStyle: React.CSSProperties = {
+  padding: "8px 10px",
+  background: "var(--panel)",
+  border: "1px solid var(--rule)",
+  color: "var(--ink)",
+  fontSize: 13,
+};
+
+const inputStyle: React.CSSProperties = {
   padding: "8px 10px",
   background: "var(--panel)",
   border: "1px solid var(--rule)",

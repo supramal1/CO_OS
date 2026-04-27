@@ -2,6 +2,7 @@
 
 import type { TaskSummary } from "@/lib/workforce/types";
 import { StateChip } from "./state-chip";
+import { TaskCostMeter } from "./cost-observability";
 
 interface Props {
   tasks: TaskSummary[];
@@ -86,7 +87,11 @@ export function RecentTasksList({ tasks, selectedTaskId, onSelect }: Props) {
                   letterSpacing: "0.08em",
                 }}
               >
-                <span>cost ${t.totalCostUsd.toFixed(4)}</span>
+                <TaskCostMeter
+                  currentUsd={t.totalCostUsd}
+                  maxUsd={t.maxCostUsd}
+                  compact
+                />
                 <span>dur {fmtDuration(t.durationMs)}</span>
               </footer>
             </button>

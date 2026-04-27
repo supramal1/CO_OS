@@ -48,6 +48,17 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
+  if (
+    body.maxCostUsd !== undefined &&
+    (typeof body.maxCostUsd !== "number" ||
+      !Number.isFinite(body.maxCostUsd) ||
+      body.maxCostUsd <= 0)
+  ) {
+    return NextResponse.json(
+      { error: "invalid_max_cost_usd" },
+      { status: 400 },
+    );
+  }
 
   try {
     const outcome = startTask(body, {

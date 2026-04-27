@@ -23,6 +23,10 @@ import {
 import { makeApprovalHook } from "./approvals";
 import { publishEnd, publishEvent } from "./bus";
 import {
+  costTelemetryFor,
+  runningCostUsdFromEvents,
+} from "./cost-observability";
+import {
   fetchEvents,
   fetchRecentTasks,
   fetchResult,
@@ -56,6 +60,7 @@ interface InflightRecord {
   parentTaskId?: string;
   parentAgentId?: string;
   targetWorkspace?: string;
+  maxCostUsd?: number;
   error?: { code: string; message: string };
   ownerPrincipalId: string;
   apiKey: string;
@@ -135,6 +140,7 @@ export function startTask(
     abortController,
     events: [],
     targetWorkspace: req.targetWorkspace ?? agent.defaultWorkspace,
+    maxCostUsd: req.maxCostUsd,
     ownerPrincipalId: ctx.principalId,
     apiKey: ctx.apiKey,
   };
@@ -345,7 +351,11 @@ function recordToSummary(record: InflightRecord): TaskSummary {
   let toolCalledCount = 0;
   let toolReturnedCount = 0;
   let latestToolCalled: string | undefined;
-  const costUsd = record.result?.totalCostUsd ?? record.result?.costUsd ?? 0;
+  const costUsd =
+    record.result?.totalCostUsd ??
+    record.result?.costUsd ??
+    runningCostUsdFromEvents(record.events);
+  const telemetry = costTelemetryFor(costUsd, record.maxCostUsd);
   for (const e of record.events) {
     if (e.type === "tool_called") {
       toolCalledCount++;
@@ -364,6 +374,10 @@ function recordToSummary(record: InflightRecord): TaskSummary {
     completedAt: record.completedAt,
     costUsd,
     totalCostUsd: costUsd,
+    maxCostUsd: record.maxCostUsd,
+    costAlert: telemetry.alert,
+    costRatio: telemetry.ratio,
+    costOverrunPct: telemetry.overrunPct,
     durationMs: record.result?.durationMs ?? 0,
     parentTaskId: record.parentTaskId,
     currentTool:
@@ -413,8 +427,9 @@ function synthesiseChildSummaries(record: InflightRecord): TaskSummary[] {
         (startEvent.payload as { description?: string }).description ?? "",
       state: "running",
       startedAt: startEvent.timestamp,
-      costUsd: 0,
-      totalCostUsd: 0,
+      costUsd: runningCostUsdFromEvents(childEvents),
+      totalCostUsd: runningCostUsdFromEvents(childEvents),
+      costAlert: "none",
       durationMs: 0,
       parentTaskId: record.taskId,
       currentTool: currentToolForEvents(childEvents),
@@ -493,6 +508,7 @@ function recordToDetail(record: InflightRecord): TaskDetail {
         startedAt: record.startedAt,
         costUsd: childCostUsd,
         totalCostUsd: childCostUsd,
+        costAlert: "none",
         durationMs: child.durationMs,
         parentTaskId: record.taskId,
       };
@@ -517,6 +533,7 @@ function rowToSummary(row: PersistedTaskRow): TaskSummary {
     completedAt: row.completed_at ?? undefined,
     costUsd: Number(row.cost_usd ?? 0),
     totalCostUsd: Number(row.cost_usd ?? 0),
+    costAlert: "none",
     durationMs: row.duration_ms ?? 0,
     parentTaskId: row.parent_task_id ?? undefined,
     _debug: {

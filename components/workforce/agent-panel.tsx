@@ -13,6 +13,7 @@
 import type { PublicAgent, TaskSummary } from "@/lib/workforce/types";
 import type { AgentState } from "./office/types";
 import { StateChip } from "./state-chip";
+import { TaskCostMeter } from "./cost-observability";
 
 interface Props {
   agent: PublicAgent;
@@ -215,7 +216,11 @@ export function AgentPanel({
                       letterSpacing: "0.08em",
                     }}
                   >
-                    <span>cost ${t.totalCostUsd.toFixed(4)}</span>
+                    <TaskCostMeter
+                      currentUsd={t.totalCostUsd}
+                      maxUsd={t.maxCostUsd}
+                      compact
+                    />
                     <span>dur {fmtDuration(t.durationMs)}</span>
                   </footer>
                 </button>
