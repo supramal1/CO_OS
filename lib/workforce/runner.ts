@@ -78,6 +78,19 @@ export interface RunnerContext {
   principalId: string;
   apiKey: string; // csk_* — Cornerstone per-principal key
   anthropicApiKey: string;
+  /**
+   * Cornerstone API base URL. Falls back inside the substrate to
+   * process.env.CORNERSTONE_API_URL → DEFAULT_CORNERSTONE_API_BASE_URL when
+   * undefined, but threading it explicitly here lets the route layer point a
+   * task at staging / a local Cornerstone without mutating env globally.
+   */
+  cornerstoneApiBaseUrl?: string;
+  /** Grace's GitHub PAT — required for github_* tools. */
+  graceGithubPat?: string;
+  /** Grace's GitHub org. Defaults to "Forgeautomatedrepo" inside the substrate. */
+  graceGithubOrg?: string;
+  /** Grace's branch-namespace prefix. Defaults to "grace/" inside the substrate. */
+  graceGithubBranchPrefix?: string;
 }
 
 export interface StartTaskOutcome {
@@ -199,6 +212,10 @@ async function runInvocation(
     const result = await invokeAgent(agent, task, {
       anthropicApiKey: ctx.anthropicApiKey,
       cornerstoneApiKey: ctx.apiKey,
+      cornerstoneApiBaseUrl: ctx.cornerstoneApiBaseUrl,
+      graceGithubPat: ctx.graceGithubPat,
+      graceGithubOrg: ctx.graceGithubOrg,
+      graceGithubBranchPrefix: ctx.graceGithubBranchPrefix,
       eventLog,
       abortSignal: record.abortController.signal,
       roster: getRoster(),

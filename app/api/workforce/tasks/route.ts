@@ -54,6 +54,10 @@ export async function POST(req: NextRequest) {
       principalId: session.principalId,
       apiKey: session.apiKey,
       anthropicApiKey,
+      cornerstoneApiBaseUrl: process.env.CORNERSTONE_API_URL,
+      graceGithubPat: process.env.GRACE_GITHUB_PAT,
+      graceGithubOrg: process.env.GRACE_GITHUB_ORG,
+      graceGithubBranchPrefix: process.env.GRACE_BRANCH_PREFIX,
     });
     return NextResponse.json(
       {

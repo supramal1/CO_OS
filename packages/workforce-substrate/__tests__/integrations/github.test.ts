@@ -36,7 +36,7 @@ function makeTask(): Task {
   };
 }
 
-function makeCtx(): ToolBuildContext {
+function makeCtx(overrides: Partial<ToolBuildContext> = {}): ToolBuildContext {
   return {
     agent: makeAgent(),
     task: makeTask(),
@@ -60,6 +60,10 @@ function makeCtx(): ToolBuildContext {
     anthropicApiKey: "test",
     cornerstoneApiKey: "csk_test",
     cornerstoneApiBaseUrl: "https://cornerstone.test",
+    graceGithubPat: "ghp_test_token",
+    graceGithubOrg: "Forgeautomatedrepo",
+    graceGithubBranchPrefix: "grace/",
+    ...overrides,
   };
 }
 
@@ -70,13 +74,19 @@ function jsonResponse(status: number, body: unknown): Response {
   });
 }
 
+// Note: PAT/org/prefix are now threaded via ToolBuildContext (see makeCtx).
+// Tests that need to simulate "no PAT configured" pass `graceGithubPat: undefined`
+// to makeCtx — they no longer mutate process.env. The substrate boundary
+// (claude-agent.ts) is the only place that reads process.env for these values.
 const ORIGINAL_PAT = process.env.GRACE_GITHUB_PAT;
 const ORIGINAL_ORG = process.env.GRACE_GITHUB_ORG;
 const ORIGINAL_PREFIX = process.env.GRACE_BRANCH_PREFIX;
 
 beforeEach(() => {
-  process.env.GRACE_GITHUB_PAT = "ghp_test_token";
-  process.env.GRACE_GITHUB_ORG = "Forgeautomatedrepo";
+  // Strip env so any accidental process.env read inside the substrate is
+  // immediately visible — dispatchers must source config from ctx, not env.
+  delete process.env.GRACE_GITHUB_PAT;
+  delete process.env.GRACE_GITHUB_ORG;
   delete process.env.GRACE_BRANCH_PREFIX;
 });
 
@@ -96,17 +106,63 @@ describe("github — surface registry", () => {
   });
 });
 
-describe("github — env var resolution", () => {
-  it("returns github_pat_missing when PAT is absent", async () => {
-    delete process.env.GRACE_GITHUB_PAT;
+describe("github — ctx-based config resolution", () => {
+  it("returns github_pat_missing when ctx.graceGithubPat is absent", async () => {
     const fetchMock = vi.fn();
     const tool = githubToolForTest("github_list_repos", fetchMock as unknown as typeof fetch)(
-      makeCtx(),
+      makeCtx({ graceGithubPat: undefined }),
     );
     const result = await tool.dispatch({ name: "github_list_repos", toolUseId: "t", input: {} });
     expect(result.status).toBe("error");
     expect(result.errorCode).toBe("github_pat_missing");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("ignores process.env.GRACE_GITHUB_PAT — config flows only through ctx", async () => {
+    process.env.GRACE_GITHUB_PAT = "ghp_should_not_be_read";
+    const fetchMock = vi.fn();
+    const tool = githubToolForTest("github_list_repos", fetchMock as unknown as typeof fetch)(
+      makeCtx({ graceGithubPat: undefined }),
+    );
+    const result = await tool.dispatch({ name: "github_list_repos", toolUseId: "t", input: {} });
+    expect(result.status).toBe("error");
+    expect(result.errorCode).toBe("github_pat_missing");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("uses ctx.graceGithubOrg for the org slug in the URL", async () => {
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = typeof input === "string" ? input : (input as URL | Request).toString();
+      expect(url.startsWith("https://api.github.com/orgs/CustomOrg/")).toBe(true);
+      return jsonResponse(200, []);
+    });
+    const tool = githubToolForTest(
+      "github_list_repos",
+      fetchMock as unknown as typeof fetch,
+    )(makeCtx({ graceGithubOrg: "CustomOrg" }));
+    const result = await tool.dispatch({
+      name: "github_list_repos",
+      toolUseId: "t",
+      input: {},
+    });
+    expect(result.status).toBe("ok");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses ctx.graceGithubBranchPrefix in namespace guard error message", async () => {
+    const fetchMock = vi.fn();
+    const tool = githubToolForTest(
+      "github_create_branch",
+      fetchMock as unknown as typeof fetch,
+    )(makeCtx({ graceGithubBranchPrefix: "agent/" }));
+    const result = await tool.dispatch({
+      name: "github_create_branch",
+      toolUseId: "t",
+      input: { repo: "r", branch: "grace/foo" },
+    });
+    expect(result.status).toBe("error");
+    expect(result.errorCode).toBe("branch_namespace_violation");
+    expect(result.errorMessage).toContain("agent/");
   });
 });
 
@@ -163,8 +219,16 @@ describe("github — branch-namespace guard", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("github_commit_files refuses 'main'", async () => {
-    const fetchMock = vi.fn();
+  it("github_commit_files refuses 'main' when main already exists", async () => {
+    // Bootstrap path is reachable only when main 404s (empty repo). When
+    // main already exists, the namespace guard fires after the cheap ref
+    // probe — protecting existing history from direct writes.
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(200, {
+        ref: "refs/heads/main",
+        object: { sha: "existing-main-sha", type: "commit" },
+      }),
+    );
     const tool = githubToolForTest(
       "github_commit_files",
       fetchMock as unknown as typeof fetch,
@@ -181,7 +245,8 @@ describe("github — branch-namespace guard", () => {
     });
     expect(result.status).toBe("error");
     expect(result.errorCode).toBe("branch_protected");
-    expect(fetchMock).not.toHaveBeenCalled();
+    // Exactly one call — the ref probe — before the guard rejects.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("github_open_pr refuses head outside namespace", async () => {
@@ -202,7 +267,7 @@ describe("github — branch-namespace guard", () => {
 });
 
 describe("github — happy path with mocked fetch", () => {
-  it("github_create_repo POSTs to /orgs/{org}/repos and returns slim metadata", async () => {
+  it("github_create_repo defaults auto_init to false (Grace owns the first commit)", async () => {
     const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
       const url = typeof input === "string" ? input : (input as URL | Request).toString();
       expect(url).toBe("https://api.github.com/orgs/Forgeautomatedrepo/repos");
@@ -210,7 +275,7 @@ describe("github — happy path with mocked fetch", () => {
       expect(JSON.parse(init?.body as string)).toMatchObject({
         name: "co-test",
         private: true,
-        auto_init: true,
+        auto_init: false,
       });
       return jsonResponse(201, {
         name: "co-test",
@@ -232,6 +297,137 @@ describe("github — happy path with mocked fetch", () => {
     expect(result.status).toBe("ok");
     expect((result.output as Record<string, unknown>).default_branch).toBe("main");
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("github_create_repo honours auto_init=true when explicitly set", async () => {
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      expect(JSON.parse(init?.body as string)).toMatchObject({ auto_init: true });
+      return jsonResponse(201, { name: "co-test", default_branch: "main" });
+    });
+    const tool = githubToolForTest(
+      "github_create_repo",
+      fetchMock as unknown as typeof fetch,
+    )(makeCtx());
+    const result = await tool.dispatch({
+      name: "github_create_repo",
+      toolUseId: "t",
+      input: { name: "co-test", auto_init: true },
+    });
+    expect(result.status).toBe("ok");
+  });
+
+  it("github_commit_files bootstrap: creates orphan commit + ref when main 404s", async () => {
+    // Sequence:
+    //   1. GET /git/ref/heads/main         → 404 (empty repo)
+    //   2. POST /git/blobs                 → blob sha
+    //   3. POST /git/trees   (no base_tree) → tree sha
+    //   4. POST /git/commits (parents: []) → commit sha
+    //   5. POST /git/refs    (refs/heads/main) → 201
+    const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : (input as URL | Request).toString();
+      const method = init?.method ?? "GET";
+      const body = init?.body ? JSON.parse(init.body as string) : null;
+
+      if (method === "GET" && url.endsWith("/repos/Forgeautomatedrepo/r/git/ref/heads/main")) {
+        return jsonResponse(404, { message: "Not Found" });
+      }
+      if (method === "POST" && url.endsWith("/repos/Forgeautomatedrepo/r/git/blobs")) {
+        expect(body).toEqual({ content: "hello", encoding: "utf-8" });
+        return jsonResponse(201, { sha: "blob-sha-1" });
+      }
+      if (method === "POST" && url.endsWith("/repos/Forgeautomatedrepo/r/git/trees")) {
+        // base_tree must be ABSENT in bootstrap mode
+        expect(body).not.toHaveProperty("base_tree");
+        expect(body.tree).toEqual([
+          { path: "README.md", mode: "100644", type: "blob", sha: "blob-sha-1" },
+        ]);
+        return jsonResponse(201, { sha: "tree-sha-1" });
+      }
+      if (method === "POST" && url.endsWith("/repos/Forgeautomatedrepo/r/git/commits")) {
+        // parents must be empty (orphan commit)
+        expect(body.parents).toEqual([]);
+        expect(body.tree).toBe("tree-sha-1");
+        return jsonResponse(201, {
+          sha: "commit-sha-1",
+          html_url: "https://github.com/Forgeautomatedrepo/r/commit/commit-sha-1",
+        });
+      }
+      if (method === "POST" && url.endsWith("/repos/Forgeautomatedrepo/r/git/refs")) {
+        // POST not PATCH — creating the ref for the first time
+        expect(body).toEqual({ ref: "refs/heads/main", sha: "commit-sha-1" });
+        return jsonResponse(201, { ref: "refs/heads/main", object: { sha: "commit-sha-1" } });
+      }
+      throw new Error(`unexpected ${method} ${url}`);
+    });
+    const tool = githubToolForTest(
+      "github_commit_files",
+      fetchMock as unknown as typeof fetch,
+    )(makeCtx());
+    const result = await tool.dispatch({
+      name: "github_commit_files",
+      toolUseId: "t",
+      input: {
+        repo: "r",
+        branch: "main",
+        message: "initial commit",
+        files: [{ path: "README.md", content: "hello" }],
+      },
+    });
+    expect(result.status).toBe("ok");
+    expect((result.output as Record<string, unknown>).bootstrap).toBe(true);
+    expect((result.output as Record<string, unknown>).commit_sha).toBe("commit-sha-1");
+  });
+
+  it("github_commit_files bootstrap: rejects deletions (no parent tree)", async () => {
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = typeof input === "string" ? input : (input as URL | Request).toString();
+      if (url.endsWith("/repos/Forgeautomatedrepo/r/git/ref/heads/main")) {
+        return jsonResponse(404, { message: "Not Found" });
+      }
+      throw new Error(`unexpected url ${url}`);
+    });
+    const tool = githubToolForTest(
+      "github_commit_files",
+      fetchMock as unknown as typeof fetch,
+    )(makeCtx());
+    const result = await tool.dispatch({
+      name: "github_commit_files",
+      toolUseId: "t",
+      input: {
+        repo: "r",
+        branch: "main",
+        message: "x",
+        files: [{ path: "README.md", content: "y" }],
+        deletions: ["old.md"],
+      },
+    });
+    expect(result.status).toBe("error");
+    expect(result.errorCode).toBe("invalid_input");
+    expect(result.errorMessage).toContain("bootstrap");
+  });
+
+  it("github_commit_files: non-default branches outside namespace fail-fast without HTTP", async () => {
+    // Bootstrap is gated to main/master only — feature/x must hit the
+    // namespace guard before any API call so a stray bootstrap path can't
+    // be forged on a non-default branch.
+    const fetchMock = vi.fn();
+    const tool = githubToolForTest(
+      "github_commit_files",
+      fetchMock as unknown as typeof fetch,
+    )(makeCtx());
+    const result = await tool.dispatch({
+      name: "github_commit_files",
+      toolUseId: "t",
+      input: {
+        repo: "r",
+        branch: "feature/x",
+        message: "x",
+        files: [{ path: "a.md", content: "y" }],
+      },
+    });
+    expect(result.status).toBe("error");
+    expect(result.errorCode).toBe("branch_namespace_violation");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("github_open_pr defaults base to default_branch via repo lookup", async () => {

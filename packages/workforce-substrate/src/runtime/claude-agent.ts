@@ -153,6 +153,15 @@ export async function invokeAgent(
     process.env.CORNERSTONE_API_URL ??
     DEFAULT_CORNERSTONE_API_BASE_URL;
 
+  // Grace's GitHub config — resolved once, threaded through ToolBuildContext
+  // so dispatchers never read process.env directly. Absent values are valid:
+  // tools surface `github_pat_missing` at dispatch time when the agent
+  // doesn't have a PAT configured for this invocation.
+  const graceGithubPat = options.graceGithubPat ?? process.env.GRACE_GITHUB_PAT;
+  const graceGithubOrg = options.graceGithubOrg ?? process.env.GRACE_GITHUB_ORG;
+  const graceGithubBranchPrefix =
+    options.graceGithubBranchPrefix ?? process.env.GRACE_BRANCH_PREFIX;
+
   if (!anthropicApiKey) {
     return finaliseError(
       agent,
@@ -178,6 +187,9 @@ export async function invokeAgent(
     anthropicApiKey,
     cornerstoneApiKey,
     cornerstoneApiBaseUrl,
+    graceGithubPat,
+    graceGithubOrg,
+    graceGithubBranchPrefix,
     requestApproval: options.requestApproval,
   };
 

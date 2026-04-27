@@ -5,11 +5,12 @@
 // tool calls idempotent-friendly and Cloud-Run-safe (no writable filesystem
 // assumptions) and matches the cornerstone integration's design.
 //
-// Auth: process-level Personal Access Token, read at dispatch time from
-// `process.env.GRACE_GITHUB_PAT`. Org is pinned via `process.env.GRACE_GITHUB_ORG`
-// (defaults to "Forgeautomatedrepo" per the Phase 5 decision record). Both env
-// vars are read lazily so a missing key produces a clear `permission_denied`
-// error rather than blowing up roster construction.
+// Auth: PAT, org, and branch prefix are threaded through ToolBuildContext at
+// invocation time. The substrate boundary (claude-agent.ts) resolves them
+// from InvocationOptions or env vars (GRACE_GITHUB_PAT / GRACE_GITHUB_ORG /
+// GRACE_BRANCH_PREFIX) and passes them via ctx; tool dispatchers never read
+// process.env directly. Missing PAT surfaces as `github_pat_missing` at
+// dispatch time rather than at roster construction.
 //
 // Tool surface deviation from grace-github-tools-decisions.md:
 //   - Dropped `clone_repo` and `push` (meaningless in pure-API model — every
@@ -107,7 +108,7 @@ function buildSpecs(): Record<string, ToolSpec> {
     github_create_repo: {
       name: "github_create_repo",
       description:
-        "Create a new repository in the configured org. Defaults: visibility=private, init=true (with empty README so the default branch exists). Pass visibility='public' explicitly to publish.",
+        "Create a new repository in the configured org. Defaults: visibility=private, auto_init=false (the repo starts empty — main is created by your first github_commit_files call against branch='main'). Pass visibility='public' to publish; pass auto_init=true to seed an empty README and have main pre-created (in which case all subsequent writes must go through grace/* branches).",
       input_schema: {
         type: "object",
         properties: {
@@ -116,6 +117,11 @@ function buildSpecs(): Record<string, ToolSpec> {
           visibility: {
             type: "string",
             description: "private (default) or public.",
+          },
+          auto_init: {
+            type: "boolean",
+            description:
+              "If true, GitHub creates an initial commit + README so main exists immediately. Default false — first github_commit_files call against branch='main' creates the initial commit instead, so Grace controls the very first content of the repo.",
           },
         },
         required: ["name"],
@@ -186,7 +192,7 @@ function buildSpecs(): Record<string, ToolSpec> {
     github_commit_files: {
       name: "github_commit_files",
       description:
-        "Atomic multi-file commit on a Grace branch. Provide an array of file edits (path + content); a single commit is created with all of them. Branch must be in the grace/ namespace and must already exist (call github_create_branch first).",
+        "Atomic multi-file commit. Provide an array of file edits (path + content); a single commit lands all of them. Two modes: (1) NORMAL — branch must be in the grace/ namespace and must already exist (call github_create_branch first); (2) BOOTSTRAP — when committing to branch='main' on a fresh repo (auto_init=false) where main doesn't yet exist, this call creates main as an orphan commit (no parents) and the initial ref. Bootstrap is the only path allowed to write to main; once main exists, all subsequent commits must go through grace/* branches.",
       input_schema: {
         type: "object",
         properties: {
@@ -328,8 +334,11 @@ interface GitHubRuntimeOrError {
   readonly error?: ToolCallResult;
 }
 
-function makeRuntime(fetchImpl?: typeof fetch): GitHubRuntimeOrError {
-  const token = process.env.GRACE_GITHUB_PAT;
+function makeRuntime(
+  ctx: ToolBuildContext,
+  fetchImpl?: typeof fetch,
+): GitHubRuntimeOrError {
+  const token = ctx.graceGithubPat;
   if (!token) {
     return {
       error: {
@@ -337,12 +346,12 @@ function makeRuntime(fetchImpl?: typeof fetch): GitHubRuntimeOrError {
         output: null,
         errorCode: "github_pat_missing",
         errorMessage:
-          "GRACE_GITHUB_PAT is not set. Configure the substrate with a PAT scoped to the configured org before invoking GitHub tools.",
+          "GitHub PAT is not configured for this invocation. Set GRACE_GITHUB_PAT (or pass graceGithubPat in InvocationOptions / RunnerContext) before invoking GitHub tools.",
       },
     };
   }
-  const org = process.env.GRACE_GITHUB_ORG ?? "Forgeautomatedrepo";
-  const branchPrefix = process.env.GRACE_BRANCH_PREFIX ?? "grace/";
+  const org = ctx.graceGithubOrg ?? "Forgeautomatedrepo";
+  const branchPrefix = ctx.graceGithubBranchPrefix ?? "grace/";
   return {
     rt: {
       fetchImpl: fetchImpl ?? fetch,
@@ -507,12 +516,16 @@ async function createRepo(rt: GitHubRuntime, input: Record<string, unknown>): Pr
       errorCode: "invalid_input",
       errorMessage: `visibility must be 'private' or 'public', got '${visibility}'.`,
     };
+  // auto_init defaults to false so Grace's first commit owns the initial
+  // tree (see github_commit_files bootstrap path). Callers can still opt
+  // back into the GitHub-seeded README by passing auto_init=true.
+  const autoInit = asOptBool(input.auto_init) ?? false;
   const res = await ghCall(rt, "POST", `/orgs/${encodeURIComponent(rt.org)}/repos`, {
     body: {
       name,
       description: asOptStr(input.description) ?? undefined,
       private: visibility === "private",
-      auto_init: true,
+      auto_init: autoInit,
     },
   });
   if (!res.ok) return mapGhError(res);
@@ -660,27 +673,58 @@ async function commitFiles(rt: GitHubRuntime, input: Record<string, unknown>): P
   const message = asStr(input.message);
   if (!repo || !branch || !message)
     return invalidInput("github_commit_files requires `repo`, `branch`, and `message`.");
-  const guard = requireBranchInNamespace(rt, branch, "branch");
-  if (guard) return guard;
   if (!Array.isArray(input.files) || input.files.length === 0)
     return invalidInput("github_commit_files requires a non-empty `files` array.");
 
-  // 1. Fetch current branch ref + commit sha + tree sha.
+  // 1. Resolve write mode:
+  //    - NORMAL: branch is grace/* and exists. Standard PATCH-the-ref flow.
+  //    - BOOTSTRAP: branch is main/master and 404s (empty repo, no ref yet).
+  //      We create main as an orphan commit + POST the ref.
+  // For non-default branches, fail-fast on namespace before any HTTP call.
+  const isDefaultBranch = branch === "main" || branch === "master";
+  if (!isDefaultBranch) {
+    const guard = requireBranchInNamespace(rt, branch, "branch");
+    if (guard) return guard;
+  }
+
   const refRes = await ghCall(
     rt,
     "GET",
     `/repos/${encodeURIComponent(rt.org)}/${encodeURIComponent(repo)}/git/ref/heads/${encodeURIComponent(branch)}`,
   );
-  if (!refRes.ok) return mapGhError(refRes);
-  const parentCommitSha = ((refRes.body as Record<string, unknown>).object as Record<string, unknown>)?.sha as string;
+  const isBootstrap = isDefaultBranch && !refRes.ok && refRes.status === 404;
 
-  const commitRes = await ghCall(
-    rt,
-    "GET",
-    `/repos/${encodeURIComponent(rt.org)}/${encodeURIComponent(repo)}/git/commits/${parentCommitSha}`,
-  );
-  if (!commitRes.ok) return mapGhError(commitRes);
-  const baseTreeSha = ((commitRes.body as Record<string, unknown>).tree as Record<string, unknown>)?.sha as string;
+  if (!isBootstrap) {
+    // main/master that DOES exist → namespace guard (always rejects main).
+    if (isDefaultBranch) {
+      const guard = requireBranchInNamespace(rt, branch, "branch");
+      if (guard) return guard;
+    }
+    if (!refRes.ok) return mapGhError(refRes);
+  }
+
+  // Bootstrap-mode invariants: reject obviously-incompatible inputs before
+  // we start spending blob/tree API calls.
+  if (isBootstrap && Array.isArray(input.deletions) && input.deletions.length > 0) {
+    return invalidInput(
+      "github_commit_files: deletions are not supported in bootstrap mode (the repo has no prior tree to delete from).",
+    );
+  }
+
+  let parentCommitSha: string | null = null;
+  let baseTreeSha: string | null = null;
+  if (!isBootstrap) {
+    parentCommitSha = ((refRes.body as Record<string, unknown>).object as Record<string, unknown>)
+      ?.sha as string;
+    const commitRes = await ghCall(
+      rt,
+      "GET",
+      `/repos/${encodeURIComponent(rt.org)}/${encodeURIComponent(repo)}/git/commits/${parentCommitSha}`,
+    );
+    if (!commitRes.ok) return mapGhError(commitRes);
+    baseTreeSha = ((commitRes.body as Record<string, unknown>).tree as Record<string, unknown>)
+      ?.sha as string;
+  }
 
   // 2. Create blobs for each file.
   const treeEntries: Array<Record<string, unknown>> = [];
@@ -708,7 +752,8 @@ async function commitFiles(rt: GitHubRuntime, input: Record<string, unknown>): P
     treeEntries.push({ path, mode: "100644", type: "blob", sha: blobSha });
   }
 
-  // 3. Deletions — represented as tree entries with sha=null (per GitHub API).
+  // 3. Deletions — represented as tree entries with sha=null. The bootstrap
+  // guard ran above, so this branch is reached only in normal-write mode.
   if (Array.isArray(input.deletions)) {
     for (const d of input.deletions as unknown[]) {
       if (typeof d !== "string" || d.length === 0) continue;
@@ -716,17 +761,17 @@ async function commitFiles(rt: GitHubRuntime, input: Record<string, unknown>): P
     }
   }
 
-  // 4. Create tree.
+  // 4. Create tree. Bootstrap omits base_tree (there is none).
   const treeRes = await ghCall(
     rt,
     "POST",
     `/repos/${encodeURIComponent(rt.org)}/${encodeURIComponent(repo)}/git/trees`,
-    { body: { base_tree: baseTreeSha, tree: treeEntries } },
+    { body: isBootstrap ? { tree: treeEntries } : { base_tree: baseTreeSha, tree: treeEntries } },
   );
   if (!treeRes.ok) return mapGhError(treeRes);
   const newTreeSha = (treeRes.body as Record<string, unknown>).sha as string;
 
-  // 5. Create commit.
+  // 5. Create commit. Bootstrap = orphan commit with no parents.
   const newCommitRes = await ghCall(
     rt,
     "POST",
@@ -735,7 +780,7 @@ async function commitFiles(rt: GitHubRuntime, input: Record<string, unknown>): P
       body: {
         message,
         tree: newTreeSha,
-        parents: [parentCommitSha],
+        parents: isBootstrap ? [] : [parentCommitSha],
         author: {
           name: "co-os-bot",
           email: "co-os-bot@charlieoscar.com",
@@ -748,14 +793,26 @@ async function commitFiles(rt: GitHubRuntime, input: Record<string, unknown>): P
   const newCommit = newCommitRes.body as Record<string, unknown>;
   const newCommitSha = newCommit.sha as string;
 
-  // 6. Update branch ref to the new commit.
-  const updateRes = await ghCall(
-    rt,
-    "PATCH",
-    `/repos/${encodeURIComponent(rt.org)}/${encodeURIComponent(repo)}/git/refs/heads/${encodeURIComponent(branch)}`,
-    { body: { sha: newCommitSha, force: false } },
-  );
-  if (!updateRes.ok) return mapGhError(updateRes);
+  // 6. Land the ref. Bootstrap creates the ref (POST /git/refs); normal mode
+  // updates an existing ref (PATCH). Force is always false — Grace never
+  // rewrites history.
+  if (isBootstrap) {
+    const createRefRes = await ghCall(
+      rt,
+      "POST",
+      `/repos/${encodeURIComponent(rt.org)}/${encodeURIComponent(repo)}/git/refs`,
+      { body: { ref: `refs/heads/${branch}`, sha: newCommitSha } },
+    );
+    if (!createRefRes.ok) return mapGhError(createRefRes);
+  } else {
+    const updateRes = await ghCall(
+      rt,
+      "PATCH",
+      `/repos/${encodeURIComponent(rt.org)}/${encodeURIComponent(repo)}/git/refs/heads/${encodeURIComponent(branch)}`,
+      { body: { sha: newCommitSha, force: false } },
+    );
+    if (!updateRes.ok) return mapGhError(updateRes);
+  }
 
   return {
     status: "ok",
@@ -764,8 +821,9 @@ async function commitFiles(rt: GitHubRuntime, input: Record<string, unknown>): P
       commit_sha: newCommitSha,
       commit_url: newCommit.html_url,
       message,
-      file_count: (Array.isArray(input.files) ? input.files.length : 0),
+      file_count: Array.isArray(input.files) ? input.files.length : 0,
       deletion_count: Array.isArray(input.deletions) ? input.deletions.length : 0,
+      bootstrap: isBootstrap,
     },
   };
 }
@@ -931,11 +989,15 @@ async function dispatch(
 // Tool builders
 // ---------------------------------------------------------------------------
 
-function makeTool(spec: ToolSpec, fetchImpl?: typeof fetch): Tool {
+function makeTool(
+  spec: ToolSpec,
+  ctx: ToolBuildContext,
+  fetchImpl?: typeof fetch,
+): Tool {
   return {
     spec,
     dispatch: async (call: ToolCallInput) => {
-      const r = makeRuntime(fetchImpl);
+      const r = makeRuntime(ctx, fetchImpl);
       if (r.error) return r.error;
       return dispatch(r.rt!, spec.name, call.input);
     },
@@ -944,10 +1006,10 @@ function makeTool(spec: ToolSpec, fetchImpl?: typeof fetch): Tool {
 
 /** Single-tool builder. agent.toolBuilders.push(githubTool('github_open_pr')). */
 export function githubTool(toolName: string): ToolBuilder {
-  return (_ctx: ToolBuildContext): Tool => {
+  return (ctx: ToolBuildContext): Tool => {
     const spec = SPECS[toolName];
     if (!spec) throw new Error(`githubTool: unknown GitHub tool '${toolName}'`);
-    return makeTool(spec);
+    return makeTool(spec, ctx);
   };
 }
 
@@ -964,10 +1026,10 @@ export function githubToolBuilders(scope: "grace"): ToolBuilder[] {
 // ---------------------------------------------------------------------------
 
 export function githubToolForTest(toolName: string, fetchImpl: typeof fetch): ToolBuilder {
-  return (_ctx: ToolBuildContext): Tool => {
+  return (ctx: ToolBuildContext): Tool => {
     const spec = SPECS[toolName];
     if (!spec) throw new Error(`githubToolForTest: unknown tool '${toolName}'`);
-    return makeTool(spec, fetchImpl);
+    return makeTool(spec, ctx, fetchImpl);
   };
 }
 

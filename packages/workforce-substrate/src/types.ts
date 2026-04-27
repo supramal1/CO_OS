@@ -217,6 +217,17 @@ export interface ToolBuildContext {
   /** Cornerstone API base URL. Defaults to prod endpoint. */
   readonly cornerstoneApiBaseUrl: string;
   /**
+   * GitHub PAT for Grace's tools. Optional — absent means the tool surface
+   * returns `github_pat_missing` at dispatch time. Resolved by the runtime
+   * from InvocationOptions or process.env.GRACE_GITHUB_PAT; never read
+   * directly by tool dispatchers.
+   */
+  readonly graceGithubPat?: string;
+  /** GitHub org for Grace's tools. Defaults to "Forgeautomatedrepo". */
+  readonly graceGithubOrg?: string;
+  /** Branch-namespace prefix for Grace's writes. Defaults to "grace/". */
+  readonly graceGithubBranchPrefix?: string;
+  /**
    * Human-approval hook. Tool dispatchers call this before a destructive
    * action and await the operator's decision. Optional — when undefined,
    * tools that require approval should fall back to a "blocked" result
@@ -286,6 +297,12 @@ export interface InvocationOptions {
   readonly roster?: ReadonlyMap<string, Agent>;
   /** Recursion depth — incremented automatically by delegate_task. */
   readonly depth?: number;
+  /** GitHub PAT for Grace's tools. Falls back to process.env.GRACE_GITHUB_PAT. */
+  readonly graceGithubPat?: string;
+  /** GitHub org for Grace's tools. Falls back to process.env.GRACE_GITHUB_ORG. */
+  readonly graceGithubOrg?: string;
+  /** Branch-namespace prefix for Grace's writes. Falls back to process.env.GRACE_BRANCH_PREFIX. */
+  readonly graceGithubBranchPrefix?: string;
   /**
    * Human-approval hook. The runner provides an implementation that
    * persists the request, registers a deferred Promise, and waits for the
