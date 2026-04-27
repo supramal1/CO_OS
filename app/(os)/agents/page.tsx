@@ -1,14 +1,14 @@
-"use client";
-
-import { useSession } from "next-auth/react";
+import { getServerSession } from "next-auth";
+import {
+  AdminWorkspaceGate,
+  AdminWorkspaceProvider,
+} from "@/components/admin/workspace-selector";
 import { AgentsBoard } from "@/components/agents/agents-board";
+import { authOptions } from "@/lib/auth";
+import { listWorkspaces } from "@/lib/cornerstone";
 
-export default function AgentsPage() {
-  const { data: session, status } = useSession();
-
-  if (status === "loading") {
-    return <Placeholder>Loading…</Placeholder>;
-  }
+export default async function AgentsPage() {
+  const session = await getServerSession(authOptions);
   if (!session?.isAdmin) {
     return (
       <Placeholder>
@@ -17,7 +17,17 @@ export default function AgentsPage() {
       </Placeholder>
     );
   }
-  return <AgentsBoard />;
+  const workspaces = session.apiKey ? await listWorkspaces(session.apiKey) : [];
+  return (
+    <AdminWorkspaceProvider
+      principalId={session.principalId}
+      workspaces={workspaces}
+    >
+      <AdminWorkspaceGate>
+        <AgentsBoard />
+      </AdminWorkspaceGate>
+    </AdminWorkspaceProvider>
+  );
 }
 
 function Placeholder({ children }: { children: React.ReactNode }) {

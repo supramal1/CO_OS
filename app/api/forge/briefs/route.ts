@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { CORNERSTONE_URL } from "@/lib/cornerstone";
+import { applyForgeNamespace } from "@/lib/forge-namespace";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +13,7 @@ export async function GET(req: NextRequest) {
   }
 
   const url = new URL(`${CORNERSTONE_URL}/forge/briefs`);
-  url.searchParams.set("namespace", "default");
+  applyForgeNamespace(url, req);
   const status = req.nextUrl.searchParams.get("status");
   if (status) url.searchParams.set("status", status);
   const limit = req.nextUrl.searchParams.get("limit");

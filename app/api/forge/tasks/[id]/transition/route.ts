@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { CORNERSTONE_URL } from "@/lib/cornerstone";
+import { applyForgeNamespace } from "@/lib/forge-namespace";
 import {
   endpointForTransition,
   isAllowedTransition,
@@ -71,7 +72,13 @@ export async function POST(
   }
 
   const taskId = params.id;
-  const body = (await req.json().catch(() => ({}))) as TransitionBody;
+  const bodyText = await req.text();
+  let body: TransitionBody;
+  try {
+    body = JSON.parse(bodyText || "{}") as TransitionBody;
+  } catch {
+    body = {};
+  }
   const from = body.from_lane;
   const to = body.to_lane;
   if (!isForgeLane(from) || !isForgeLane(to)) {
@@ -88,10 +95,12 @@ export async function POST(
   // Re-read the task so we (a) verify lane still matches the client's
   // from_lane — the Realtime stream may have already moved it — and
   // (b) have title/description/metadata to build the PM brief for invoke.
-  const taskRes = await fetch(
-    `${CORNERSTONE_URL}/forge/tasks/${taskId}?namespace=default`,
-    { headers: { "X-API-Key": session.apiKey }, cache: "no-store" },
-  );
+  const taskUrl = new URL(`${CORNERSTONE_URL}/forge/tasks/${taskId}`);
+  applyForgeNamespace(taskUrl, req, bodyText);
+  const taskRes = await fetch(taskUrl.toString(), {
+    headers: { "X-API-Key": session.apiKey },
+    cache: "no-store",
+  });
   if (!taskRes.ok) {
     const text = await taskRes.text().catch(() => "");
     return jsonError(
@@ -144,10 +153,12 @@ export async function POST(
   // Resume path — find the paused PM run's session_id. The backend
   // pauses exactly one run per task at a time, so the most recent
   // pm_orchestration row with stage=awaiting_review is unambiguous.
-  const runsRes = await fetch(
-    `${CORNERSTONE_URL}/forge/tasks/${taskId}/runs?namespace=default`,
-    { headers: { "X-API-Key": session.apiKey }, cache: "no-store" },
-  );
+  const runsUrl = new URL(`${CORNERSTONE_URL}/forge/tasks/${taskId}/runs`);
+  applyForgeNamespace(runsUrl, req, bodyText);
+  const runsRes = await fetch(runsUrl.toString(), {
+    headers: { "X-API-Key": session.apiKey },
+    cache: "no-store",
+  });
   if (!runsRes.ok) {
     const text = await runsRes.text().catch(() => "");
     return jsonError(runsRes.status, "runs_fetch_failed", text);

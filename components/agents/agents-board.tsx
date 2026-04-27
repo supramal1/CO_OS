@@ -1,7 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { DragEvent } from "react";
+import {
+  useAdminWorkspace,
+  WorkspaceSelector,
+} from "@/components/admin/workspace-selector";
 import type { ForgeTask, BoardColumnId } from "@/lib/agents-types";
 import {
   COLUMN_LABEL,
@@ -19,6 +23,7 @@ type TasksState =
   | { status: "error"; message: string };
 
 export function AgentsBoard() {
+  const { selectedWorkspace } = useAdminWorkspace();
   const [state, setState] = useState<TasksState>({ status: "loading" });
   const [activeId, setActiveId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -27,9 +32,16 @@ export function AgentsBoard() {
   );
   const [dragOver, setDragOver] = useState<BoardColumnId | null>(null);
 
-  const loadTasks = async () => {
+  const namespaceQuery = selectedWorkspace
+    ? `?namespace=${encodeURIComponent(selectedWorkspace)}`
+    : "";
+
+  const loadTasks = useCallback(async () => {
+    if (!selectedWorkspace) return;
     try {
-      const res = await fetch("/api/forge/tasks", { cache: "no-store" });
+      const res = await fetch(`/api/forge/tasks${namespaceQuery}`, {
+        cache: "no-store",
+      });
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(data.error ?? `status ${res.status}`);
@@ -44,11 +56,12 @@ export function AgentsBoard() {
         message: err instanceof Error ? err.message : "failed to load",
       });
     }
-  };
+  }, [namespaceQuery, selectedWorkspace]);
 
   useEffect(() => {
+    setState({ status: "loading" });
     loadTasks();
-  }, []);
+  }, [loadTasks]);
 
   const grouped = useMemo(() => {
     const groups: Record<BoardColumnId, ForgeTask[]> = {
@@ -104,14 +117,17 @@ export function AgentsBoard() {
     applyTaskUpdate(optimistic);
 
     try {
-      const res = await fetch(`/api/forge/tasks/${taskId}/transition`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          from_lane: resolution.fromLane,
-          to_lane: resolution.toLane,
-        }),
-      });
+      const res = await fetch(
+        `/api/forge/tasks/${taskId}/transition${namespaceQuery}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            from_lane: resolution.fromLane,
+            to_lane: resolution.toLane,
+          }),
+        },
+      );
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as {
           error?: string;
@@ -166,6 +182,7 @@ export function AgentsBoard() {
             Agents · tasks
           </div>
           <div style={{ flex: 1 }} />
+          <WorkspaceSelector />
           <button
             type="button"
             onClick={() => setShowCreate(true)}
@@ -232,6 +249,7 @@ export function AgentsBoard() {
         >
           <TaskDetail
             task={activeTask}
+            namespace={selectedWorkspace}
             onUpdated={applyTaskUpdate}
             onDeleted={(id) => {
               setState((s) => {
@@ -251,6 +269,7 @@ export function AgentsBoard() {
 
       {showCreate ? (
         <CreateTaskForm
+          namespace={selectedWorkspace}
           onCreated={(task) => {
             setState((s) => {
               if (s.status !== "loaded") return s;

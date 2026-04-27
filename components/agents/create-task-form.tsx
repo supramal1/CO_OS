@@ -4,10 +4,12 @@ import { useState } from "react";
 import type { ForgeTask } from "@/lib/agents-types";
 
 export function CreateTaskForm({
+  namespace,
   onCreated,
   onError,
   onClose,
 }: {
+  namespace: string | null;
   onCreated: (task: ForgeTask) => void;
   onError: (message: string) => void;
   onClose: () => void;
@@ -16,6 +18,9 @@ export function CreateTaskForm({
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState(0);
   const [saving, setSaving] = useState(false);
+  const namespaceQuery = namespace
+    ? `?namespace=${encodeURIComponent(namespace)}`
+    : "";
 
   const submit = async () => {
     if (!title.trim()) {
@@ -24,7 +29,7 @@ export function CreateTaskForm({
     }
     setSaving(true);
     try {
-      const res = await fetch("/api/forge/tasks", {
+      const res = await fetch(`/api/forge/tasks${namespaceQuery}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

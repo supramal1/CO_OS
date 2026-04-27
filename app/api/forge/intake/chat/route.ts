@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import Anthropic from "@anthropic-ai/sdk";
 import { authOptions } from "@/lib/auth";
 import { CORNERSTONE_URL } from "@/lib/cornerstone";
+import { forgeNamespaceFromRequest } from "@/lib/forge-namespace";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +11,7 @@ type IncomingMessage = { role: "user" | "assistant"; content: string };
 
 type IntakeBody = {
   message: string;
+  namespace?: string | null;
   threadId?: string | null;
   history?: IncomingMessage[];
 };
@@ -99,10 +101,11 @@ function write(
 
 async function callSearchBriefs(
   apiKey: string,
+  namespace: string,
   query: string,
 ): Promise<{ matches: unknown[]; error?: string }> {
   const url = new URL(`${CORNERSTONE_URL}/forge/briefs`);
-  url.searchParams.set("namespace", "default");
+  url.searchParams.set("namespace", namespace);
   url.searchParams.set("limit", "10");
   const res = await fetch(url.toString(), {
     headers: { "X-API-Key": apiKey },
@@ -136,9 +139,12 @@ async function callSearchBriefs(
 
 async function callSubmitBrief(
   apiKey: string,
+  namespace: string,
   input: Record<string, unknown>,
 ): Promise<{ id?: string; error?: string }> {
-  const res = await fetch(`${CORNERSTONE_URL}/forge/briefs?namespace=default`, {
+  const url = new URL(`${CORNERSTONE_URL}/forge/briefs`);
+  url.searchParams.set("namespace", namespace);
+  const res = await fetch(url.toString(), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -170,9 +176,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const bodyText = await req.text();
+  const namespace = forgeNamespaceFromRequest(req, bodyText);
   let body: IntakeBody;
   try {
-    body = (await req.json()) as IntakeBody;
+    body = JSON.parse(bodyText || "{}") as IntakeBody;
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
@@ -239,10 +247,11 @@ export async function POST(req: NextRequest) {
           let payload: Record<string, unknown>;
           if (use.name === "search_existing_briefs") {
             const input = use.input as { query: string };
-            payload = await callSearchBriefs(apiKey, input.query ?? "");
+            payload = await callSearchBriefs(apiKey, namespace, input.query ?? "");
           } else if (use.name === "submit_brief") {
             payload = await callSubmitBrief(
               apiKey,
+              namespace,
               use.input as Record<string, unknown>,
             );
             if (payload.id) {

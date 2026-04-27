@@ -19,7 +19,11 @@ type FetchMock = ReturnType<typeof vi.fn>;
 let fetchMock: FetchMock;
 
 function req(body: unknown): NextRequest {
+  const text = JSON.stringify(body);
   return {
+    nextUrl: new URL("https://co-os.test/api/forge/tasks/t1/transition"),
+    headers: new Headers(),
+    text: async () => text,
     json: async () => body,
   } as unknown as NextRequest;
 }

@@ -6,6 +6,7 @@ import { ALL_STATUSES, STATUS_LABEL } from "@/lib/agents-types";
 
 type Props = {
   task: ForgeTask;
+  namespace: string | null;
   onUpdated: (next: ForgeTask) => void;
   onDeleted: (id: string) => void;
   onError: (message: string) => void;
@@ -14,6 +15,7 @@ type Props = {
 
 export function TaskDetail({
   task,
+  namespace,
   onUpdated,
   onDeleted,
   onError,
@@ -23,11 +25,14 @@ export function TaskDetail({
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? "");
   const [priority, setPriority] = useState(task.priority);
+  const namespaceQuery = namespace
+    ? `?namespace=${encodeURIComponent(namespace)}`
+    : "";
 
   const patch = async (body: Record<string, unknown>) => {
     setSaving(true);
     try {
-      const res = await fetch(`/api/forge/tasks/${task.id}`, {
+      const res = await fetch(`/api/forge/tasks/${task.id}${namespaceQuery}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -57,7 +62,7 @@ export function TaskDetail({
     if (!window.confirm(`Delete task "${task.title}"?`)) return;
     setSaving(true);
     try {
-      const res = await fetch(`/api/forge/tasks/${task.id}`, {
+      const res = await fetch(`/api/forge/tasks/${task.id}${namespaceQuery}`, {
         method: "DELETE",
       });
       if (!res.ok && res.status !== 204) {
