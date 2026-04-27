@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { adminFetch } from "@/lib/admin-api";
 import type { AdminStatus, Namespace } from "@/lib/admin-types";
+import { useAdminWorkspace } from "@/components/admin/workspace-selector";
 import { StatusPill } from "@/components/admin/status-pill";
 import {
   Empty,
@@ -43,6 +44,7 @@ function formatDate(iso: string) {
 
 export default function AdminWorkspacesPage() {
   const router = useRouter();
+  const { selectedWorkspace } = useAdminWorkspace();
   const [state, setState] = useState<ListState>({ status: "loading" });
   const [filter, setFilter] = useState<Filter>("active");
   const [search, setSearch] = useState("");
@@ -55,13 +57,17 @@ export default function AdminWorkspacesPage() {
   const [toast, setToast] = useState<string | null>(null);
 
   const load = async () => {
+    if (!selectedWorkspace) return;
     setState({ status: "loading" });
     try {
       const includeArchived = filter !== "active";
       const [admin, namespaces] = await Promise.all([
-        adminFetch<AdminStatus>("/admin/status").catch(() => null),
+        adminFetch<AdminStatus>("/admin/status", {
+          namespace: selectedWorkspace,
+        }).catch(() => null),
         adminFetch<Namespace[]>(
           `/admin/namespaces${includeArchived ? "?include_archived=true" : ""}`,
+          { namespace: selectedWorkspace },
         ),
       ]);
       setState({ status: "loaded", admin, namespaces });
@@ -75,7 +81,7 @@ export default function AdminWorkspacesPage() {
 
   useEffect(() => {
     void load();
-  }, [filter]);
+  }, [filter, selectedWorkspace]);
 
   const namespaces = state.status === "loaded" ? state.namespaces : [];
 
@@ -130,7 +136,10 @@ export default function AdminWorkspacesPage() {
   const archiveOne = async (ns: Namespace) => {
     setBusy(true);
     try {
-      await adminFetch(`/admin/namespaces/${ns.name}`, { method: "DELETE" });
+      await adminFetch(`/admin/namespaces/${ns.name}`, {
+        method: "DELETE",
+        namespace: selectedWorkspace,
+      });
       setState((s) => {
         if (s.status !== "loaded") return s;
         return {
@@ -153,6 +162,7 @@ export default function AdminWorkspacesPage() {
     try {
       await adminFetch<Namespace>(`/admin/namespaces/${ns.name}`, {
         method: "PATCH",
+        namespace: selectedWorkspace,
         body: JSON.stringify({ status: "active" }),
       });
       await load();
@@ -172,6 +182,7 @@ export default function AdminWorkspacesPage() {
         .map((n) => n.name);
       await adminFetch("/admin/namespaces/bulk-archive", {
         method: "POST",
+        namespace: selectedWorkspace,
         body: JSON.stringify({ namespaces: names }),
       });
       setSelected(new Set());
@@ -188,6 +199,7 @@ export default function AdminWorkspacesPage() {
     try {
       await adminFetch(`/admin/namespaces/${ns.name}/permanent`, {
         method: "DELETE",
+        namespace: selectedWorkspace,
       });
       setState((s) => {
         if (s.status !== "loaded") return s;
@@ -270,6 +282,7 @@ export default function AdminWorkspacesPage() {
 
       {createOpen ? (
         <CreateDialog
+          namespace={selectedWorkspace}
           onClose={() => setCreateOpen(false)}
           onCreated={onCreated}
           onError={(m) => setToast(m)}
@@ -802,10 +815,12 @@ function BulkBar({
 }
 
 function CreateDialog({
+  namespace,
   onClose,
   onCreated,
   onError,
 }: {
+  namespace: string | null;
   onClose: () => void;
   onCreated: (ns: Namespace) => void;
   onError: (m: string) => void;
@@ -822,6 +837,7 @@ function CreateDialog({
     try {
       const created = await adminFetch<Namespace>("/admin/namespaces", {
         method: "POST",
+        namespace,
         body: JSON.stringify({
           name: name.trim(),
           display_name: displayName.trim() || name.trim(),
@@ -986,4 +1002,3 @@ function DeleteDialog({
     </Modal>
   );
 }
-

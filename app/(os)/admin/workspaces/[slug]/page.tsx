@@ -85,8 +85,10 @@ export default function AdminWorkspaceDetailPage({
     setState({ status: "loading" });
     try {
       const [workspace, principals] = await Promise.all([
-        adminFetch<Namespace>(`/admin/namespaces/${slug}`),
-        adminFetch<Principal[]>("/admin/principals").catch(() => [] as Principal[]),
+        adminFetch<Namespace>(`/admin/namespaces/${slug}`, { namespace: slug }),
+        adminFetch<Principal[]>("/admin/principals", { namespace: slug }).catch(
+          () => [] as Principal[],
+        ),
       ]);
 
       // Resolve each principal's grants → members for this workspace
@@ -95,6 +97,7 @@ export default function AdminWorkspaceDetailPage({
           try {
             const grants = await adminFetch<NamespaceGrant[]>(
               `/admin/principals/${p.id}/grants`,
+              { namespace: slug },
             );
             const grant = grants.find((g) => g.namespace === slug);
             return grant ? { principal: p, grant } : null;
@@ -139,7 +142,10 @@ export default function AdminWorkspaceDetailPage({
   const archive = async () => {
     setBusy(true);
     try {
-      await adminFetch(`/admin/namespaces/${slug}`, { method: "DELETE" });
+      await adminFetch(`/admin/namespaces/${slug}`, {
+        method: "DELETE",
+        namespace: slug,
+      });
       router.push("/admin/workspaces");
     } catch (err) {
       setToast(err instanceof Error ? err.message : "archive failed");
@@ -154,6 +160,7 @@ export default function AdminWorkspaceDetailPage({
     try {
       await adminFetch<Namespace>(`/admin/namespaces/${slug}`, {
         method: "PATCH",
+        namespace: slug,
         body: JSON.stringify({ status: "active" }),
       });
       await loadAll();
@@ -169,7 +176,7 @@ export default function AdminWorkspaceDetailPage({
     try {
       await adminFetch(
         `/admin/principals/${row.principal.id}/grants/${row.grant.id}`,
-        { method: "DELETE" },
+        { method: "DELETE", namespace: slug },
       );
       setState((s) =>
         s.status === "loaded"
@@ -192,10 +199,12 @@ export default function AdminWorkspaceDetailPage({
     try {
       await adminFetch(`/admin/principals/${conn.principalId}/status`, {
         method: "PATCH",
+        namespace: slug,
         body: JSON.stringify({ status: "archived" }),
       });
       await adminFetch(`/admin/principals/${conn.principalId}/permanent`, {
         method: "DELETE",
+        namespace: slug,
         body: JSON.stringify({ confirmation: conn.principalName }),
       });
       setState((s) =>
@@ -382,6 +391,7 @@ export default function AdminWorkspaceDetailPage({
             try {
               await adminFetch(`/admin/namespaces/${slug}/permanent`, {
                 method: "DELETE",
+                namespace: slug,
                 body: JSON.stringify({ confirmation: slug }),
               });
               router.push("/admin/workspaces");
@@ -839,7 +849,9 @@ function AddMemberDialog({
   useEffect(() => {
     void (async () => {
       try {
-        const all = await adminFetch<Principal[]>("/admin/principals");
+        const all = await adminFetch<Principal[]>("/admin/principals", {
+          namespace: slug,
+        });
         setAvailable(
           all.filter(
             (p) => !existingMemberIds.has(p.id) && p.status === "active",
@@ -857,6 +869,7 @@ function AddMemberDialog({
     try {
       await adminFetch(`/admin/principals/${selected}/grants`, {
         method: "POST",
+        namespace: slug,
         body: JSON.stringify({ namespace: slug, access_level: accessLevel }),
       });
       onAdded();
@@ -875,6 +888,7 @@ function AddMemberDialog({
         `/admin/workspaces/${slug}/setup-client`,
         {
           method: "POST",
+          namespace: slug,
           body: JSON.stringify({
             principal_name: newName.trim(),
             type: newType,
@@ -1066,7 +1080,7 @@ function PermanentDeleteDialog({
           fact_count: number;
           note_count: number;
           principal_count: number;
-        }>(`/admin/namespaces/${slug}/deletion-impact`);
+        }>(`/admin/namespaces/${slug}/deletion-impact`, { namespace: slug });
         setImpact(data);
       } catch (err) {
         onError(err instanceof Error ? err.message : "impact load failed");
