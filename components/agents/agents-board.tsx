@@ -6,6 +6,12 @@ import {
   useAdminWorkspace,
   WorkspaceSelector,
 } from "@/components/admin/workspace-selector";
+import { CostConfirmDialog } from "@/components/forge/cost-confirm-dialog";
+import {
+  buildAgentsCostTransition,
+  shouldSkipAgentsCostConfirm,
+  type AgentsCostTransition,
+} from "@/lib/agents-cost";
 import type { ForgeTask, BoardColumnId } from "@/lib/agents-types";
 import {
   COLUMN_LABEL,
@@ -13,6 +19,9 @@ import {
   boardColumnForLane,
   resolveBoardDrop,
 } from "@/lib/agents-types";
+import type { CostRunRow } from "@/lib/cost-samples";
+import { fetchUsdGbpRate, type FxRate } from "@/lib/fx-rate";
+import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { TaskCard } from "./task-card";
 import { TaskDetail } from "./task-detail";
 import { CreateTaskForm } from "./create-task-form";
@@ -31,6 +40,12 @@ export function AgentsBoard() {
     null,
   );
   const [dragOver, setDragOver] = useState<BoardColumnId | null>(null);
+  const [costRows, setCostRows] = useState<CostRunRow[] | null>(null);
+  const [costRowsError, setCostRowsError] = useState(false);
+  const [fxRate, setFxRate] = useState<FxRate | null>(null);
+  const [pendingCost, setPendingCost] = useState<AgentsCostTransition | null>(
+    null,
+  );
 
   const namespaceQuery = selectedWorkspace
     ? `?namespace=${encodeURIComponent(selectedWorkspace)}`
@@ -62,6 +77,42 @@ export function AgentsBoard() {
     setState({ status: "loading" });
     loadTasks();
   }, [loadTasks]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchUsdGbpRate().then((rate) => {
+      if (!cancelled && rate) setFxRate(rate);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const sb = getSupabaseBrowserClient();
+    if (!sb) {
+      setCostRowsError(true);
+      return;
+    }
+    (async () => {
+      const { data, error } = await sb
+        .from("forge_task_runs")
+        .select("task_id, run_type, actual_cost_usd")
+        .not("actual_cost_usd", "is", null)
+        .gt("actual_cost_usd", 0)
+        .limit(2000);
+      if (cancelled) return;
+      if (error || !data) {
+        setCostRowsError(true);
+        return;
+      }
+      setCostRows(data as CostRunRow[]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const grouped = useMemo(() => {
     const groups: Record<BoardColumnId, ForgeTask[]> = {
@@ -97,34 +148,27 @@ export function AgentsBoard() {
     });
   };
 
-  const handleDrop = async (column: BoardColumnId, taskId: string) => {
-    setDragOver(null);
-    if (state.status !== "loaded") return;
-    const current = state.tasks.find((t) => t.id === taskId);
-    if (!current) return;
-    const resolution = resolveBoardDrop(current.lane, column);
-    if (resolution.type === "noop") return;
-    if (resolution.type === "blocked") {
-      setToast({ kind: "error", message: resolution.message });
-      return;
-    }
-
+  const runTransition = async (
+    current: ForgeTask,
+    fromLane: ForgeTask["lane"],
+    toLane: ForgeTask["lane"],
+  ) => {
     const optimistic: ForgeTask = {
       ...current,
-      lane: resolution.toLane,
+      lane: toLane,
       updated_at: new Date().toISOString(),
     };
     applyTaskUpdate(optimistic);
 
     try {
       const res = await fetch(
-        `/api/forge/tasks/${taskId}/transition${namespaceQuery}`,
+        `/api/forge/tasks/${current.id}/transition${namespaceQuery}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            from_lane: resolution.fromLane,
-            to_lane: resolution.toLane,
+            from_lane: fromLane,
+            to_lane: toLane,
           }),
         },
       );
@@ -142,6 +186,34 @@ export function AgentsBoard() {
         message: err instanceof Error ? err.message : "transition failed",
       });
     }
+  };
+
+  const handleDrop = async (column: BoardColumnId, taskId: string) => {
+    setDragOver(null);
+    if (state.status !== "loaded") return;
+    const current = state.tasks.find((t) => t.id === taskId);
+    if (!current) return;
+    const resolution = resolveBoardDrop(current.lane, column);
+    if (resolution.type === "noop") return;
+    if (resolution.type === "blocked") {
+      setToast({ kind: "error", message: resolution.message });
+      return;
+    }
+
+    if (shouldSkipAgentsCostConfirm(resolution.fromLane, resolution.toLane)) {
+      await runTransition(current, resolution.fromLane, resolution.toLane);
+      return;
+    }
+
+    setPendingCost(
+      buildAgentsCostTransition({
+        task: current,
+        from: resolution.fromLane,
+        to: resolution.toLane,
+        costRows,
+        costRowsError,
+      }),
+    );
   };
 
   return (
@@ -278,6 +350,26 @@ export function AgentsBoard() {
           }}
           onError={(message) => setToast({ kind: "error", message })}
           onClose={() => setShowCreate(false)}
+        />
+      ) : null}
+
+      {pendingCost ? (
+        <CostConfirmDialog
+          from={pendingCost.from}
+          to={pendingCost.to}
+          taskTitle={pendingCost.taskTitle}
+          estimate={pendingCost.estimate}
+          estimateError={pendingCost.estimateError}
+          fxRate={fxRate}
+          onCancel={() => setPendingCost(null)}
+          onConfirm={() => {
+            const pending = pendingCost;
+            setPendingCost(null);
+            if (state.status !== "loaded") return;
+            const current = state.tasks.find((t) => t.id === pending.taskId);
+            if (!current) return;
+            void runTransition(current, pending.from, pending.to);
+          }}
         />
       ) : null}
 
