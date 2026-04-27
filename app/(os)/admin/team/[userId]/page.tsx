@@ -21,6 +21,7 @@ import {
   modalInputStyle,
 } from "@/components/admin/modal";
 import { CredentialReveal } from "@/components/admin/credential-reveal";
+import { workspaceGrantSuccessMessage } from "@/components/admin/grant-access-state";
 
 type DetailState =
   | { status: "loading" }
@@ -251,6 +252,11 @@ export default function AdminTeamMemberPage({
   const grantAccess = async (namespace: string, level: string) => {
     setBusy(true);
     try {
+      const workspaceName =
+        state.status === "loaded"
+          ? state.namespaces.find((ns) => ns.name === namespace)?.display_name ||
+            namespace
+          : namespace;
       const created = await adminFetch<NamespaceGrant>(
         `/admin/principals/${userId}/grants`,
         {
@@ -265,6 +271,7 @@ export default function AdminTeamMemberPage({
           : s,
       );
       setGrantOpen(false);
+      showToast(workspaceGrantSuccessMessage(workspaceName));
     } catch (err) {
       showToast(err instanceof Error ? err.message : "grant failed");
     } finally {
