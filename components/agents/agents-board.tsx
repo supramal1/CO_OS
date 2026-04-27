@@ -4,10 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import type { DragEvent } from "react";
 import type { ForgeTask, BoardColumnId } from "@/lib/agents-types";
 import {
-  COLUMN_DEFAULT_STATUS,
   COLUMN_LABEL,
   COLUMN_ORDER,
-  columnFor,
+  boardColumnForLane,
+  resolveBoardDrop,
 } from "@/lib/agents-types";
 import { TaskCard } from "./task-card";
 import { TaskDetail } from "./task-detail";
@@ -63,7 +63,7 @@ export function AgentsBoard() {
         return b.updated_at.localeCompare(a.updated_at);
       });
       for (const task of sorted) {
-        groups[columnFor(task.status)].push(task);
+        groups[boardColumnForLane(task.lane)].push(task);
       }
     }
     return groups;
@@ -89,30 +89,41 @@ export function AgentsBoard() {
     if (state.status !== "loaded") return;
     const current = state.tasks.find((t) => t.id === taskId);
     if (!current) return;
-    const nextStatus = COLUMN_DEFAULT_STATUS[column];
-    if (columnFor(current.status) === column) return;
+    const resolution = resolveBoardDrop(current.lane, column);
+    if (resolution.type === "noop") return;
+    if (resolution.type === "blocked") {
+      setToast({ kind: "error", message: resolution.message });
+      return;
+    }
 
-    // optimistic update
-    const optimistic: ForgeTask = { ...current, status: nextStatus };
+    const optimistic: ForgeTask = {
+      ...current,
+      lane: resolution.toLane,
+      updated_at: new Date().toISOString(),
+    };
     applyTaskUpdate(optimistic);
 
     try {
-      const res = await fetch(`/api/forge/tasks/${taskId}`, {
-        method: "PATCH",
+      const res = await fetch(`/api/forge/tasks/${taskId}/transition`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: nextStatus }),
+        body: JSON.stringify({
+          from_lane: resolution.fromLane,
+          to_lane: resolution.toLane,
+        }),
       });
       if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error ?? `status ${res.status}`);
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          detail?: string;
+        };
+        throw new Error(data.detail ?? data.error ?? `status ${res.status}`);
       }
-      applyTaskUpdate((await res.json()) as ForgeTask);
     } catch (err) {
-      // rollback
       applyTaskUpdate(current);
       setToast({
         kind: "error",
-        message: err instanceof Error ? err.message : "move failed",
+        message: err instanceof Error ? err.message : "transition failed",
       });
     }
   };

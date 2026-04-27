@@ -76,6 +76,11 @@ export const COLUMN_LABEL: Record<BoardColumnId, string> = {
   done: "Done",
 };
 
+export type BoardDropResolution =
+  | { type: "transition"; fromLane: ForgeLane; toLane: ForgeLane }
+  | { type: "noop" }
+  | { type: "blocked"; message: string };
+
 // Default target status when moving a task into a build-board column.
 export const COLUMN_DEFAULT_STATUS: Record<BoardColumnId, TaskStatus> = {
   backlog: "submitted",
@@ -97,6 +102,56 @@ const STATUS_TO_COLUMN: Record<TaskStatus, BoardColumnId> = {
 
 export function columnFor(status: TaskStatus): BoardColumnId {
   return STATUS_TO_COLUMN[status];
+}
+
+const LANE_TO_COLUMN: Record<ForgeLane, BoardColumnId> = {
+  backlog: "backlog",
+  research: "in_progress",
+  production: "in_progress",
+  research_review: "review",
+  production_review: "review",
+  done: "done",
+};
+
+export function boardColumnForLane(lane: ForgeLane): BoardColumnId {
+  return LANE_TO_COLUMN[lane];
+}
+
+export function resolveBoardDrop(
+  fromLane: ForgeLane,
+  targetColumn: BoardColumnId,
+): BoardDropResolution {
+  if (boardColumnForLane(fromLane) === targetColumn) {
+    return { type: "noop" };
+  }
+
+  if (fromLane === "backlog" && targetColumn === "in_progress") {
+    return { type: "transition", fromLane, toLane: "research" };
+  }
+  if (fromLane === "research_review" && targetColumn === "in_progress") {
+    return { type: "transition", fromLane, toLane: "production" };
+  }
+  if (fromLane === "production_review" && targetColumn === "done") {
+    return { type: "transition", fromLane, toLane: "done" };
+  }
+
+  return { type: "blocked", message: blockedBoardDropMessage(fromLane) };
+}
+
+function blockedBoardDropMessage(fromLane: ForgeLane): string {
+  if (fromLane === "research" || fromLane === "production") {
+    return "Tasks move to Review automatically when work completes.";
+  }
+  if (fromLane === "backlog") {
+    return "Backlog tasks must move to In progress first.";
+  }
+  if (fromLane === "research_review") {
+    return "Research review tasks move to In progress when approved.";
+  }
+  if (fromLane === "production_review") {
+    return "Production review tasks move to Done when approved.";
+  }
+  return "Done tasks can't be moved from this board.";
 }
 
 // Human-gated drags allowed in the UI. Any transition not listed here
