@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { cancelPendingApprovalsForTask } from "@/lib/workforce/approvals";
 import { cancelTask } from "@/lib/workforce/runner";
 
 export const dynamic = "force-dynamic";
@@ -20,5 +21,14 @@ export async function POST(
   if (!ok) {
     return NextResponse.json({ error: "not_found_or_not_owner" }, { status: 404 });
   }
-  return NextResponse.json({ ok: true, taskId: params.id, state: "cancelled" });
+  const cancelledApprovals = await cancelPendingApprovalsForTask(
+    params.id,
+    session.principalId,
+  );
+  return NextResponse.json({
+    ok: true,
+    taskId: params.id,
+    state: "cancelled",
+    cancelledApprovals,
+  });
 }
