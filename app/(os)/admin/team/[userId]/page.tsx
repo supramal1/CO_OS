@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, use } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { adminFetch } from "@/lib/admin-api";
@@ -10,6 +10,7 @@ import type {
   NamespaceGrant,
   Principal,
 } from "@/lib/admin-types";
+import { useAdminWorkspace } from "@/components/admin/workspace-selector";
 import { StatusPill } from "@/components/admin/status-pill";
 import {
   Empty,
@@ -91,10 +92,11 @@ function formatDateTime(iso: string | null | undefined) {
 export default function AdminTeamMemberPage({
   params,
 }: {
-  params: Promise<{ userId: string }>;
+  params: { userId: string };
 }) {
-  const { userId } = use(params);
+  const { userId } = params;
   const router = useRouter();
+  const { selectedWorkspace } = useAdminWorkspace();
 
   const [state, setState] = useState<DetailState>({ status: "loading" });
   const [busy, setBusy] = useState(false);
@@ -118,13 +120,22 @@ export default function AdminTeamMemberPage({
   }, []);
 
   const loadAll = useCallback(async () => {
+    if (!selectedWorkspace) return;
     setState({ status: "loading" });
     try {
       const [principal, credentials, grants, namespaces] = await Promise.all([
-        adminFetch<Principal>(`/admin/principals/${userId}`),
-        adminFetch<Credential[]>(`/admin/principals/${userId}/credentials`),
-        adminFetch<NamespaceGrant[]>(`/admin/principals/${userId}/grants`),
-        adminFetch<Namespace[]>("/admin/namespaces").catch(
+        adminFetch<Principal>(`/admin/principals/${userId}`, {
+          namespace: selectedWorkspace,
+        }),
+        adminFetch<Credential[]>(`/admin/principals/${userId}/credentials`, {
+          namespace: selectedWorkspace,
+        }),
+        adminFetch<NamespaceGrant[]>(`/admin/principals/${userId}/grants`, {
+          namespace: selectedWorkspace,
+        }),
+        adminFetch<Namespace[]>("/admin/namespaces", {
+          namespace: selectedWorkspace,
+        }).catch(
           () => [] as Namespace[],
         ),
       ]);
@@ -143,7 +154,7 @@ export default function AdminTeamMemberPage({
         setState({ status: "error", message: msg });
       }
     }
-  }, [userId]);
+  }, [selectedWorkspace, userId]);
 
   useEffect(() => {
     void loadAll();
@@ -187,6 +198,7 @@ export default function AdminTeamMemberPage({
         raw_key: string;
       }>(`/admin/principals/${userId}/credentials`, {
         method: "POST",
+        namespace: selectedWorkspace,
         body: JSON.stringify({
           label: label.trim(),
           capabilities: levelToCaps(level),
@@ -222,7 +234,7 @@ export default function AdminTeamMemberPage({
     try {
       await adminFetch(
         `/admin/principals/${userId}/credentials/${cred.id}`,
-        { method: "DELETE" },
+        { method: "DELETE", namespace: selectedWorkspace },
       );
       setPendingRevokeCred(null);
       showToast("Connection key revoked.");
@@ -243,6 +255,7 @@ export default function AdminTeamMemberPage({
         `/admin/principals/${userId}/grants`,
         {
           method: "POST",
+          namespace,
           body: JSON.stringify({ namespace, access_level: level }),
         },
       );
@@ -264,7 +277,7 @@ export default function AdminTeamMemberPage({
     try {
       await adminFetch(
         `/admin/principals/${userId}/grants/${g.namespace}`,
-        { method: "DELETE" },
+        { method: "DELETE", namespace: g.namespace },
       );
       setState((s) =>
         s.status === "loaded"
@@ -289,6 +302,7 @@ export default function AdminTeamMemberPage({
         `/admin/principals/${userId}/status`,
         {
           method: "PATCH",
+          namespace: selectedWorkspace,
           body: JSON.stringify({ status: next }),
         },
       );
@@ -312,6 +326,7 @@ export default function AdminTeamMemberPage({
     try {
       await adminFetch(`/admin/principals/${userId}/permanent`, {
         method: "DELETE",
+        namespace: selectedWorkspace,
         body: JSON.stringify({ confirmation: principal.name }),
       });
       router.push("/admin/team");
@@ -603,6 +618,7 @@ export default function AdminTeamMemberPage({
       {pendingStatus === "deleted" ? (
         <PermanentDeleteDialog
           userId={userId}
+          namespace={selectedWorkspace}
           principalName={principal.name}
           busy={busy}
           onCancel={() => setPendingStatus(null)}
@@ -1264,6 +1280,7 @@ function ConfirmDialog({
 
 function PermanentDeleteDialog({
   userId,
+  namespace,
   principalName,
   busy,
   onCancel,
@@ -1271,6 +1288,7 @@ function PermanentDeleteDialog({
   onError,
 }: {
   userId: string;
+  namespace: string | null;
   principalName: string;
   busy: boolean;
   onCancel: () => void;
@@ -1292,7 +1310,7 @@ function PermanentDeleteDialog({
           credential_count: number;
           grant_count: number;
           role_count?: number;
-        }>(`/admin/principals/${userId}/deletion-impact`);
+        }>(`/admin/principals/${userId}/deletion-impact`, { namespace });
         setImpact(data);
       } catch (err) {
         onError(err instanceof Error ? err.message : "impact load failed");
@@ -1300,7 +1318,7 @@ function PermanentDeleteDialog({
         setImpactLoading(false);
       }
     })();
-  }, [userId, onError]);
+  }, [namespace, userId, onError]);
 
   return (
     <Modal

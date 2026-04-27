@@ -9,6 +9,7 @@ import type {
   Namespace,
   Principal,
 } from "@/lib/admin-types";
+import { useAdminWorkspace } from "@/components/admin/workspace-selector";
 import { StatusPill } from "@/components/admin/status-pill";
 import { TabBar } from "@/components/admin/tab-bar";
 import { BulkBar } from "@/components/admin/bulk-bar";
@@ -29,6 +30,7 @@ type LoadState =
       status: "loaded";
       principals: Principal[];
       invitations: Invitation[];
+      invitationError: string | null;
       admin: AdminStatus | null;
     }
   | { status: "error"; message: string };
@@ -80,6 +82,7 @@ function formatRelative(iso: string) {
 }
 
 export default function AdminTeamPage() {
+  const { selectedWorkspace } = useAdminWorkspace();
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [tab, setTab] = useState<TabId>("active");
   const [search, setSearch] = useState("");
@@ -92,17 +95,37 @@ export default function AdminTeamPage() {
   const [inviteOpen, setInviteOpen] = useState(false);
 
   const load = async () => {
+    if (!selectedWorkspace) return;
     setState({ status: "loading" });
     try {
       const principalsPath = showArchived
         ? "/admin/principals?include_archived=true"
         : "/admin/principals";
-      const [admin, principals, invitations] = await Promise.all([
-        adminFetch<AdminStatus>("/admin/status").catch(() => null),
-        adminFetch<Principal[]>(principalsPath),
-        adminFetch<Invitation[]>("/admin/invitations"),
+      const [admin, principals, invitationsResult] = await Promise.all([
+        adminFetch<AdminStatus>("/admin/status", {
+          namespace: selectedWorkspace,
+        }).catch(() => null),
+        adminFetch<Principal[]>(principalsPath, { namespace: selectedWorkspace }),
+        adminFetch<Invitation[]>("/admin/invitations", {
+          namespace: selectedWorkspace,
+        })
+          .then((invitations) => ({
+            invitations,
+            invitationError: null as string | null,
+          }))
+          .catch((err) => ({
+            invitations: [] as Invitation[],
+            invitationError:
+              err instanceof Error ? err.message : "invitations unavailable",
+          })),
       ]);
-      setState({ status: "loaded", admin, principals, invitations });
+      setState({
+        status: "loaded",
+        admin,
+        principals,
+        invitations: invitationsResult.invitations,
+        invitationError: invitationsResult.invitationError,
+      });
     } catch (err) {
       setState({
         status: "error",
@@ -114,7 +137,7 @@ export default function AdminTeamPage() {
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showArchived]);
+  }, [showArchived, selectedWorkspace]);
 
   // Reset selection when switching tabs (different bulk action sets)
   useEffect(() => {
@@ -123,6 +146,8 @@ export default function AdminTeamPage() {
 
   const principals = state.status === "loaded" ? state.principals : [];
   const invitations = state.status === "loaded" ? state.invitations : [];
+  const invitationError =
+    state.status === "loaded" ? state.invitationError : null;
 
   const activePrincipals = useMemo(
     () =>
@@ -232,6 +257,7 @@ export default function AdminTeamPage() {
     try {
       await adminFetch(`/admin/principals/${id}/status`, {
         method: "PATCH",
+        namespace: selectedWorkspace,
         body: JSON.stringify({ status: "archived" }),
       });
       await load();
@@ -248,6 +274,7 @@ export default function AdminTeamPage() {
     try {
       await adminFetch("/admin/principals/bulk-archive", {
         method: "POST",
+        namespace: selectedWorkspace,
         body: JSON.stringify({ principal_ids: Array.from(selected) }),
       });
       setSelected(new Set());
@@ -265,6 +292,7 @@ export default function AdminTeamPage() {
     try {
       await adminFetch("/admin/principals/bulk-revoke", {
         method: "POST",
+        namespace: selectedWorkspace,
         body: JSON.stringify({ principal_ids: Array.from(selected) }),
       });
       setSelected(new Set());
@@ -279,7 +307,10 @@ export default function AdminTeamPage() {
   const revokeInvitation = async (id: string) => {
     setActionTarget(id);
     try {
-      await adminFetch(`/admin/invitations/${id}`, { method: "DELETE" });
+      await adminFetch(`/admin/invitations/${id}`, {
+        method: "DELETE",
+        namespace: selectedWorkspace,
+      });
       await load();
     } catch (err) {
       setToast(err instanceof Error ? err.message : "revoke failed");
@@ -293,6 +324,7 @@ export default function AdminTeamPage() {
     try {
       await adminFetch(`/admin/invitations/${id}/resend`, {
         method: "POST",
+        namespace: selectedWorkspace,
         body: JSON.stringify({ extend_days: 30 }),
       });
       setToast("Invitation extended by 30 days.");
@@ -310,9 +342,10 @@ export default function AdminTeamPage() {
     try {
       await Promise.all(
         Array.from(selected).map((id) =>
-          adminFetch(`/admin/invitations/${id}`, { method: "DELETE" }).catch(
-            () => null,
-          ),
+          adminFetch(`/admin/invitations/${id}`, {
+            method: "DELETE",
+            namespace: selectedWorkspace,
+          }).catch(() => null),
         ),
       );
       setSelected(new Set());
@@ -342,6 +375,7 @@ export default function AdminTeamPage() {
       <Header
         admin={state.status === "loaded" ? state.admin : null}
         counts={counts}
+        inviteDisabled={Boolean(invitationError)}
         onInvite={() => setInviteOpen(true)}
       />
 
@@ -380,6 +414,8 @@ export default function AdminTeamPage() {
               showServiceColumn={false}
             />
           )
+        ) : tab === "pending" && invitationError ? (
+          <Empty>Pending invitations unavailable — {invitationError}</Empty>
         ) : tab === "pending" ? (
           filteredPending.length === 0 ? (
             <Empty>
@@ -457,6 +493,7 @@ export default function AdminTeamPage() {
 
       {inviteOpen ? (
         <InviteDialog
+          namespace={selectedWorkspace}
           onClose={() => setInviteOpen(false)}
           onCreated={onInviteCreated}
           onError={(m) => setToast(m)}
@@ -473,10 +510,12 @@ export default function AdminTeamPage() {
 function Header({
   admin,
   counts,
+  inviteDisabled,
   onInvite,
 }: {
   admin: AdminStatus | null;
   counts: Record<TabId, number>;
+  inviteDisabled: boolean;
   onInvite: () => void;
 }) {
   return (
@@ -552,6 +591,8 @@ function Header({
       <button
         type="button"
         onClick={onInvite}
+        disabled={inviteDisabled}
+        title={inviteDisabled ? "Pending invitations unavailable" : undefined}
         style={{
           fontFamily: "var(--font-plex-mono)",
           fontSize: 11,
@@ -561,7 +602,8 @@ function Header({
           background: "var(--ink)",
           color: "var(--panel)",
           border: "1px solid var(--ink)",
-          cursor: "pointer",
+          cursor: inviteDisabled ? "not-allowed" : "pointer",
+          opacity: inviteDisabled ? 0.5 : 1,
         }}
       >
         Invite member
@@ -1055,10 +1097,12 @@ function RowAction({
 }
 
 function InviteDialog({
+  namespace,
   onClose,
   onCreated,
   onError,
 }: {
+  namespace: string | null;
   onClose: () => void;
   onCreated: () => void;
   onError: (m: string) => void;
@@ -1076,12 +1120,12 @@ function InviteDialog({
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    void adminFetch<Namespace[]>("/admin/namespaces")
+    void adminFetch<Namespace[]>("/admin/namespaces", { namespace })
       .then((ns) =>
         setNamespaces(ns.filter((n) => n.status === "active")),
       )
       .catch(() => setNamespaces([]));
-  }, []);
+  }, [namespace]);
 
   const toggleNs = (name: string) => {
     setSelectedNs((prev) => {
@@ -1102,6 +1146,7 @@ function InviteDialog({
         .filter((s) => s.length > 0);
       await adminFetch("/admin/invitations", {
         method: "POST",
+        namespace,
         body: JSON.stringify({
           email: email.trim().toLowerCase(),
           role_template: role,
