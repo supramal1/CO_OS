@@ -9,11 +9,16 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import {
+  addAndSelectWorkspace,
+  normalizeWorkspaces,
+} from "@/components/admin/workspace-state";
 
 type AdminWorkspaceContextValue = {
   workspaces: string[];
   selectedWorkspace: string | null;
   setSelectedWorkspace: (workspace: string) => void;
+  registerWorkspace: (workspace: string) => void;
   hasWorkspaceAccess: boolean;
   hasMultipleWorkspaces: boolean;
 };
@@ -30,58 +35,75 @@ export function AdminWorkspaceProvider({
   principalId: string | null;
   workspaces: string[];
 }) {
-  const normalizedWorkspaces = useMemo(
-    () =>
-      Array.from(
-        new Set(workspaces.map((workspace) => workspace.trim()).filter(Boolean)),
-      ).sort((a, b) => a.localeCompare(b)),
-    [workspaces],
+  const incomingWorkspacesKey = workspaces.join("\0");
+  const incomingWorkspaces = useMemo(
+    () => normalizeWorkspaces(workspaces),
+    [incomingWorkspacesKey],
   );
 
   const storageKey = `co-os:admin:selected-workspace:${principalId ?? "anonymous"}`;
+  const [workspaceList, setWorkspaceList] = useState<string[]>(
+    () => incomingWorkspaces,
+  );
   const [selectedWorkspace, setSelectedWorkspaceState] = useState<string | null>(
-    normalizedWorkspaces[0] ?? null,
+    incomingWorkspaces[0] ?? null,
   );
 
   useEffect(() => {
-    if (normalizedWorkspaces.length === 0) {
+    setWorkspaceList(incomingWorkspaces);
+  }, [incomingWorkspacesKey, incomingWorkspaces]);
+
+  useEffect(() => {
+    if (workspaceList.length === 0) {
       setSelectedWorkspaceState(null);
       return;
     }
 
-    if (normalizedWorkspaces.length === 1) {
-      setSelectedWorkspaceState(normalizedWorkspaces[0]);
+    if (workspaceList.length === 1) {
+      setSelectedWorkspaceState(workspaceList[0]);
       return;
     }
 
     const saved = window.localStorage.getItem(storageKey);
-    setSelectedWorkspaceState(
-      saved && normalizedWorkspaces.includes(saved)
-        ? saved
-        : normalizedWorkspaces[0],
-    );
-  }, [normalizedWorkspaces, storageKey]);
+    setSelectedWorkspaceState((current) => {
+      if (current && workspaceList.includes(current)) return current;
+      return saved && workspaceList.includes(saved) ? saved : workspaceList[0];
+    });
+  }, [workspaceList, storageKey]);
 
   const setSelectedWorkspace = useCallback(
     (workspace: string) => {
-      if (!normalizedWorkspaces.includes(workspace)) return;
+      if (!workspaceList.includes(workspace)) return;
       setSelectedWorkspaceState(workspace);
-      if (normalizedWorkspaces.length > 1) {
+      if (workspaceList.length > 1) {
         window.localStorage.setItem(storageKey, workspace);
       }
     },
-    [normalizedWorkspaces, storageKey],
+    [workspaceList, storageKey],
+  );
+
+  const registerWorkspace = useCallback(
+    (workspace: string) => {
+      const next = addAndSelectWorkspace(workspaceList, workspace);
+      setWorkspaceList(next.workspaces);
+      setSelectedWorkspaceState(next.selectedWorkspace);
+      if (next.selectedWorkspace && next.workspaces.length > 1) {
+        window.localStorage.setItem(storageKey, next.selectedWorkspace);
+      }
+    },
+    [workspaceList, storageKey],
   );
 
   const value = useMemo<AdminWorkspaceContextValue>(
     () => ({
-      workspaces: normalizedWorkspaces,
+      workspaces: workspaceList,
       selectedWorkspace,
       setSelectedWorkspace,
-      hasWorkspaceAccess: normalizedWorkspaces.length > 0,
-      hasMultipleWorkspaces: normalizedWorkspaces.length > 1,
+      registerWorkspace,
+      hasWorkspaceAccess: workspaceList.length > 0,
+      hasMultipleWorkspaces: workspaceList.length > 1,
     }),
-    [normalizedWorkspaces, selectedWorkspace, setSelectedWorkspace],
+    [workspaceList, selectedWorkspace, setSelectedWorkspace, registerWorkspace],
   );
 
   return (

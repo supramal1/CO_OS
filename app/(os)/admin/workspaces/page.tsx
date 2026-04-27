@@ -44,7 +44,7 @@ function formatDate(iso: string) {
 
 export default function AdminWorkspacesPage() {
   const router = useRouter();
-  const { selectedWorkspace } = useAdminWorkspace();
+  const { registerWorkspace, selectedWorkspace } = useAdminWorkspace();
   const [state, setState] = useState<ListState>({ status: "loading" });
   const [filter, setFilter] = useState<Filter>("active");
   const [search, setSearch] = useState("");
@@ -129,8 +129,10 @@ export default function AdminWorkspacesPage() {
       if (s.status !== "loaded") return s;
       return { ...s, namespaces: [created, ...s.namespaces] };
     });
+    registerWorkspace(created.name);
     setCreateOpen(false);
     router.push(`/admin/workspaces/${created.name}`);
+    router.refresh();
   };
 
   const archiveOne = async (ns: Namespace) => {
