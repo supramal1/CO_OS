@@ -9,6 +9,7 @@
 import type { Agent } from "../types.js";
 import { AI_OPS_WORKSPACE } from "../types.js";
 import { cornerstoneToolBuilders } from "../integrations/cornerstone.js";
+import { cookbookToolBuilders } from "../integrations/cookbook.js";
 
 export const donald: Agent = {
   id: "donald",
@@ -22,6 +23,10 @@ export const donald: Agent = {
   defaultWorkspace: AI_OPS_WORKSPACE,
   // "donald" scope mounts the steward family in addition to the standard
   // read+write surface. steward_apply is mounted but blocked at the
-  // dispatch layer.
-  toolBuilders: cornerstoneToolBuilders("donald"),
+  // dispatch layer. Cookbook reads let Donald load memory-hygiene
+  // protocols before recommending mutations.
+  toolBuilders: [
+    ...cornerstoneToolBuilders("donald"),
+    ...cookbookToolBuilders(),
+  ],
 };

@@ -323,13 +323,21 @@ export async function invokeAgent(
         runningCostUsd: round6(totalCostUsd),
       });
 
-      // Capture assistant text — we keep the latest non-empty text as final output.
+      // Capture assistant text — accumulate non-empty turns rather than
+      // overwriting. Multi-turn agents (e.g. Ada) often write the
+      // user-facing deliverable in turn N alongside a tool call (e.g.
+      // save_conversation) and then close in turn N+1 with a short
+      // ack like "Saved." The previous "keep the latest" rule lost the
+      // deliverable to the closing line. Joining preserves the entire
+      // user-visible narrative.
       const assistantText = response.content
         .filter((b): b is Anthropic.Messages.TextBlock => b.type === "text")
         .map((b) => b.text)
         .join("\n")
         .trim();
-      if (assistantText.length > 0) finalText = assistantText;
+      if (assistantText.length > 0) {
+        finalText = finalText ? `${finalText}\n\n${assistantText}` : assistantText;
+      }
 
       // Append the assistant turn to the running messages array verbatim.
       messages.push({ role: "assistant", content: response.content });

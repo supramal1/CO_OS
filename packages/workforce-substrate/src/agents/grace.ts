@@ -14,6 +14,7 @@ import {
   cornerstoneTool,
 } from "../integrations/cornerstone.js";
 import { githubToolBuilders } from "../integrations/github.js";
+import { cookbookToolBuilders } from "../integrations/cookbook.js";
 
 export const grace: Agent = {
   id: "grace",
@@ -29,6 +30,9 @@ export const grace: Agent = {
     ...cornerstoneToolBuilders("read-only"),
     cornerstoneTool("add_fact"),
     cornerstoneTool("save_conversation"),
+    // Cookbook reads — Grace pulls implementation playbooks (PR
+    // conventions, branch naming) instead of guessing from training data.
+    ...cookbookToolBuilders(),
     ...githubToolBuilders("grace"),
   ],
 };

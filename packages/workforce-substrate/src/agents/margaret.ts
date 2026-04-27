@@ -9,6 +9,7 @@
 import type { Agent } from "../types.js";
 import { AI_OPS_WORKSPACE } from "../types.js";
 import { buildWebSearchTool } from "../integrations/web-search.js";
+import { cookbookToolBuilders } from "../integrations/cookbook.js";
 
 export const margaret: Agent = {
   id: "margaret",
@@ -23,5 +24,11 @@ export const margaret: Agent = {
   outputHeavy: true,
   reportsTo: "ada",
   defaultWorkspace: AI_OPS_WORKSPACE,
-  toolBuilders: [buildWebSearchTool()],
+  toolBuilders: [
+    // Cookbook reads — Margaret pulls how-to-run-investigation and any
+    // research playbooks before answering. Forces tool-use over training-
+    // data-only responses.
+    ...cookbookToolBuilders(),
+    buildWebSearchTool(),
+  ],
 };

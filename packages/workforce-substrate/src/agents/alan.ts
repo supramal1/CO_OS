@@ -11,6 +11,7 @@ import {
   cornerstoneTool,
 } from "../integrations/cornerstone.js";
 import { buildWebSearchTool } from "../integrations/web-search.js";
+import { cookbookToolBuilders } from "../integrations/cookbook.js";
 
 export const alan: Agent = {
   id: "alan",
@@ -26,6 +27,9 @@ export const alan: Agent = {
     ...cornerstoneToolBuilders("read-only"),
     cornerstoneTool("add_fact"),
     cornerstoneTool("save_conversation"),
+    // Cookbook reads — Alan loads architecture decision protocols before
+    // emitting rulings instead of relying on training-data heuristics.
+    ...cookbookToolBuilders(),
     buildWebSearchTool(),
   ],
 };

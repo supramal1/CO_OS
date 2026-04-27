@@ -74,7 +74,7 @@ async function parseSseJsonRpc(body: ReadableStream<Uint8Array>): Promise<McpRes
 
 let requestCounter = 0;
 
-async function callMcpTool<T>(
+export async function callMcpTool<T>(
   apiKey: string,
   name: string,
   args: Record<string, unknown> = {},

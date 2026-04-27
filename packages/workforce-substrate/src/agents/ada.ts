@@ -13,6 +13,7 @@ import {
 } from "../integrations/cornerstone.js";
 import { buildDelegateTaskTool } from "../integrations/delegation.js";
 import { buildWebSearchTool } from "../integrations/web-search.js";
+import { cookbookToolBuilders } from "../integrations/cookbook.js";
 
 export const ada: Agent = {
   id: "ada",
@@ -30,6 +31,9 @@ export const ada: Agent = {
     // Lead writes only save_conversation — Ada synthesises but does not
     // pollute facts directly. add_fact is a specialist responsibility.
     cornerstoneTool("save_conversation"),
+    // Cookbook reads — Ada checks decision protocols before delegating
+    // (e.g. agent-handoff-protocol) instead of answering from training data.
+    ...cookbookToolBuilders(),
     // Lead-only delegation tool.
     buildDelegateTaskTool(),
     // Server-side web search for quick checks Ada can answer herself
