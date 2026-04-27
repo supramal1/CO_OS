@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { CORNERSTONE_URL } from "@/lib/cornerstone";
+import { resolveForgeNamespace } from "@/lib/forge-namespace";
 
 export const dynamic = "force-dynamic";
 
@@ -13,8 +14,18 @@ export async function GET(req: NextRequest) {
   if (!session.isAdmin) {
     return NextResponse.json({ error: "admin_only" }, { status: 403 });
   }
+  const namespace = await resolveForgeNamespace(
+    session.apiKey,
+    req.nextUrl.searchParams.get("namespace"),
+  );
+  if (!namespace.ok) {
+    return NextResponse.json(
+      { error: namespace.error },
+      { status: namespace.status },
+    );
+  }
   const url = new URL(`${CORNERSTONE_URL}/forge/tasks`);
-  url.searchParams.set("namespace", "default");
+  url.searchParams.set("namespace", namespace.namespace);
   const status = req.nextUrl.searchParams.get("status");
   if (status) url.searchParams.set("status", status);
   const agentId = req.nextUrl.searchParams.get("agent_id");
@@ -41,9 +52,19 @@ export async function POST(req: NextRequest) {
   if (!session.isAdmin) {
     return NextResponse.json({ error: "admin_only" }, { status: 403 });
   }
+  const namespace = await resolveForgeNamespace(
+    session.apiKey,
+    req.nextUrl.searchParams.get("namespace"),
+  );
+  if (!namespace.ok) {
+    return NextResponse.json(
+      { error: namespace.error },
+      { status: namespace.status },
+    );
+  }
   const payload = await req.text();
   const upstream = await fetch(
-    `${CORNERSTONE_URL}/forge/tasks?namespace=default`,
+    `${CORNERSTONE_URL}/forge/tasks?namespace=${encodeURIComponent(namespace.namespace)}`,
     {
       method: "POST",
       headers: {

@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import Anthropic from "@anthropic-ai/sdk";
 import { authOptions } from "@/lib/auth";
 import { CORNERSTONE_URL } from "@/lib/cornerstone";
+import { resolveForgeNamespace } from "@/lib/forge-namespace";
 
 export const dynamic = "force-dynamic";
 
@@ -99,10 +100,11 @@ function write(
 
 async function callSearchBriefs(
   apiKey: string,
+  namespace: string,
   query: string,
 ): Promise<{ matches: unknown[]; error?: string }> {
   const url = new URL(`${CORNERSTONE_URL}/forge/briefs`);
-  url.searchParams.set("namespace", "default");
+  url.searchParams.set("namespace", namespace);
   url.searchParams.set("limit", "10");
   const res = await fetch(url.toString(), {
     headers: { "X-API-Key": apiKey },
@@ -136,9 +138,10 @@ async function callSearchBriefs(
 
 async function callSubmitBrief(
   apiKey: string,
+  namespace: string,
   input: Record<string, unknown>,
 ): Promise<{ id?: string; error?: string }> {
-  const res = await fetch(`${CORNERSTONE_URL}/forge/briefs?namespace=default`, {
+  const res = await fetch(`${CORNERSTONE_URL}/forge/briefs?namespace=${encodeURIComponent(namespace)}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -161,6 +164,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
   const apiKey = session.apiKey;
+  const namespace = await resolveForgeNamespace(
+    apiKey,
+    req.nextUrl.searchParams.get("namespace"),
+  );
+  if (!namespace.ok) {
+    return NextResponse.json(
+      { error: namespace.error },
+      { status: namespace.status },
+    );
+  }
 
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   if (!anthropicKey) {
@@ -239,10 +252,15 @@ export async function POST(req: NextRequest) {
           let payload: Record<string, unknown>;
           if (use.name === "search_existing_briefs") {
             const input = use.input as { query: string };
-            payload = await callSearchBriefs(apiKey, input.query ?? "");
+            payload = await callSearchBriefs(
+              apiKey,
+              namespace.namespace,
+              input.query ?? "",
+            );
           } else if (use.name === "submit_brief") {
             payload = await callSubmitBrief(
               apiKey,
+              namespace.namespace,
               use.input as Record<string, unknown>,
             );
             if (payload.id) {
