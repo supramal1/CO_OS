@@ -344,6 +344,8 @@ interface CornerstoneRuntime {
    * test seams that bypass makeRuntime can leave this undefined.
    */
   readonly eventLog?: ToolBuildContext["eventLog"];
+  readonly getRecentMessages?: ToolBuildContext["getRecentMessages"];
+  readonly honchoSessionId: string;
 }
 
 interface ApiOk {
@@ -591,6 +593,11 @@ async function runAddFact(
     category: asOptStr(input.category) ?? "general",
     confidence: typeof input.confidence === "number" ? input.confidence : 0.9,
   };
+  const context = rt.getRecentMessages?.() ?? [];
+  if (context.length > 0) {
+    body.conversation_context = context;
+    body.honcho_session_id = rt.honchoSessionId;
+  }
   const res = await callApi(rt, "POST", "/memory/fact", { body });
   if (!res.ok) return mapApiError(res, writeNs, rt.taskWorkspace);
   return { status: "ok", output: res.body };
@@ -875,6 +882,8 @@ function makeRuntime(ctx: ToolBuildContext, fetchImpl?: typeof fetch): Cornersto
     taskWorkspace,
     requestApproval: ctx.requestApproval,
     eventLog: ctx.eventLog,
+    getRecentMessages: ctx.getRecentMessages,
+    honchoSessionId: ctx.task.id,
   };
 }
 

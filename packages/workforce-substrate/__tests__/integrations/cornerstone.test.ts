@@ -41,7 +41,10 @@ function makeTask(targetWorkspace?: string): Task {
   };
 }
 
-function makeCtx(task: Task = makeTask("aiops")): ToolBuildContext {
+function makeCtx(
+  task: Task = makeTask("aiops"),
+  recentMessages?: ToolBuildContext["getRecentMessages"],
+): ToolBuildContext {
   return {
     agent: makeAgent(),
     task,
@@ -65,6 +68,7 @@ function makeCtx(task: Task = makeTask("aiops")): ToolBuildContext {
     anthropicApiKey: "test",
     cornerstoneApiKey: "csk_test",
     cornerstoneApiBaseUrl: "https://cornerstone.test",
+    getRecentMessages: recentMessages,
   };
 }
 
@@ -193,6 +197,35 @@ describe("cornerstone — write namespace forcing", () => {
       },
     });
     expect(payload?.["namespace"]).toBe("aiops");
+  });
+
+  it("add_fact injects recent runtime messages as conversation_context", async () => {
+    let payload: Record<string, unknown> | undefined;
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      payload =
+        typeof init?.body === "string"
+          ? (JSON.parse(init.body as string) as Record<string, unknown>)
+          : undefined;
+      return jsonResponse(200, { ok: true });
+    }) as unknown as typeof fetch;
+    const recentMessages = () => [
+      { role: "user" as const, content: "T4 Alan needs to re-spec the approval gate." },
+      { role: "assistant" as const, content: "Alan should bind apply to Mal approval evidence." },
+    ];
+    const ctx = makeCtx(makeTask("aiops"), recentMessages);
+    const tool = cornerstoneToolForTest("add_fact", fetchMock)(ctx);
+
+    await tool.dispatch({
+      name: "add_fact",
+      toolUseId: "u1",
+      input: {
+        key: "alan_respec",
+        value: "Alan re-spec approved 2026-04-29.",
+      },
+    });
+
+    expect(payload?.["conversation_context"]).toEqual(recentMessages());
+    expect(payload?.["honcho_session_id"]).toBe("task-1");
   });
 });
 

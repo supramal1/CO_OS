@@ -147,6 +147,11 @@ export interface ToolCallInput {
 
 export type ToolCallResultStatus = "ok" | "error" | "blocked";
 
+export interface ConversationContextMessage {
+  readonly role: "user" | "assistant";
+  readonly content: string;
+}
+
 // ---------------------------------------------------------------------------
 // Approval hook (Path Y — see docs/superpowers/specs/2026-04-26-wf6-approval-inbox-design.md)
 //
@@ -237,6 +242,12 @@ export interface ToolBuildContext {
    * inbox UI wired up, e.g. CLI / unit tests).
    */
   readonly requestApproval?: (req: ApprovalRequest) => Promise<ApprovalDecision>;
+  /**
+   * Runtime-supplied recent conversation around the current task. Cornerstone
+   * write tools use this to mirror add_fact context to Honcho without relying
+   * on the model to manually pass its own transcript.
+   */
+  readonly getRecentMessages?: () => readonly ConversationContextMessage[];
 }
 
 // ---------------------------------------------------------------------------

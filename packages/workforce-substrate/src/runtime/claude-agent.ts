@@ -21,6 +21,7 @@ import {
   type Agent,
   type AnthropicMessageParam,
   type AnthropicToolResultBlockParam,
+  type ConversationContextMessage,
   type EventLog,
   type InvocationOptions,
   type Task,
@@ -177,6 +178,7 @@ export async function invokeAgent(
   const recursiveInvoker = options.depth !== undefined && options.roster
     ? buildChildInvoker(options, eventLog)
     : buildChildInvoker({ ...options, depth: options.depth ?? 0 }, eventLog);
+  let messages: AnthropicMessageParam[] = [];
 
   const toolBuildCtx: ToolBuildContext = {
     agent,
@@ -191,6 +193,7 @@ export async function invokeAgent(
     graceGithubOrg,
     graceGithubBranchPrefix,
     requestApproval: options.requestApproval,
+    getRecentMessages: () => recentConversationMessages(messages),
   };
 
   let tools: Tool[];
@@ -257,7 +260,7 @@ export async function invokeAgent(
   // ---- Run the loop ----
   const clientFactory = options.clientFactory ?? defaultClientFactory;
   const client = clientFactory(anthropicApiKey);
-  const messages: AnthropicMessageParam[] = [{ role: "user", content: userMessageContent }];
+  messages = [{ role: "user", content: userMessageContent }];
   const childResults: TaskResult[] = [];
   const toolByName = new Map<string, Tool>(tools.map((t) => [t.spec.name, t] as const));
 
@@ -530,6 +533,29 @@ function serialiseToolOutput(result: ToolCallResult): string {
   } catch {
     return String(result.output ?? "");
   }
+}
+
+function recentConversationMessages(
+  messages: readonly AnthropicMessageParam[],
+): ConversationContextMessage[] {
+  const context: ConversationContextMessage[] = [];
+  for (const message of messages) {
+    if (message.role !== "user" && message.role !== "assistant") continue;
+    const content = textContentForHoncho(message.content);
+    if (content) {
+      context.push({ role: message.role, content });
+    }
+  }
+  return context.slice(-8);
+}
+
+function textContentForHoncho(content: AnthropicMessageParam["content"]): string {
+  if (typeof content === "string") return content.trim();
+  if (!Array.isArray(content)) return "";
+  return content
+    .flatMap((block) => (block.type === "text" ? [block.text] : []))
+    .join("\n")
+    .trim();
 }
 
 function round6(n: number): number {
