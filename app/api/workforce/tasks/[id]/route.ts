@@ -1,0 +1,24 @@
+import { NextResponse, type NextRequest } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { getTaskDetail } from "@/lib/workforce/runner";
+
+export const dynamic = "force-dynamic";
+
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: { id: string } },
+) {
+  const session = await getServerSession(authOptions);
+  if (!session?.apiKey || !session.principalId) {
+    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+  }
+  if (!session.isAdmin) {
+    return NextResponse.json({ error: "admin_only" }, { status: 403 });
+  }
+  const detail = await getTaskDetail(params.id, session.principalId);
+  if (!detail) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+  return NextResponse.json(detail);
+}

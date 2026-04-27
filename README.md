@@ -47,10 +47,20 @@ Use a `@charlieoscar.com` Google account (or an address listed in `CO_OS_ALLOWED
 - `app/(os)/` — authenticated route group sharing the top-bar shell
 - `app/api/cookbook/*` — thin proxy routes wrapping the Cookbook MCP (`lib/cookbook-client.ts`)
 - `app/api/cornerstone/query` — streaming proxy to Cornerstone `/answer` (NDJSON passthrough)
+- `app/api/workforce/*` — HTTP API around `@workforce/substrate` (dispatch, list, detail, cancel, SSE event stream, health)
 - `components/cookbook/*` — Cookbook UI; fetches from `/api/cookbook/skills`
 - `components/cornerstone/*` — Chat UI; posts to `/api/cornerstone/query`, parses NDJSON via `lib/cornerstone-stream.ts`
+- `components/workforce/*` — minimal functional dispatch UI (pixel office lands Night 2 on top of this)
 - `lib/auth.ts` — NextAuth Google OAuth + principal resolution
 - `lib/cornerstone.ts` — server helpers (`resolveEmailToPrincipal`, `checkAdminCapability`, `listWorkspaces`)
+- `lib/workforce/*` — runner bridge between HTTP API and the substrate (in-memory registry + Supabase persistence + SSE pub/sub)
+- `packages/workforce-substrate/` — the v0 AI Ops workforce (Ada/Alan/Grace/Margaret/Donald) on Anthropic Messages API + Cornerstone + delegate_task. Imported via tsconfig path alias; Next bundles it via `transpilePackages`.
+
+## Workforce module
+
+Admin-only at `/workforce`. Lead-rooted dispatch (always Ada in v0); Ada delegates to specialists in-process. Live event log via SSE, cost/duration/output persisted to Supabase. See `packages/workforce-substrate/docs/co-os-smoke-runbook.md` for the dogfood smoke walkthrough.
+
+Required additional env beyond the table above: `ANTHROPIC_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `GRACE_GITHUB_PAT`, `GRACE_GITHUB_ORG` (defaults `Forgeautomatedrepo`).
 
 ## Deploy
 

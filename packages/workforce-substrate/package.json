@@ -1,0 +1,26 @@
+{
+  "name": "@co/workforce-substrate",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Charlie Oscar AI Ops workforce substrate v0 — Claude Agent SDK + Cornerstone + delegate_task on a single in-process synchronous runtime, CLI-invokable.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "bin": {
+    "wf-invoke": "./bin/invoke.ts"
+  },
+  "scripts": {
+    "test": "vitest run --config vitest.config.ts",
+    "test:watch": "vitest --config vitest.config.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "invoke": "tsx bin/invoke.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.90.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "tsx": "^4.19.0",
+    "typescript": "^5",
+    "vitest": "^3.2.4"
+  }
+}
