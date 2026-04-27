@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 
 async function handler(
   req: NextRequest,
-  { params }: { params: { path: string[] } },
+  { params }: { params: Promise<{ path: string[] }> },
 ) {
   const session = await getServerSession(authOptions);
   if (!session?.apiKey) {
@@ -21,7 +21,7 @@ async function handler(
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
-  const { path } = params;
+  const { path } = await params;
   const adminPath = `/admin/${path.join("/")}`;
   const upstreamUrl = new URL(`${CORNERSTONE_URL}${adminPath}`);
   req.nextUrl.searchParams.forEach((value, key) => {

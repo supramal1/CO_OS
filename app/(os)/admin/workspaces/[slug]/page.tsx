@@ -8,7 +8,6 @@ import type {
   Namespace,
   Principal,
   NamespaceGrant,
-  SetupClientResult,
 } from "@/lib/admin-types";
 import { StatusPill } from "@/components/admin/status-pill";
 import {
@@ -19,7 +18,10 @@ import {
   Toast,
   modalInputStyle,
 } from "@/components/admin/modal";
-import { CredentialReveal } from "@/components/admin/credential-reveal";
+import {
+  filterGrantablePrincipals,
+  workspaceGrantSuccessMessage,
+} from "@/components/admin/grant-access-state";
 
 type MemberRow = { principal: Principal; grant: NamespaceGrant };
 
@@ -79,7 +81,6 @@ export default function AdminWorkspaceDetailPage({
   const [removeConnectionTarget, setRemoveConnectionTarget] = useState<ConnectionRow | null>(null);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [permanentDeleteOpen, setPermanentDeleteOpen] = useState(false);
-  const [revealKey, setRevealKey] = useState<string | null>(null);
 
   const loadAll = useCallback(async () => {
     setState({ status: "loading" });
@@ -333,12 +334,13 @@ export default function AdminWorkspaceDetailPage({
       {addMemberOpen ? (
         <AddMemberDialog
           slug={slug}
+          workspaceName={displayName}
           existingMemberIds={new Set(members.map((m) => m.principal.id))}
           onClose={() => setAddMemberOpen(false)}
-          onAdded={(rawKey) => {
+          onAdded={() => {
             setAddMemberOpen(false);
             void loadAll();
-            if (rawKey) setRevealKey(rawKey);
+            setToast(workspaceGrantSuccessMessage(displayName));
           }}
           onError={(m) => setToast(m)}
         />
@@ -403,13 +405,6 @@ export default function AdminWorkspaceDetailPage({
             }
           }}
           onError={(m) => setToast(m)}
-        />
-      ) : null}
-
-      {revealKey ? (
-        <CredentialReveal
-          rawKey={revealKey}
-          onClose={() => setRevealKey(null)}
         />
       ) : null}
 
@@ -827,23 +822,22 @@ function ConnectionsList({
 
 function AddMemberDialog({
   slug,
+  workspaceName,
   existingMemberIds,
   onClose,
   onAdded,
   onError,
 }: {
   slug: string;
+  workspaceName: string;
   existingMemberIds: Set<string>;
   onClose: () => void;
-  onAdded: (rawKey?: string) => void;
+  onAdded: () => void;
   onError: (m: string) => void;
 }) {
-  const [tab, setTab] = useState<"existing" | "new">("existing");
   const [available, setAvailable] = useState<Principal[] | null>(null);
   const [selected, setSelected] = useState("");
   const [accessLevel, setAccessLevel] = useState("read");
-  const [newName, setNewName] = useState("");
-  const [newType, setNewType] = useState<"human" | "service">("human");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -852,16 +846,12 @@ function AddMemberDialog({
         const all = await adminFetch<Principal[]>("/admin/principals", {
           namespace: slug,
         });
-        setAvailable(
-          all.filter(
-            (p) => !existingMemberIds.has(p.id) && p.status === "active",
-          ),
-        );
+        setAvailable(filterGrantablePrincipals(all, existingMemberIds));
       } catch {
         setAvailable([]);
       }
     })();
-  }, [existingMemberIds]);
+  }, [existingMemberIds, slug]);
 
   const grantExisting = async () => {
     if (!selected) return;
@@ -880,131 +870,66 @@ function AddMemberDialog({
     }
   };
 
-  const setupNew = async () => {
-    if (!newName.trim()) return;
-    setBusy(true);
-    try {
-      const result = await adminFetch<SetupClientResult>(
-        `/admin/workspaces/${slug}/setup-client`,
-        {
-          method: "POST",
-          namespace: slug,
-          body: JSON.stringify({
-            principal_name: newName.trim(),
-            type: newType,
-          }),
-        },
-      );
-      onAdded(result.raw_key);
-    } catch (err) {
-      onError(err instanceof Error ? err.message : "create failed");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
-    <Modal title="Add member" onClose={onClose}>
-      <div
+    <Modal title="Grant workspace access" onClose={onClose}>
+      <p
         style={{
-          display: "flex",
-          gap: 0,
-          border: "1px solid var(--rule)",
-          alignSelf: "flex-start",
+          margin: 0,
+          fontFamily: "var(--font-plex-sans)",
+          fontSize: 14,
+          color: "var(--ink-dim)",
         }}
       >
-        {(["existing", "new"] as const).map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => setTab(t)}
+        Give an existing principal access to {workspaceName}. No new key is
+        needed; their existing key will work.
+      </p>
+      <Field label="User">
+        <select
+          value={selected}
+          onChange={(e) => setSelected(e.target.value)}
+          style={modalInputStyle}
+          disabled={!available || available.length === 0}
+        >
+          <option value="">
+            {available === null ? "Loading…" : "Select a user…"}
+          </option>
+          {(available ?? []).map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+              {p.email ? ` (${p.email})` : ""}
+            </option>
+          ))}
+        </select>
+        {available?.length === 0 ? (
+          <span
             style={{
-              fontFamily: "var(--font-plex-mono)",
-              fontSize: 10,
-              letterSpacing: "0.14em",
-              textTransform: "uppercase",
-              padding: "5px 12px",
-              border: "none",
-              borderRight: t === "existing" ? "1px solid var(--rule)" : "none",
-              background: tab === t ? "var(--ink)" : "transparent",
-              color: tab === t ? "var(--panel)" : "var(--ink-dim)",
-              cursor: "pointer",
+              fontFamily: "var(--font-plex-sans)",
+              fontSize: 12,
+              color: "var(--ink-dim)",
+              marginTop: 4,
             }}
           >
-            {t === "existing" ? "Existing user" : "New user"}
-          </button>
-        ))}
-      </div>
-
-      {tab === "existing" ? (
-        <>
-          <Field label="User">
-            <select
-              value={selected}
-              onChange={(e) => setSelected(e.target.value)}
-              style={modalInputStyle}
-              disabled={!available}
-            >
-              <option value="">
-                {available === null ? "Loading…" : "Select a user…"}
-              </option>
-              {(available ?? []).map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                  {p.email ? ` (${p.email})` : ""}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Access level">
-            <select
-              value={accessLevel}
-              onChange={(e) => setAccessLevel(e.target.value)}
-              style={modalInputStyle}
-            >
-              <option value="read">Read</option>
-              <option value="write">Write</option>
-              <option value="admin">Admin</option>
-            </select>
-          </Field>
-          <ModalFooter
-            primaryLabel={busy ? "Adding…" : "Grant access"}
-            primaryDisabled={busy || !selected}
-            onPrimary={grantExisting}
-            onCancel={onClose}
-          />
-        </>
-      ) : (
-        <>
-          <Field label="Name">
-            <input
-              autoFocus
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="e.g. jane-smith or claude-code--acme"
-              style={modalInputStyle}
-            />
-          </Field>
-          <Field label="Type">
-            <select
-              value={newType}
-              onChange={(e) =>
-                setNewType(e.target.value as "human" | "service")
-              }
-              style={modalInputStyle}
-            >
-              <option value="human">Human</option>
-              <option value="service">Service</option>
-            </select>
-          </Field>
-          <ModalFooter
-            primaryLabel={busy ? "Creating…" : "Create & grant"}
-            primaryDisabled={busy || !newName.trim()}
-            onPrimary={setupNew}
-            onCancel={onClose}
-          />
-        </>
-      )}
+            Every active principal already has access to this workspace.
+          </span>
+        ) : null}
+      </Field>
+      <Field label="Access level">
+        <select
+          value={accessLevel}
+          onChange={(e) => setAccessLevel(e.target.value)}
+          style={modalInputStyle}
+        >
+          <option value="read">Read</option>
+          <option value="write">Write</option>
+          <option value="admin">Admin</option>
+        </select>
+      </Field>
+      <ModalFooter
+        primaryLabel={busy ? "Adding…" : "Grant access"}
+        primaryDisabled={busy || !selected}
+        onPrimary={grantExisting}
+        onCancel={onClose}
+      />
     </Modal>
   );
 }

@@ -82,7 +82,7 @@ function formatRelative(iso: string) {
 }
 
 export default function AdminTeamPage() {
-  const { selectedWorkspace, workspaces } = useAdminWorkspace();
+  const { selectedWorkspace, adminWorkspaces } = useAdminWorkspace();
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [tab, setTab] = useState<TabId>("active");
   const [search, setSearch] = useState("");
@@ -375,7 +375,6 @@ export default function AdminTeamPage() {
       <Header
         admin={state.status === "loaded" ? state.admin : null}
         counts={counts}
-        inviteDisabled={Boolean(invitationError)}
         onInvite={() => setInviteOpen(true)}
       />
 
@@ -494,7 +493,7 @@ export default function AdminTeamPage() {
       {inviteOpen ? (
         <InviteDialog
           namespace={selectedWorkspace}
-          workspaces={workspaces}
+          workspaces={adminWorkspaces}
           onClose={() => setInviteOpen(false)}
           onCreated={onInviteCreated}
           onError={(m) => setToast(m)}
@@ -511,12 +510,10 @@ export default function AdminTeamPage() {
 function Header({
   admin,
   counts,
-  inviteDisabled,
   onInvite,
 }: {
   admin: AdminStatus | null;
   counts: Record<TabId, number>;
-  inviteDisabled: boolean;
   onInvite: () => void;
 }) {
   return (
@@ -592,8 +589,6 @@ function Header({
       <button
         type="button"
         onClick={onInvite}
-        disabled={inviteDisabled}
-        title={inviteDisabled ? "Pending invitations unavailable" : undefined}
         style={{
           fontFamily: "var(--font-plex-mono)",
           fontSize: 11,
@@ -603,8 +598,7 @@ function Header({
           background: "var(--ink)",
           color: "var(--panel)",
           border: "1px solid var(--ink)",
-          cursor: inviteDisabled ? "not-allowed" : "pointer",
-          opacity: inviteDisabled ? 0.5 : 1,
+          cursor: "pointer",
         }}
       >
         Invite member
@@ -1137,11 +1131,12 @@ function InviteDialog({
 
   const submit = async () => {
     if (!email.trim() || selectedNs.size === 0) return;
+    const inviteNamespace = Array.from(selectedNs)[0] ?? namespace;
     setBusy(true);
     try {
       await adminFetch("/admin/invitations", {
         method: "POST",
-        namespace,
+        namespace: inviteNamespace,
         body: JSON.stringify(
           buildInvitationRequest({
             email,

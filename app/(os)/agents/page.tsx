@@ -22,6 +22,7 @@ export default async function AgentsPage() {
     <AdminWorkspaceProvider
       principalId={session.principalId}
       workspaces={workspaces}
+      adminWorkspaces={workspaces}
     >
       <AdminWorkspaceGate>
         <AgentsBoard />
