@@ -1,16 +1,11 @@
 // Alan — Architect specialist.
 //
-// Reports to Ada. Reads Cornerstone for prior decisions, writes facts to
-// capture architectural rulings, saves conversations for the why. Web search
-// for current-tech checks. No delegation — specialists never delegate in v0.
+// Reports to Ada. Reads Cornerstone for prior decisions and saves
+// conversations for the why. No delegation — specialists never delegate in v0.
 
 import type { Agent } from "../types.js";
 import { AI_OPS_WORKSPACE } from "../types.js";
-import {
-  cornerstoneToolBuilders,
-  cornerstoneTool,
-} from "../integrations/cornerstone.js";
-import { buildWebSearchTool } from "../integrations/web-search.js";
+import { cornerstoneTool } from "../integrations/cornerstone.js";
 import { cookbookToolBuilders } from "../integrations/cookbook.js";
 
 export const alan: Agent = {
@@ -24,12 +19,14 @@ export const alan: Agent = {
   reportsTo: "ada",
   defaultWorkspace: AI_OPS_WORKSPACE,
   toolBuilders: [
-    ...cornerstoneToolBuilders("read-only"),
-    cornerstoneTool("add_fact"),
+    // Explicit read surface only; do not inherit steward tools.
+    cornerstoneTool("get_context"),
+    cornerstoneTool("search"),
+    cornerstoneTool("list_facts"),
+    cornerstoneTool("recall"),
     cornerstoneTool("save_conversation"),
     // Cookbook reads — Alan loads architecture decision protocols before
     // emitting rulings instead of relying on training-data heuristics.
     ...cookbookToolBuilders(),
-    buildWebSearchTool(),
   ],
 };
