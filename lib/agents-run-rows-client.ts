@@ -1,29 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ForgeActiveRunRow } from "@/lib/agents-active-status";
 
-export type ForgeTaskRunRow = {
-  id: string;
-  task_id: string;
-  run_type: string | null;
-  stage: string | null;
-  status: string | null;
-  agent_role?: string | null;
-  actual_cost_usd: string | number | null;
-  output: unknown;
-  error: string | null;
-  pr_url: string | null;
-  started_at: string | null;
-  completed_at: string | null;
-  created_at: string;
-};
-
 const ACTIVE_RUN_SELECT =
   "id, task_id, status, run_type, stage, started_at, created_at";
 const ACTIVE_RUN_SELECT_WITH_AGENT_ROLE = `${ACTIVE_RUN_SELECT}, agent_role`;
-
-const DETAIL_RUN_SELECT =
-  "id, task_id, run_type, stage, status, actual_cost_usd, output, error, pr_url, started_at, completed_at, created_at";
-const DETAIL_RUN_SELECT_WITH_AGENT_ROLE = `${DETAIL_RUN_SELECT}, agent_role`;
 
 export async function fetchActiveRunRowsForTasks(
   sb: SupabaseClient,
@@ -43,20 +23,6 @@ export async function fetchActiveRunRowsForTasks(
   return fallback.error ? [] : fallback.rows;
 }
 
-export async function fetchTaskRunRowsForDetail(
-  sb: SupabaseClient,
-  taskId: string,
-): Promise<{ rows: ForgeTaskRunRow[]; error: string | null }> {
-  const withAgent = await queryDetailRunRows(
-    sb,
-    taskId,
-    DETAIL_RUN_SELECT_WITH_AGENT_ROLE,
-  );
-  if (!withAgent.error) return withAgent;
-
-  return queryDetailRunRows(sb, taskId, DETAIL_RUN_SELECT);
-}
-
 async function queryActiveRunRows(
   sb: SupabaseClient,
   taskIds: string[],
@@ -71,19 +37,4 @@ async function queryActiveRunRows(
 
   if (error) return { rows: [], error: error.message };
   return { rows: (data ?? []) as unknown as ForgeActiveRunRow[], error: null };
-}
-
-async function queryDetailRunRows(
-  sb: SupabaseClient,
-  taskId: string,
-  select: string,
-): Promise<{ rows: ForgeTaskRunRow[]; error: string | null }> {
-  const { data, error } = await sb
-    .from("forge_task_runs")
-    .select(select)
-    .eq("task_id", taskId)
-    .order("created_at", { ascending: true });
-
-  if (error) return { rows: [], error: error.message };
-  return { rows: (data ?? []) as unknown as ForgeTaskRunRow[], error: null };
 }
