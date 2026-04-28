@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MODULES } from "@/lib/modules";
+import { MODULES, NAV_ITEMS } from "@/lib/modules";
 
 describe("top-level CO OS modules", () => {
   it("keeps admin-only operational modules visible for admin users", () => {
@@ -17,5 +17,19 @@ describe("top-level CO OS modules", () => {
       path: "/admin",
       adminOnly: true,
     });
+  });
+
+  it("groups Dispatch surfaces while keeping Cookbook and Admin top-level", () => {
+    expect(NAV_ITEMS).toEqual([
+      {
+        type: "group",
+        id: "dispatch",
+        label: "Dispatch",
+        children: ["speak-to-charlie", "forge", "workforce"],
+        accentVar: "var(--c-forge)",
+      },
+      { type: "module", id: "cookbook" },
+      { type: "module", id: "admin" },
+    ]);
   });
 });

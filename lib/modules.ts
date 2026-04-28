@@ -13,6 +13,18 @@ export type ModuleDef = {
   adminOnly?: boolean;
 };
 
+export type ModuleGroupDef = {
+  type: "group";
+  id: "dispatch";
+  label: string;
+  children: ModuleId[];
+  accentVar: string;
+};
+
+export type ModuleNavItem =
+  | { type: "module"; id: ModuleId }
+  | ModuleGroupDef;
+
 // Order here is the tab-nav order, left to right.
 export const MODULES: ModuleDef[] = [
   {
@@ -49,7 +61,23 @@ export const MODULES: ModuleDef[] = [
   },
 ];
 
+export const NAV_ITEMS: ModuleNavItem[] = [
+  {
+    type: "group",
+    id: "dispatch",
+    label: "Dispatch",
+    children: ["speak-to-charlie", "forge", "workforce"],
+    accentVar: "var(--c-forge)",
+  },
+  { type: "module", id: "cookbook" },
+  { type: "module", id: "admin" },
+];
+
 export const DEFAULT_LANDING: `/${ModuleId}` = "/speak-to-charlie";
+
+export function moduleById(id: ModuleId): ModuleDef | undefined {
+  return MODULES.find((m) => m.id === id);
+}
 
 export function moduleFromPath(pathname: string): ModuleDef | undefined {
   return MODULES.find(
