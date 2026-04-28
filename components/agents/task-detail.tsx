@@ -10,6 +10,8 @@ import {
   type DisplayRun,
   type ForgeTaskRunRow,
 } from "@/lib/agents-detail-display";
+import { AgentActivityBanner } from "@/components/agents/agent-activity-badge";
+import { activeStatusForTask } from "@/lib/agents-active-status";
 import { formatTaskCostSummary } from "@/lib/agents-cost";
 import {
   cancelForgeTaskOptimistically,
@@ -17,6 +19,7 @@ import {
 } from "@/lib/agents-cancel";
 import type { ForgeTask, TaskStatus } from "@/lib/agents-types";
 import { ALL_STATUSES, STATUS_LABEL } from "@/lib/agents-types";
+import { fetchTaskRunRowsForDetail } from "@/lib/agents-run-rows-client";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
 type Props = {
@@ -71,24 +74,24 @@ export function TaskDetail({
       return;
     }
 
-    (async () => {
-      const { data, error } = await sb
-        .from("forge_task_runs")
-        .select(
-          "id, task_id, run_type, stage, status, actual_cost_usd, output, error, pr_url, started_at, completed_at, created_at",
-        )
-        .eq("task_id", task.id)
-        .order("created_at", { ascending: true });
+    const loadRuns = async () => {
+      const { rows, error } = await fetchTaskRunRowsForDetail(sb, task.id);
       if (cancelled) return;
       if (error) {
-        setRunsState({ status: "error", message: error.message });
+        setRunsState({ status: "error", message: error });
         return;
       }
-      setRunsState({ status: "loaded", runs: (data ?? []) as ForgeTaskRunRow[] });
-    })();
+      setRunsState({ status: "loaded", runs: rows });
+    };
+
+    void loadRuns();
+    const pollId = window.setInterval(() => {
+      if (document.visibilityState !== "hidden") void loadRuns();
+    }, 10_000);
 
     return () => {
       cancelled = true;
+      window.clearInterval(pollId);
     };
   }, [task.id]);
 
@@ -97,6 +100,10 @@ export function TaskDetail({
   const detailDisplay = useMemo(
     () => buildTaskDetailDisplay(task, displayRuns),
     [task, displayRuns],
+  );
+  const activityStatus = useMemo(
+    () => activeStatusForTask(displayRuns, task.id),
+    [displayRuns, task.id],
   );
 
   const patch = async (body: Record<string, unknown>) => {
@@ -214,6 +221,8 @@ export function TaskDetail({
           Close
         </button>
       </div>
+
+      <AgentActivityBanner status={activityStatus} />
 
       <div
         style={{

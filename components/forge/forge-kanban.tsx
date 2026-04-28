@@ -13,6 +13,12 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import type { ForgeLane, ForgeTask } from "@/lib/agents-types";
+import { AgentActivityBadge } from "@/components/agents/agent-activity-badge";
+import {
+  activeStatusMap,
+  type AgentActiveStatus,
+  type ForgeActiveRunRow,
+} from "@/lib/agents-active-status";
 import {
   LANE_LABEL,
   LANE_ORDER,
@@ -25,6 +31,7 @@ import {
   type CostEstimate,
 } from "@/lib/cost-samples";
 import { fetchUsdGbpRate, type FxRate } from "@/lib/fx-rate";
+import { fetchActiveRunRowsForTasks } from "@/lib/agents-run-rows-client";
 import { CostConfirmDialog } from "./cost-confirm-dialog";
 
 type TasksState =
@@ -49,6 +56,8 @@ type PendingTransition = {
   estimateError: boolean;
 };
 
+type ActiveAgentStatus = Extract<AgentActiveStatus, { active: true }>;
+
 export function ForgeKanban() {
   const [state, setState] = useState<TasksState>({ status: "loading" });
   const [toast, setToast] = useState<{ kind: "error"; message: string } | null>(
@@ -57,6 +66,7 @@ export function ForgeKanban() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [costRows, setCostRows] = useState<CostRunRow[] | null>(null);
   const [costRowsError, setCostRowsError] = useState<boolean>(false);
+  const [activeRunRows, setActiveRunRows] = useState<ForgeActiveRunRow[]>([]);
   const [fxRate, setFxRate] = useState<FxRate | null>(null);
   const [pending, setPending] = useState<PendingTransition | null>(null);
 
@@ -213,6 +223,46 @@ export function ForgeKanban() {
     };
   }, []);
 
+  const visibleTaskIdsKey = useMemo(() => {
+    if (state.status !== "loaded") return "";
+    return state.tasks.map((task) => task.id).join(",");
+  }, [state]);
+
+  useEffect(() => {
+    if (!visibleTaskIdsKey) {
+      setActiveRunRows([]);
+      return;
+    }
+
+    const sb = getSupabaseBrowserClient();
+    if (!sb) {
+      setActiveRunRows([]);
+      return;
+    }
+
+    let cancelled = false;
+    const taskIds = visibleTaskIdsKey.split(",");
+    const loadActiveRuns = async () => {
+      const rows = await fetchActiveRunRowsForTasks(sb, taskIds);
+      if (!cancelled) setActiveRunRows(rows);
+    };
+    const refreshIfVisible = () => {
+      if (document.visibilityState !== "hidden") void loadActiveRuns();
+    };
+
+    void loadActiveRuns();
+    const pollId = window.setInterval(refreshIfVisible, 10_000);
+    window.addEventListener("focus", refreshIfVisible);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(pollId);
+      window.removeEventListener("focus", refreshIfVisible);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+    };
+  }, [visibleTaskIdsKey]);
+
   const grouped = useMemo(() => {
     const groups: Record<ForgeLane, ForgeTask[]> = {
       backlog: [],
@@ -235,6 +285,15 @@ export function ForgeKanban() {
     }
     return groups;
   }, [state]);
+
+  const activityByTaskId = useMemo(
+    () =>
+      activeStatusMap(
+        activeRunRows,
+        visibleTaskIdsKey ? visibleTaskIdsKey.split(",") : [],
+      ),
+    [activeRunRows, visibleTaskIdsKey],
+  );
 
   const applyLane = (taskId: string, lane: ForgeLane) => {
     setState((s) => {
@@ -356,6 +415,7 @@ export function ForgeKanban() {
                 lane={lane}
                 tasks={grouped[lane]}
                 activeId={activeId}
+                activityByTaskId={activityByTaskId}
               />
             ))}
           </div>
@@ -365,7 +425,13 @@ export function ForgeKanban() {
             {activeId && state.status === "loaded"
               ? (() => {
                   const t = state.tasks.find((x) => x.id === activeId);
-                  return t ? <KanbanCardPresentational task={t} dragging /> : null;
+                  return t ? (
+                    <KanbanCardPresentational
+                      task={t}
+                      activityStatus={activityByTaskId.get(t.id)}
+                      dragging
+                    />
+                  ) : null;
                 })()
               : null}
           </DragOverlay>
@@ -418,10 +484,12 @@ function LaneColumn({
   lane,
   tasks,
   activeId,
+  activityByTaskId,
 }: {
   lane: ForgeLane;
   tasks: ForgeTask[];
   activeId: string | null;
+  activityByTaskId: Map<string, ActiveAgentStatus>;
 }) {
   const { isOver, setNodeRef } = useDroppable({ id: lane });
   return (
@@ -490,7 +558,12 @@ function LaneColumn({
           </div>
         ) : (
           tasks.map((task) => (
-            <KanbanCard key={task.id} task={task} hidden={task.id === activeId} />
+            <KanbanCard
+              key={task.id}
+              task={task}
+              activityStatus={activityByTaskId.get(task.id)}
+              hidden={task.id === activeId}
+            />
           ))
         )}
       </div>
@@ -498,7 +571,15 @@ function LaneColumn({
   );
 }
 
-function KanbanCard({ task, hidden }: { task: ForgeTask; hidden: boolean }) {
+function KanbanCard({
+  task,
+  activityStatus,
+  hidden,
+}: {
+  task: ForgeTask;
+  activityStatus?: ActiveAgentStatus;
+  hidden: boolean;
+}) {
   const { attributes, listeners, setNodeRef } = useDraggable({ id: task.id });
   // While dragging, the source card leaves a transparent placeholder so the
   // column doesn't collapse. The floating clone is rendered by DragOverlay.
@@ -509,16 +590,18 @@ function KanbanCard({ task, hidden }: { task: ForgeTask; hidden: boolean }) {
   };
   return (
     <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
-      <KanbanCardPresentational task={task} />
+      <KanbanCardPresentational task={task} activityStatus={activityStatus} />
     </div>
   );
 }
 
 function KanbanCardPresentational({
   task,
+  activityStatus,
   dragging = false,
 }: {
   task: ForgeTask;
+  activityStatus?: ActiveAgentStatus;
   dragging?: boolean;
 }) {
   const style: React.CSSProperties = {
@@ -538,7 +621,17 @@ function KanbanCardPresentational({
   };
   return (
     <div style={style}>
-      <div style={{ fontWeight: 500 }}>{task.title}</div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          minWidth: 0,
+        }}
+      >
+        <div style={{ fontWeight: 500, flex: 1, minWidth: 0 }}>{task.title}</div>
+        <AgentActivityBadge status={activityStatus} />
+      </div>
       {task.description ? (
         <div
           style={{

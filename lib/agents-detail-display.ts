@@ -6,6 +6,7 @@ export type ForgeTaskRunRow = {
   run_type: string | null;
   stage: string | null;
   status: string | null;
+  agent_role?: string | null;
   actual_cost_usd: string | number | null;
   output: unknown;
   error: string | null;

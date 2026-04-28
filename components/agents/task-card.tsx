@@ -1,18 +1,22 @@
 "use client";
 
 import type { DragEvent } from "react";
+import { AgentActivityBadge } from "@/components/agents/agent-activity-badge";
+import type { AgentActiveStatus } from "@/lib/agents-active-status";
 import type { ForgeTask } from "@/lib/agents-types";
 import { STATUS_LABEL } from "@/lib/agents-types";
 
 export function TaskCard({
   task,
   costUsd,
+  activityStatus,
   active,
   onSelect,
   onDragStart,
 }: {
   task: ForgeTask;
   costUsd: number | null;
+  activityStatus?: AgentActiveStatus | null;
   active: boolean;
   onSelect: () => void;
   onDragStart: (e: DragEvent<HTMLDivElement>) => void;
@@ -70,6 +74,7 @@ export function TaskCard({
             P{task.priority}
           </span>
         ) : null}
+        <AgentActivityBadge status={activityStatus} />
       </div>
       <div
         style={{

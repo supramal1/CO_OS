@@ -13,6 +13,11 @@ import {
   shouldSkipAgentsCostConfirm,
   type AgentsCostTransition,
 } from "@/lib/agents-cost";
+import {
+  activeStatusMap,
+  type AgentActiveStatus,
+  type ForgeActiveRunRow,
+} from "@/lib/agents-active-status";
 import type { ForgeTask, BoardColumnId } from "@/lib/agents-types";
 import {
   COLUMN_LABEL,
@@ -28,6 +33,7 @@ import {
 } from "@/lib/agents-sync";
 import type { CostRunRow } from "@/lib/cost-samples";
 import { fetchUsdGbpRate, type FxRate } from "@/lib/fx-rate";
+import { fetchActiveRunRowsForTasks } from "@/lib/agents-run-rows-client";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { TaskCard } from "./task-card";
 import { TaskDetail } from "./task-detail";
@@ -37,6 +43,8 @@ type TasksState =
   | { status: "loading" }
   | { status: "loaded"; tasks: ForgeTask[]; refreshing?: boolean }
   | { status: "error"; message: string };
+
+type ActiveAgentStatus = Extract<AgentActiveStatus, { active: true }>;
 
 export function AgentsBoard() {
   const { selectedWorkspace } = useAdminWorkspace();
@@ -50,6 +58,7 @@ export function AgentsBoard() {
   const [dragOver, setDragOver] = useState<BoardColumnId | null>(null);
   const [costRows, setCostRows] = useState<CostRunRow[] | null>(null);
   const [costRowsError, setCostRowsError] = useState(false);
+  const [activeRunRows, setActiveRunRows] = useState<ForgeActiveRunRow[]>([]);
   const [fxRate, setFxRate] = useState<FxRate | null>(null);
   const [pendingCost, setPendingCost] = useState<AgentsCostTransition | null>(
     null,
@@ -205,6 +214,53 @@ export function AgentsBoard() {
     };
   }, []);
 
+  const visibleTaskIdsKey = useMemo(
+    () =>
+      state.status === "loaded"
+        ? state.tasks.map((task) => task.id).join(",")
+        : "",
+    [state],
+  );
+
+  useEffect(() => {
+    if (!selectedWorkspace || !visibleTaskIdsKey) {
+      setActiveRunRows([]);
+      return;
+    }
+    const sb = getSupabaseBrowserClient();
+    if (!sb) {
+      setActiveRunRows([]);
+      return;
+    }
+    let cancelled = false;
+    const taskIds = visibleTaskIdsKey.split(",");
+
+    const loadActiveRuns = async () => {
+      const rows = await fetchActiveRunRowsForTasks(sb, taskIds);
+      if (!cancelled) setActiveRunRows(rows);
+    };
+    const refreshIfVisible = () => {
+      if (shouldPollAgentsTasks(document.visibilityState)) {
+        void loadActiveRuns();
+      }
+    };
+
+    void loadActiveRuns();
+    const pollId = window.setInterval(
+      refreshIfVisible,
+      AGENTS_TASKS_POLL_MS,
+    );
+    window.addEventListener("focus", refreshIfVisible);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(pollId);
+      window.removeEventListener("focus", refreshIfVisible);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+    };
+  }, [selectedWorkspace, visibleTaskIdsKey]);
+
   const grouped = useMemo(() => {
     const groups: Record<BoardColumnId, ForgeTask[]> = {
       backlog: [],
@@ -223,6 +279,14 @@ export function AgentsBoard() {
     }
     return groups;
   }, [state]);
+  const activityByTaskId = useMemo(
+    () =>
+      activeStatusMap(
+        activeRunRows,
+        visibleTaskIdsKey ? visibleTaskIdsKey.split(",") : [],
+      ),
+    [activeRunRows, visibleTaskIdsKey],
+  );
 
   const activeTask =
     state.status === "loaded"
@@ -400,6 +464,7 @@ export function AgentsBoard() {
                 columnId={col}
                 tasks={grouped[col]}
                 costRows={costRows}
+                activityByTaskId={activityByTaskId}
                 activeId={activeId}
                 isDragOver={dragOver === col}
                 onSelect={setActiveId}
@@ -514,6 +579,7 @@ function Column({
   columnId,
   tasks,
   costRows,
+  activityByTaskId,
   activeId,
   isDragOver,
   onSelect,
@@ -524,6 +590,7 @@ function Column({
   columnId: BoardColumnId;
   tasks: ForgeTask[];
   costRows: CostRunRow[] | null;
+  activityByTaskId: Map<string, ActiveAgentStatus>;
   activeId: string | null;
   isDragOver: boolean;
   onSelect: (id: string) => void;
@@ -603,6 +670,7 @@ function Column({
               key={task.id}
               task={task}
               costUsd={displayCostUsdForTask(task, costRows)}
+              activityStatus={activityByTaskId.get(task.id)}
               active={task.id === activeId}
               onSelect={() => onSelect(task.id)}
               onDragStart={(e) => {
