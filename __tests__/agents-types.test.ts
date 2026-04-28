@@ -1,8 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
   LANE_ORDER,
-  boardColumnForLane,
-  resolveBoardDrop,
   HUMAN_GATED_TRANSITIONS,
   isAllowedTransition,
   endpointForTransition,
@@ -98,54 +96,5 @@ describe("endpointForTransition", () => {
     for (const [f, t] of HUMAN_GATED_TRANSITIONS) {
       expect(endpointForTransition(f, t)).not.toBeNull();
     }
-  });
-});
-
-describe("Agents 4-column lane mapping", () => {
-  it("collapses canonical lanes into the approved /agents columns", () => {
-    expect(boardColumnForLane("backlog")).toBe("backlog");
-    expect(boardColumnForLane("research")).toBe("in_progress");
-    expect(boardColumnForLane("production")).toBe("in_progress");
-    expect(boardColumnForLane("research_review")).toBe("review");
-    expect(boardColumnForLane("production_review")).toBe("review");
-    expect(boardColumnForLane("done")).toBe("done");
-  });
-
-  it("resolves 4-column drops to canonical Forge transitions", () => {
-    expect(resolveBoardDrop("backlog", "in_progress")).toEqual({
-      type: "transition",
-      fromLane: "backlog",
-      toLane: "research",
-    });
-    expect(resolveBoardDrop("research_review", "in_progress")).toEqual({
-      type: "transition",
-      fromLane: "research_review",
-      toLane: "production",
-    });
-    expect(resolveBoardDrop("production_review", "done")).toEqual({
-      type: "transition",
-      fromLane: "production_review",
-      toLane: "done",
-    });
-  });
-
-  it("treats drops within a collapsed column as no-ops", () => {
-    expect(resolveBoardDrop("research", "in_progress")).toEqual({
-      type: "noop",
-    });
-    expect(resolveBoardDrop("production_review", "review")).toEqual({
-      type: "noop",
-    });
-  });
-
-  it("explains automated Review moves instead of returning a vague block", () => {
-    expect(resolveBoardDrop("research", "review")).toEqual({
-      type: "blocked",
-      message: "Tasks move to Review automatically when work completes.",
-    });
-    expect(resolveBoardDrop("production", "review")).toEqual({
-      type: "blocked",
-      message: "Tasks move to Review automatically when work completes.",
-    });
   });
 });

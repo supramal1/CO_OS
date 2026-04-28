@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import { MODULES } from "@/lib/modules";
 
 describe("top-level CO OS modules", () => {
-  it("keeps Admin and Agents visible for admin users", () => {
+  it("keeps admin-only operational modules visible for admin users", () => {
     const byId = new Map(MODULES.map((module) => [module.id, module]));
+    const ids = MODULES.map((module): string => module.id);
 
-    expect(byId.get("agents")).toMatchObject({
-      label: "Agents",
-      path: "/agents",
+    expect(ids).not.toContain("agents");
+    expect(byId.get("workforce")).toMatchObject({
+      label: "Workforce",
+      path: "/workforce",
       adminOnly: true,
     });
     expect(byId.get("admin")).toMatchObject({

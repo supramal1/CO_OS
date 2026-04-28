@@ -1,6 +1,21 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ForgeActiveRunRow } from "@/lib/agents-active-status";
-import type { ForgeTaskRunRow } from "@/lib/agents-detail-display";
+
+export type ForgeTaskRunRow = {
+  id: string;
+  task_id: string;
+  run_type: string | null;
+  stage: string | null;
+  status: string | null;
+  agent_role?: string | null;
+  actual_cost_usd: string | number | null;
+  output: unknown;
+  error: string | null;
+  pr_url: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+};
 
 const ACTIVE_RUN_SELECT =
   "id, task_id, status, run_type, stage, started_at, created_at";
