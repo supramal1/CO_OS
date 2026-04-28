@@ -11,6 +11,10 @@ import {
   type ForgeTaskRunRow,
 } from "@/lib/agents-detail-display";
 import { formatTaskCostSummary } from "@/lib/agents-cost";
+import {
+  cancelForgeTaskOptimistically,
+  isForgeTaskCancellable,
+} from "@/lib/agents-cancel";
 import type { ForgeTask, TaskStatus } from "@/lib/agents-types";
 import { ALL_STATUSES, STATUS_LABEL } from "@/lib/agents-types";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
@@ -21,6 +25,7 @@ type Props = {
   costUsd: number | null;
   onUpdated: (next: ForgeTask) => void;
   onDeleted: (id: string) => void;
+  onSuccess: (message: string) => void;
   onError: (message: string) => void;
   onClose: () => void;
 };
@@ -38,6 +43,7 @@ export function TaskDetail({
   costUsd,
   onUpdated,
   onDeleted,
+  onSuccess,
   onError,
   onClose,
 }: Props) {
@@ -121,6 +127,27 @@ export function TaskDetail({
     });
 
   const setStatus = (status: TaskStatus) => patch({ status });
+
+  const cancelTask = async () => {
+    setSaving(true);
+    try {
+      await cancelForgeTaskOptimistically({
+        task,
+        namespaceQuery,
+        confirm: (message) => window.confirm(message),
+        fetcher: (input, init) => fetch(input, init),
+        onOptimistic: onUpdated,
+        onRollback: onUpdated,
+        onSuccess: (next) => {
+          onUpdated(next);
+          onSuccess("Task cancelled");
+        },
+        onError,
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const remove = async () => {
     if (!window.confirm(`Delete task "${task.title}"?`)) return;
@@ -238,6 +265,16 @@ export function TaskDetail({
           >
             Delete
           </button>
+          {isForgeTaskCancellable(task) ? (
+            <button
+              type="button"
+              onClick={cancelTask}
+              disabled={saving}
+              style={dangerBtn(saving)}
+            >
+              Cancel
+            </button>
+          ) : null}
         </div>
       </div>
 

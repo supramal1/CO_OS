@@ -43,9 +43,10 @@ export function AgentsBoard() {
   const [state, setState] = useState<TasksState>({ status: "loading" });
   const [activeId, setActiveId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
-  const [toast, setToast] = useState<{ kind: "error"; message: string } | null>(
-    null,
-  );
+  const [toast, setToast] = useState<{
+    kind: "error" | "success";
+    message: string;
+  } | null>(null);
   const [dragOver, setDragOver] = useState<BoardColumnId | null>(null);
   const [costRows, setCostRows] = useState<CostRunRow[] | null>(null);
   const [costRowsError, setCostRowsError] = useState(false);
@@ -440,6 +441,7 @@ export function AgentsBoard() {
               });
               setActiveId(null);
             }}
+            onSuccess={(message) => setToast({ kind: "success", message })}
             onError={(message) => setToast({ kind: "error", message })}
             onClose={() => setActiveId(null)}
           />
@@ -491,6 +493,10 @@ export function AgentsBoard() {
             padding: "10px 14px",
             background: "var(--ink)",
             color: "var(--panel)",
+            border:
+              toast.kind === "success"
+                ? "1px solid rgba(58, 125, 68, 0.9)"
+                : "1px solid rgba(192, 57, 43, 0.9)",
             fontFamily: "var(--font-plex-sans)",
             fontSize: 13,
             zIndex: 30,
