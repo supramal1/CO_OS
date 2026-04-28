@@ -1,17 +1,17 @@
 # Charlie Oscar OS (co-os)
 
-Charlie Oscar OS is the active Next.js shell for the agency operating system. It brings Speak to Charlie, Forge intake and build boards, Cookbook skills, Admin, Workforce, and Cornerstone-backed memory into one Google SSO app. This repo is the canonical frontend now, and older standalone frontend repos should not be treated as current product truth.
+Charlie Oscar OS is the active Next.js shell for the agency operating system. It brings Speak to Charlie, Forge intake and build boards, Workforce, Cookbook skills, Admin, and Cornerstone-backed memory into one Google SSO app. This repo is the canonical frontend now, and older standalone frontend repos should not be treated as current product truth.
 
 ## Current Surface
 
+- Dispatch groups Speak to Charlie, Forge, and Workforce in the top navigation.
 - Speak to Charlie lives at `/speak-to-charlie`. It is the conversational Forge intake surface, backed by `/api/forge/intake/chat`, and it helps turn a loose operational problem into a structured Forge brief.
-- Forge lives at `/forge` with review surfaces at `/forge/kanban`, `/forge/research-review`, and `/forge/production-review`. These pages work with Forge briefs, task gates, and production review state.
+- Forge lives at `/forge` with global views at `/forge/kanban`, `/forge/research-review`, and `/forge/production-review`. These pages work with Forge briefs, task gates, and production review state across namespaces.
 - Cookbook lives at `/cookbook`. It reads and edits skills through the Cookbook MCP proxy routes, and the admin export flow can open PRs through the configured GitHub repo.
-- Agents lives at `/agents`. This is the four-column Forge build board used to move work through Backlog, In progress, Review, and Done.
 - Workforce lives at `/workforce`. This is the AI Ops pixel office for dispatching Ada-led tasks, watching agents work, approving gated stewardship actions, and seeing spend as work runs.
 - Admin lives at `/admin`. It owns workspace, team, audit, setup, principal detail, connection-key, invitation, and grant management through the Cornerstone admin proxy.
 
-Admin-only modules are hidden from non-admin sessions in the top navigation. Auth is Google OAuth through NextAuth, and the server resolves each signed-in email to a Cornerstone principal and a `csk_` API key before proxying downstream calls.
+Admin-only modules are hidden from non-admin sessions in the top navigation. Auth is Google OAuth through Auth.js v5, and the server resolves each signed-in email to a Cornerstone principal and a `csk_` API key before proxying downstream calls.
 
 ## Local Setup
 
@@ -50,7 +50,8 @@ Keep Vercel and `.env.local` aligned with the variables below. Some features deg
 | Variable | Used by | Purpose |
 | --- | --- | --- |
 | `NEXTAUTH_URL` | Auth | `http://localhost:3000` in dev and the deployed URL in production. |
-| `NEXTAUTH_SECRET` | Auth | NextAuth signing secret. Generate a 32+ byte value. |
+| `AUTH_SECRET` | Auth | Primary Auth.js v5 signing secret. Generate a 32+ byte value. |
+| `NEXTAUTH_SECRET` | Auth | Legacy compatibility alias. If present, keep it equal to `AUTH_SECRET`. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Auth | Google OAuth credentials. Dev redirect URI is `http://localhost:3000/api/auth/callback/google`. |
 | `CO_OS_ALLOWED_EMAILS` | Auth | Optional comma-separated allowlist beyond the `@charlieoscar.com` domain. |
 | `CORNERSTONE_API_URL` | Cornerstone, Admin, Forge, Workforce | Cornerstone API base URL. Defaults are in code and `.env.local.example`, but production should set this explicitly. |
@@ -63,8 +64,8 @@ Keep Vercel and `.env.local` aligned with the variables below. Some features deg
 | `COOKBOOK_GIT_AUTHOR_NAME` / `COOKBOOK_GIT_AUTHOR_EMAIL` | Cookbook export | Optional commit author metadata for export PRs. |
 | `CORNERSTONE_AGENTS_URL` | Forge transitions | Cornerstone Agents service used by `/api/forge/tasks/[id]/transition` for `/invoke` and `/resume`. |
 | `CORNERSTONE_AGENTS_API_KEY` | Forge transitions | Optional API key forwarded as `X-API-Key` if the agents service requires it. |
-| `NEXT_PUBLIC_SUPABASE_URL` | Forge, Agents, Workforce | Supabase project URL used by browser Realtime, Forge run detail reads, and Workforce persistence setup. |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Forge, Agents | Supabase anon key for browser Realtime and read surfaces. |
+| `NEXT_PUBLIC_SUPABASE_URL` | Forge, Workforce | Supabase project URL used by browser Realtime, Forge run detail reads, and Workforce persistence setup. |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Forge | Supabase anon key for browser Realtime and read surfaces. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Workforce | Server-side key for persisting Workforce tasks, events, results, child tasks, and approval rows. Without it, Workforce falls back toward process-local state. |
 | `ANTHROPIC_API_KEY` | Speak to Charlie, Workforce | Required for Forge intake chat and Workforce dispatch. |
 | `ANTHROPIC_MODEL` | Speak to Charlie | Optional model override for Forge intake chat. Defaults to `claude-sonnet-4-6`. |
@@ -81,11 +82,10 @@ Page routes:
 | `/` | Splash page, then redirects authenticated sessions to `/speak-to-charlie`. |
 | `/speak-to-charlie` | Conversational Forge intake. |
 | `/forge` | Forge brief shell. |
-| `/forge/kanban` | Six-lane Forge kanban reference surface. |
+| `/forge/kanban` | Global Forge kanban surface across namespaces. |
 | `/forge/research-review` | Research review queue. |
 | `/forge/production-review` | Production review queue. |
 | `/cookbook` | Cookbook skill library and editor. |
-| `/agents` | Admin-only four-column Forge build board. |
 | `/workforce` | Admin-only AI Ops pixel office. |
 | `/workforce/tasks/[id]` | Workforce task detail and event stream view. |
 | `/admin` | Redirects to `/admin/workspaces`. |
@@ -106,9 +106,8 @@ API routes:
 | `/api/cookbook/*` | Cookbook MCP skill read/write/export and Git PR export proxy. |
 | `/api/forge/briefs/*` | Forge brief list, detail, stats, and creation. |
 | `/api/forge/intake/chat` | Speak to Charlie intake chat with brief search and submit tools. |
-| `/api/forge/tasks` and `/api/forge/tasks/[id]` | Forge task list, create, read, update, and delete proxy. |
+| `/api/forge/tasks` and `/api/forge/tasks/[id]` | Forge task list, create, read, and update proxy. |
 | `/api/forge/tasks/[id]/transition` | Admin-only lane transition proxy to Cornerstone Agents `/invoke` or `/resume`. |
-| `/api/forge/tasks/[id]/cancel` | Admin-only cancellation for running Forge tasks. |
 | `/api/forge/tasks/[id]/pr` and `/api/forge/task-runs/[id]/scope` | Forge task detail enrichment for PR, run, scope, and output panels. |
 | `/api/workforce/agents` | Public roster metadata for the Workforce UI. |
 | `/api/workforce/tasks` | Admin-only Workforce dispatch and recent task list. |
@@ -124,9 +123,9 @@ The admin module is now part of `co-os/main`, not a separate product surface. `/
 
 The admin frontend talks to Cornerstone through `/api/admin/[...path]`. Browser code never calls the backend admin endpoints directly, and admin gating is enforced both in the UI and in the proxy.
 
-## Forge And Agents
+## Forge
 
-`/agents` is the active four-column Forge build board. It is not the old legacy board. The columns are Backlog, In progress, Review, and Done, while the canonical task state is still the six-lane `forge_tasks.lane` lifecycle: `backlog`, `research`, `research_review`, `production`, `production_review`, and `done`.
+`/forge/kanban` is the active global Forge board. It shows briefs and tasks across namespaces using the canonical six-lane `forge_tasks.lane` lifecycle: `backlog`, `research`, `research_review`, `production`, `production_review`, and `done`.
 
 The board groups by `task.lane`, not the legacy `task.status` field. Human drags map visual columns onto canonical lane transitions:
 
@@ -138,7 +137,7 @@ The board groups by `task.lane`, not the legacy `task.status` field. Human drags
 
 Other transitions are blocked in the client with specific explanatory toast text because some movement is automatic. For example, work in `research` and `production` moves to Review when the agent run completes.
 
-The board has Supabase Realtime for `forge_tasks`, a polling fallback, optimistic lane updates with rollback, cost confirmation for spendful transitions, cost summaries from recorded Forge runs, task detail enrichment, PR context, scope rows, run timelines, outputs, and cancellation for running tasks. The cancellation path is `/api/forge/tasks/[id]/cancel`, and it marks cancellable running tasks as `cancelled` in the Done lane through the Cornerstone task proxy.
+The board has Supabase Realtime for `forge_tasks`, a polling fallback, optimistic lane updates with rollback, cost confirmation for spendful transitions, cost summaries from recorded Forge runs, task detail enrichment, PR context, scope rows, run timelines, and outputs.
 
 ## Workforce
 
@@ -180,7 +179,7 @@ The Workforce substrate mounts Cornerstone read and write tools per agent. `add_
 
 ## Development Notes
 
-This app is a Next.js 14 app with App Router. Route pages live under `app/(os)`, server routes live under `app/api`, shared browser/server helpers live under `lib`, UI components live under `components`, and the embedded Workforce package lives under `packages/workforce-substrate`.
+This app is a Next.js 16 app with App Router. Route pages live under `app/(os)`, server routes live under `app/api`, shared browser/server helpers live under `lib`, UI components live under `components`, and the embedded Workforce package lives under `packages/workforce-substrate`.
 
 `packages/workforce-substrate/README.md` and the older Night 1 and Night 2 docs are historical in places. Treat this README and the current code paths above as the operational map until the nested package docs get their own cleanup pass.
 
