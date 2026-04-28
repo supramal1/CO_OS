@@ -142,6 +142,7 @@ describe("POST /api/forge/tasks/:id/transition — invoke path (backlog→resear
           status: "submitted",
           priority: 1,
           metadata: { foo: "bar" },
+          namespace: "aiops",
         },
       },
       { ok: true, status: 200, body: { queued: true } },
@@ -158,6 +159,7 @@ describe("POST /api/forge/tasks/:id/transition — invoke path (backlog→resear
     const sent = JSON.parse(invokeCall[1].body as string);
     expect(sent).toEqual({
       task_id: "t1",
+      namespace: "aiops",
       brief: {
         title: "Decompose a brief",
         description: "Make it a thing",

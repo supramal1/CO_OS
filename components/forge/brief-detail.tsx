@@ -25,7 +25,7 @@ export function BriefDetail({ brief, isAdmin, onUpdated, onError }: Props) {
       const res = await fetch(`/api/forge/briefs/${brief.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ ...body, namespace: brief.namespace }),
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
@@ -51,6 +51,8 @@ export function BriefDetail({ brief, isAdmin, onUpdated, onError }: Props) {
     try {
       const res = await fetch(`/api/forge/briefs/${brief.id}/promote`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ namespace: brief.namespace }),
       });
       const data = (await res.json().catch(() => ({}))) as {
         brief?: Brief;
@@ -107,6 +109,18 @@ export function BriefDetail({ brief, isAdmin, onUpdated, onError }: Props) {
         >
           {brief.title}
         </h2>
+        <div
+          style={{
+            marginTop: 8,
+            fontFamily: "var(--font-plex-mono)",
+            fontSize: 10,
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            color: "var(--ink-faint)",
+          }}
+        >
+          {brief.namespace}
+        </div>
       </div>
 
       <div

@@ -133,7 +133,7 @@ export async function POST(
     const resp = await fetch(`${AGENTS_URL}/invoke`, {
       method: "POST",
       headers: agentsHeaders(),
-      body: JSON.stringify({ task_id: taskId, brief }),
+      body: JSON.stringify({ task_id: taskId, namespace: task.namespace, brief }),
     });
     const payload = await resp.text();
     if (!resp.ok) {

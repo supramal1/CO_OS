@@ -68,6 +68,17 @@ export function BriefCard({
             {URGENCY_LABEL[brief.urgency]}
           </span>
         ) : null}
+        <span
+          style={{
+            marginLeft: "auto",
+            fontFamily: "var(--font-plex-mono)",
+            fontSize: 10,
+            letterSpacing: "0.08em",
+            color: "var(--ink-faint)",
+          }}
+        >
+          {brief.namespace}
+        </span>
       </div>
       <div
         style={{

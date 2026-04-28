@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import type { Brief, BriefStats, BriefStatus } from "@/lib/forge-types";
 import { BRIEF_STATUSES, STATUS_LABEL } from "@/lib/forge-types";
+import { buildGlobalBriefStats } from "@/lib/forge-global-view";
+import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { BriefCard } from "./brief-card";
 import { BriefDetail } from "./brief-detail";
 
@@ -21,7 +23,6 @@ export function ForgeShell() {
   const [briefsState, setBriefsState] = useState<BriefsState>({
     status: "loading",
   });
-  const [stats, setStats] = useState<BriefStats | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [toast, setToast] = useState<{ kind: "error"; message: string } | null>(
@@ -30,12 +31,15 @@ export function ForgeShell() {
 
   const loadBriefs = async () => {
     try {
-      const res = await fetch("/api/forge/briefs", { cache: "no-store" });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error ?? `status ${res.status}`);
-      }
-      const briefs = (await res.json()) as Brief[];
+      const sb = getSupabaseBrowserClient();
+      if (!sb) throw new Error("Supabase not configured");
+      const { data, error } = await sb
+        .from("forge_briefs")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(500);
+      if (error) throw error;
+      const briefs = (data ?? []) as Brief[];
       setBriefsState({ status: "loaded", briefs });
     } catch (err) {
       setBriefsState({
@@ -45,19 +49,8 @@ export function ForgeShell() {
     }
   };
 
-  const loadStats = async () => {
-    try {
-      const res = await fetch("/api/forge/briefs/stats", { cache: "no-store" });
-      if (!res.ok) return;
-      setStats((await res.json()) as BriefStats);
-    } catch {
-      /* non-fatal */
-    }
-  };
-
   useEffect(() => {
     loadBriefs();
-    loadStats();
   }, []);
 
   const filtered = useMemo(() => {
@@ -71,6 +64,11 @@ export function ForgeShell() {
     return briefsState.briefs.find((b) => b.id === activeId) ?? null;
   }, [briefsState, activeId]);
 
+  const stats = useMemo<BriefStats | null>(() => {
+    if (briefsState.status !== "loaded") return null;
+    return buildGlobalBriefStats(briefsState.briefs);
+  }, [briefsState]);
+
   const handleBriefUpdated = (next: Brief) => {
     setBriefsState((state) => {
       if (state.status !== "loaded") return state;
@@ -79,7 +77,6 @@ export function ForgeShell() {
         briefs: state.briefs.map((b) => (b.id === next.id ? next : b)),
       };
     });
-    loadStats();
   };
 
   return (

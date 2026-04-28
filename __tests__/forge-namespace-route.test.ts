@@ -175,4 +175,57 @@ describe("Forge task route namespace scoping", () => {
     expect(taskLookup.searchParams.get("namespace")).toBe("aiops");
     expect(runsLookup.searchParams.get("namespace")).toBe("aiops");
   });
+
+  it("uses body namespace for global-board transitions", async () => {
+    queueFetch([
+      {
+        ok: true,
+        status: 200,
+        body: {
+          id: "t1",
+          title: "Scoped task",
+          description: null,
+          lane: "research_review",
+          status: "scoping",
+          priority: 0,
+          metadata: {},
+          namespace: "client-a",
+        },
+      },
+      {
+        ok: true,
+        status: 200,
+        body: [
+          {
+            id: "r-paused",
+            task_id: "t1",
+            run_type: "pm_orchestration",
+            stage: "awaiting_review",
+            session_id: "pm-session-xyz",
+            created_at: "2026-04-23T00:00:00Z",
+          },
+        ],
+      },
+      { ok: true, status: 200, body: { resumed: true } },
+    ]);
+
+    const res = await transitionTask(
+      req({
+        method: "POST",
+        url: "https://co-os.test/api/forge/tasks/t1/transition",
+        jsonBody: {
+          namespace: "client-a",
+          from_lane: "research_review",
+          to_lane: "production",
+        },
+      }),
+      { params: Promise.resolve({ id: "t1" }) },
+    );
+
+    expect(res.status).toBe(200);
+    const taskLookup = new URL(fetchMock.mock.calls[0][0] as string);
+    const runsLookup = new URL(fetchMock.mock.calls[1][0] as string);
+    expect(taskLookup.searchParams.get("namespace")).toBe("client-a");
+    expect(runsLookup.searchParams.get("namespace")).toBe("client-a");
+  });
 });

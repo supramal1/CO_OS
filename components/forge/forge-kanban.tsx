@@ -24,6 +24,11 @@ import {
   LANE_ORDER,
   isAllowedTransition,
 } from "@/lib/agents-types";
+import {
+  FORGE_TASK_SELECT,
+  groupForgeTasksByLane,
+  normaliseForgeLane,
+} from "@/lib/forge-global-view";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import {
   costEstimateFor,
@@ -50,6 +55,7 @@ function shouldSkipModal(from: ForgeLane, to: ForgeLane): boolean {
 type PendingTransition = {
   taskId: string;
   taskTitle: string;
+  namespace: string;
   from: ForgeLane;
   to: ForgeLane;
   estimate: CostEstimate | null;
@@ -82,14 +88,15 @@ export function ForgeKanban() {
 
     const loadTasks = async (initial: boolean) => {
       try {
-        const res = await fetch("/api/forge/tasks", { cache: "no-store" });
-        if (!res.ok) {
-          const data = (await res.json().catch(() => ({}))) as {
-            error?: string;
-          };
-          throw new Error(data.error ?? `status ${res.status}`);
-        }
-        const tasks = (await res.json()) as ForgeTask[];
+        const sb = getSupabaseBrowserClient();
+        if (!sb) throw new Error("Supabase not configured");
+        const { data, error } = await sb
+          .from("forge_tasks")
+          .select(FORGE_TASK_SELECT)
+          .order("updated_at", { ascending: false })
+          .limit(500);
+        if (error) throw error;
+        const tasks = (data ?? []) as ForgeTask[];
         if (cancelled) return;
         setState((prev) => {
           // Merge rather than replace so an optimistic lane change made
@@ -146,7 +153,6 @@ export function ForgeKanban() {
           event: "*",
           schema: "public",
           table: "forge_tasks",
-          filter: "namespace=eq.default",
         },
         (payload) => {
           const row = (payload.new ?? payload.old) as ForgeTask | null;
@@ -264,26 +270,8 @@ export function ForgeKanban() {
   }, [visibleTaskIdsKey]);
 
   const grouped = useMemo(() => {
-    const groups: Record<ForgeLane, ForgeTask[]> = {
-      backlog: [],
-      research: [],
-      research_review: [],
-      production: [],
-      production_review: [],
-      done: [],
-    };
-    if (state.status !== "loaded") return groups;
-    // Priority desc, then most recently updated first. Stable ordering
-    // keeps the card the user just dragged from sliding under its peers.
-    const sorted = [...state.tasks].sort((a, b) => {
-      if (b.priority !== a.priority) return b.priority - a.priority;
-      return b.updated_at.localeCompare(a.updated_at);
-    });
-    for (const task of sorted) {
-      const lane = normaliseLane(task.lane);
-      groups[lane].push(task);
-    }
-    return groups;
+    if (state.status !== "loaded") return groupForgeTasksByLane([]);
+    return groupForgeTasksByLane(state.tasks);
   }, [state]);
 
   const activityByTaskId = useMemo(
@@ -313,6 +301,7 @@ export function ForgeKanban() {
 
   const runTransition = async (
     taskId: string,
+    namespace: string,
     fromLane: ForgeLane,
     toLane: ForgeLane,
   ) => {
@@ -325,7 +314,11 @@ export function ForgeKanban() {
       const res = await fetch(`/api/forge/tasks/${taskId}/transition`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ from_lane: fromLane, to_lane: toLane }),
+        body: JSON.stringify({
+          namespace,
+          from_lane: fromLane,
+          to_lane: toLane,
+        }),
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as {
@@ -350,7 +343,7 @@ export function ForgeKanban() {
     if (!overLane || state.status !== "loaded") return;
     const task = state.tasks.find((t) => t.id === taskId);
     if (!task) return;
-    const fromLane = normaliseLane(task.lane);
+    const fromLane = normaliseForgeLane(task.lane);
     if (fromLane === overLane) return;
     if (!isAllowedTransition(fromLane, overLane)) {
       setToast({
@@ -361,7 +354,7 @@ export function ForgeKanban() {
     }
 
     if (shouldSkipModal(fromLane, overLane)) {
-      void runTransition(taskId, fromLane, overLane);
+      void runTransition(taskId, task.namespace, fromLane, overLane);
       return;
     }
 
@@ -373,6 +366,7 @@ export function ForgeKanban() {
     setPending({
       taskId,
       taskTitle: task.title,
+      namespace: task.namespace,
       from: fromLane,
       to: overLane,
       estimate,
@@ -450,7 +444,7 @@ export function ForgeKanban() {
           onConfirm={() => {
             const p = pending;
             setPending(null);
-            void runTransition(p.taskId, p.from, p.to);
+            void runTransition(p.taskId, p.namespace, p.from, p.to);
           }}
         />
       ) : null}
@@ -621,6 +615,18 @@ function KanbanCardPresentational({
   };
   return (
     <div style={style}>
+      <div
+        style={{
+          marginBottom: 6,
+          fontFamily: "var(--font-plex-mono)",
+          fontSize: 10,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          color: "var(--ink-faint)",
+        }}
+      >
+        {task.namespace}
+      </div>
       <div style={{ fontWeight: 500 }}>{task.title}</div>
       {activityStatus?.active ? (
         <div style={{ marginTop: 6, maxWidth: "100%" }}>
@@ -660,12 +666,4 @@ function Empty({ children }: { children: React.ReactNode }) {
       {children}
     </div>
   );
-}
-
-// Defensive — older rows pre-migration 047 may have null lane or a
-// legacy value. Surface those as backlog rather than dropping the card.
-function normaliseLane(lane: string | null | undefined): ForgeLane {
-  const candidates = new Set(LANE_ORDER);
-  if (lane && candidates.has(lane as ForgeLane)) return lane as ForgeLane;
-  return "backlog";
 }
