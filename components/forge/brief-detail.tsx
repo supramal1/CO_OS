@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { Brief, BriefStatus } from "@/lib/forge-types";
 import { BRIEF_STATUSES, STATUS_LABEL, URGENCY_LABEL } from "@/lib/forge-types";
+import { linkedTaskIds } from "@/lib/forge-brief-promotion";
 
 type Props = {
   brief: Brief;
@@ -13,8 +14,10 @@ type Props = {
 
 export function BriefDetail({ brief, isAdmin, onUpdated, onError }: Props) {
   const [saving, setSaving] = useState(false);
+  const [promoting, setPromoting] = useState(false);
   const [adminNotes, setAdminNotes] = useState(brief.admin_notes ?? "");
   const [resolution, setResolution] = useState(brief.resolution ?? "");
+  const taskIds = linkedTaskIds(brief);
 
   const patch = async (body: Record<string, unknown>) => {
     setSaving(true);
@@ -43,6 +46,27 @@ export function BriefDetail({ brief, isAdmin, onUpdated, onError }: Props) {
       admin_notes: adminNotes || null,
       resolution: resolution || null,
     });
+  const promoteToBacklog = async () => {
+    setPromoting(true);
+    try {
+      const res = await fetch(`/api/forge/briefs/${brief.id}/promote`, {
+        method: "POST",
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        brief?: Brief;
+        error?: string;
+        detail?: string;
+      };
+      if (!res.ok || !data.brief) {
+        throw new Error(data.detail ?? data.error ?? `status ${res.status}`);
+      }
+      onUpdated(data.brief);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "promotion failed");
+    } finally {
+      setPromoting(false);
+    }
+  };
 
   return (
     <div
@@ -166,6 +190,82 @@ export function BriefDetail({ brief, isAdmin, onUpdated, onError }: Props) {
                 {STATUS_LABEL[s]}
               </button>
             ))}
+          </div>
+
+          <div
+            style={{
+              border: "1px solid var(--rule)",
+              padding: 12,
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+              background: "var(--panel-2)",
+            }}
+          >
+            <div
+              style={{
+                fontFamily: "var(--font-plex-mono)",
+                fontSize: 10,
+                letterSpacing: "0.12em",
+                textTransform: "uppercase",
+                color: "var(--ink-faint)",
+              }}
+            >
+              Backlog task
+            </div>
+            {taskIds.length > 0 ? (
+              <div
+                style={{
+                  fontFamily: "var(--font-plex-mono)",
+                  fontSize: 11,
+                  color: "var(--ink-dim)",
+                  wordBreak: "break-word",
+                }}
+              >
+                Linked task {taskIds.join(", ")}
+              </div>
+            ) : (
+              <>
+                <p
+                  style={{
+                    margin: 0,
+                    fontFamily: "var(--font-plex-sans)",
+                    fontSize: 13,
+                    color: "var(--ink-dim)",
+                    lineHeight: 1.45,
+                  }}
+                >
+                  Create a Forge task in Backlog from this brief so it can move
+                  through the kanban.
+                </p>
+                <button
+                  type="button"
+                  onClick={promoteToBacklog}
+                  disabled={saving || promoting || brief.status === "rejected"}
+                  style={{
+                    alignSelf: "flex-start",
+                    fontFamily: "var(--font-plex-mono)",
+                    fontSize: 11,
+                    letterSpacing: "0.12em",
+                    textTransform: "uppercase",
+                    padding: "8px 14px",
+                    background: "transparent",
+                    color: "var(--ink)",
+                    border: "1px solid var(--ink)",
+                    cursor:
+                      saving || promoting || brief.status === "rejected"
+                        ? "default"
+                        : "pointer",
+                    opacity:
+                      saving || promoting || brief.status === "rejected"
+                        ? 0.6
+                        : 1,
+                  }}
+                >
+                  {promoting ? "Sending..." : "Send to backlog"}
+                </button>
+              </>
+            )}
           </div>
 
           <LabeledTextarea
