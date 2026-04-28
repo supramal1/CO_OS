@@ -38,7 +38,7 @@ describe("POST /api/workforce/tasks/:id/cancel", () => {
     runner.cancelTask.mockReturnValue(false);
     approvals.cancelPendingApprovalsForTask.mockResolvedValue(2);
 
-    const res = await POST(req(), { params: { id: "task-stranded" } });
+    const res = await POST(req(), { params: Promise.resolve({ id: "task-stranded" }) });
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -59,7 +59,7 @@ describe("POST /api/workforce/tasks/:id/cancel", () => {
     runner.cancelTask.mockReturnValue(false);
     approvals.cancelPendingApprovalsForTask.mockResolvedValue(0);
 
-    const res = await POST(req(), { params: { id: "missing-task" } });
+    const res = await POST(req(), { params: Promise.resolve({ id: "missing-task" }) });
 
     expect(res.status).toBe(404);
   });

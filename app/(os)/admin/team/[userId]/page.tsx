@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { adminFetch } from "@/lib/admin-api";
@@ -93,9 +93,9 @@ function formatDateTime(iso: string | null | undefined) {
 export default function AdminTeamMemberPage({
   params,
 }: {
-  params: { userId: string };
+  params: Promise<{ userId: string }>;
 }) {
-  const { userId } = params;
+  const { userId } = use(params);
   const router = useRouter();
   const { selectedWorkspace } = useAdminWorkspace();
 

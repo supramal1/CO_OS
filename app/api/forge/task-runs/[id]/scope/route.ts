@@ -43,7 +43,7 @@ function jsonError(status: number, error: string, detail?: string) {
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await getServerSession(authOptions);
   if (!session?.apiKey) return jsonError(401, "unauthenticated");
@@ -72,10 +72,11 @@ export async function PATCH(
   // jsonb so we can't update nested keys atomically without a raw SQL
   // function. Race window is tiny (same reviewer, one open run) and the
   // backend doesn't rewrite output.scope while awaiting_review.
+  const { id } = await params;
   const { data: run, error: readErr } = await admin
     .from("forge_task_runs")
     .select("id, output, run_type, stage")
-    .eq("id", params.id)
+    .eq("id", id)
     .single();
   if (readErr || !run) {
     return jsonError(404, "run_not_found", readErr?.message);
@@ -98,7 +99,7 @@ export async function PATCH(
   const { error: writeErr } = await admin
     .from("forge_task_runs")
     .update({ output: nextOutput })
-    .eq("id", params.id);
+    .eq("id", id);
   if (writeErr) {
     return jsonError(500, "write_failed", writeErr.message);
   }

@@ -25,7 +25,7 @@ interface ResolveBody {
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await getServerSession(authOptions);
   if (!session?.apiKey || !session.principalId) {
@@ -49,8 +49,9 @@ export async function POST(
   }
   const reason = typeof body.reason === "string" ? body.reason : undefined;
 
+  const { id } = await params;
   const ok = await resolveApproval(
-    params.id,
+    id,
     {
       approved: body.approved,
       reason,

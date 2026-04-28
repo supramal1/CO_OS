@@ -6,7 +6,7 @@ import { applyForgeNamespace } from "@/lib/forge-namespace";
 
 export const dynamic = "force-dynamic";
 
-type RouteContext = { params: { id: string } };
+type RouteContext = { params: Promise<{ id: string }> };
 
 async function guard() {
   const session = await getServerSession(authOptions);
@@ -26,7 +26,8 @@ async function guard() {
 export async function GET(req: NextRequest, { params }: RouteContext) {
   const auth = await guard();
   if ("error" in auth) return auth.error;
-  const url = new URL(`${CORNERSTONE_URL}/forge/tasks/${params.id}`);
+  const { id } = await params;
+  const url = new URL(`${CORNERSTONE_URL}/forge/tasks/${id}`);
   applyForgeNamespace(url, req);
   const upstream = await fetch(url.toString(), {
     headers: { "X-API-Key": auth.apiKey },
@@ -43,7 +44,8 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
   const auth = await guard();
   if ("error" in auth) return auth.error;
   const payload = await req.text();
-  const url = new URL(`${CORNERSTONE_URL}/forge/tasks/${params.id}`);
+  const { id } = await params;
+  const url = new URL(`${CORNERSTONE_URL}/forge/tasks/${id}`);
   applyForgeNamespace(url, req, payload);
   const upstream = await fetch(url.toString(), {
     method: "PATCH",
@@ -64,7 +66,8 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
 export async function DELETE(req: NextRequest, { params }: RouteContext) {
   const auth = await guard();
   if ("error" in auth) return auth.error;
-  const url = new URL(`${CORNERSTONE_URL}/forge/tasks/${params.id}`);
+  const { id } = await params;
+  const url = new URL(`${CORNERSTONE_URL}/forge/tasks/${id}`);
   applyForgeNamespace(url, req);
   const upstream = await fetch(url.toString(), {
     method: "DELETE",

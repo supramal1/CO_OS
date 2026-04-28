@@ -3,6 +3,7 @@
 // (3) extend StationKind in ../types.ts. No other file needs to change.
 
 import { KIND_COLORS } from "../palette";
+import type { ReactElement } from "react";
 import type { OfficeStation, StationKind } from "../types";
 import { Cabinet } from "./cabinet";
 import { Codex } from "./codex";
@@ -12,7 +13,11 @@ import { Monolith } from "./monolith";
 import { Radar } from "./radar";
 import { Rack } from "./rack";
 
-type StationComponent = (props: { x: number; label: string; color: string }) => JSX.Element;
+type StationComponent = (props: {
+  x: number;
+  label: string;
+  color: string;
+}) => ReactElement;
 
 const REGISTRY: Record<StationKind, StationComponent> = {
   monolith: Monolith,

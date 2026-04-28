@@ -118,7 +118,7 @@ describe("Forge task route namespace scoping", () => {
           title: "Finance-only task",
         }),
       }),
-      { params: { id: "t1" } },
+      { params: Promise.resolve({ id: "t1" }) },
     );
 
     expect(res?.status).toBe(200);
@@ -167,7 +167,7 @@ describe("Forge task route namespace scoping", () => {
           to_lane: "production",
         },
       }),
-      { params: { id: "t1" } },
+      { params: Promise.resolve({ id: "t1" }) },
     );
 
     expect(res.status).toBe(200);

@@ -12,7 +12,7 @@ import {
 
 export const dynamic = "force-dynamic";
 
-type RouteContext = { params: { id: string } };
+type RouteContext = { params: Promise<{ id: string }> };
 
 function jsonError(status: number, error: string, detail?: string) {
   return NextResponse.json(
@@ -35,8 +35,9 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   }
 
   const bodyText = await req.text().catch(() => "");
+  const { id } = await params;
 
-  const briefUrl = new URL(`${CORNERSTONE_URL}/forge/briefs/${params.id}`);
+  const briefUrl = new URL(`${CORNERSTONE_URL}/forge/briefs/${id}`);
   applyForgeNamespace(briefUrl, req, bodyText);
   const briefRes = await fetch(briefUrl.toString(), {
     headers: { "X-API-Key": session.apiKey },

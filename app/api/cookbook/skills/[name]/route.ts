@@ -11,7 +11,7 @@ import {
 
 export const dynamic = "force-dynamic";
 
-type RouteParams = { params: { name: string } };
+type RouteParams = { params: Promise<{ name: string }> };
 
 async function requireKey() {
   const session = await getServerSession(authOptions);
@@ -26,8 +26,9 @@ async function requireKey() {
 export async function GET(_req: NextRequest, { params }: RouteParams) {
   const auth = await requireKey();
   if ("error" in auth) return auth.error;
+  const { name } = await params;
   try {
-    const skill = await getSkill(auth.apiKey, params.name);
+    const skill = await getSkill(auth.apiKey, name);
     return NextResponse.json({ skill });
   } catch (err) {
     return toErrorResponse(err);
@@ -48,8 +49,9 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
+  const { name } = await params;
   try {
-    const skill = await updateSkill(auth.apiKey, params.name, body);
+    const skill = await updateSkill(auth.apiKey, name, body);
     return NextResponse.json({ skill });
   } catch (err) {
     return toErrorResponse(err);
@@ -63,8 +65,9 @@ export async function DELETE(_req: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
+  const { name } = await params;
   try {
-    const result = await deleteSkill(auth.apiKey, params.name);
+    const result = await deleteSkill(auth.apiKey, name);
     return NextResponse.json(result);
   } catch (err) {
     return toErrorResponse(err);

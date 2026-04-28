@@ -8,7 +8,7 @@ import type { ForgeTask } from "@/lib/agents-types";
 
 export const dynamic = "force-dynamic";
 
-type RouteContext = { params: { id: string } };
+type RouteContext = { params: Promise<{ id: string }> };
 
 function jsonError(status: number, error: string, detail?: string) {
   return NextResponse.json(
@@ -26,7 +26,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     return jsonError(403, "admin_only");
   }
 
-  const taskUrl = new URL(`${CORNERSTONE_URL}/forge/tasks/${params.id}`);
+  const { id } = await params;
+  const taskUrl = new URL(`${CORNERSTONE_URL}/forge/tasks/${id}`);
   applyForgeNamespace(taskUrl, req);
   const taskRes = await fetch(taskUrl.toString(), {
     headers: { "X-API-Key": session.apiKey },
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   }
 
   const payload = JSON.stringify({ status: "cancelled", lane: "done" });
-  const patchUrl = new URL(`${CORNERSTONE_URL}/forge/tasks/${params.id}`);
+  const patchUrl = new URL(`${CORNERSTONE_URL}/forge/tasks/${id}`);
   applyForgeNamespace(patchUrl, req, payload);
   const upstream = await fetch(patchUrl.toString(), {
     method: "PATCH",

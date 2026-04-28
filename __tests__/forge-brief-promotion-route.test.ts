@@ -106,7 +106,7 @@ describe("POST /api/forge/briefs/:id/promote", () => {
       },
     ]);
 
-    const res = await POST(req(), { params: { id: "brief-1" } });
+    const res = await POST(req(), { params: Promise.resolve({ id: "brief-1" }) });
 
     expect(res.status).toBe(201);
     const body = (await res.json()) as {
@@ -161,7 +161,7 @@ describe("POST /api/forge/briefs/:id/promote", () => {
       },
     ]);
 
-    const res = await POST(req(), { params: { id: "brief-1" } });
+    const res = await POST(req(), { params: Promise.resolve({ id: "brief-1" }) });
 
     expect(res.status).toBe(409);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -176,7 +176,7 @@ describe("POST /api/forge/briefs/:id/promote", () => {
   it("requires an admin session", async () => {
     okSession(false);
 
-    const res = await POST(req(), { params: { id: "brief-1" } });
+    const res = await POST(req(), { params: Promise.resolve({ id: "brief-1" }) });
 
     expect(res.status).toBe(403);
     expect(fetchMock).not.toHaveBeenCalled();

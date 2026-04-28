@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 // forwards live events from the in-process bus until the task terminates.
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await getServerSession(authOptions);
   if (!session?.apiKey || !session.principalId) {
@@ -24,12 +24,12 @@ export async function GET(
   if (!session.isAdmin) {
     return NextResponse.json({ error: "admin_only" }, { status: 403 });
   }
-  const detail = await getTaskDetail(params.id, session.principalId);
+  const { id: taskId } = await params;
+  const detail = await getTaskDetail(taskId, session.principalId);
   if (!detail) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
-  const taskId = params.id;
   const seenSeqs = new Set<number>();
   const encoder = new TextEncoder();
 

@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST(
   _req: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await getServerSession(authOptions);
   if (!session?.apiKey || !session.principalId) {
@@ -17,9 +17,10 @@ export async function POST(
   if (!session.isAdmin) {
     return NextResponse.json({ error: "admin_only" }, { status: 403 });
   }
-  const taskCancelled = cancelTask(params.id, session.principalId);
+  const { id } = await params;
+  const taskCancelled = cancelTask(id, session.principalId);
   const cancelledApprovals = await cancelPendingApprovalsForTask(
-    params.id,
+    id,
     session.principalId,
   );
   if (!taskCancelled && cancelledApprovals === 0) {
@@ -27,7 +28,7 @@ export async function POST(
   }
   return NextResponse.json({
     ok: true,
-    taskId: params.id,
+    taskId: id,
     state: "cancelled",
     cancelledApprovals,
     taskCancelled,

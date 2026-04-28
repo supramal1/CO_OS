@@ -60,7 +60,7 @@ describe("POST /api/forge/tasks/:id/transition — auth gates", () => {
     mockSession.mockResolvedValue(null);
     const res = await POST(
       req({ from_lane: "backlog", to_lane: "research" }),
-      { params: { id: "t1" } },
+      { params: Promise.resolve({ id: "t1" }) },
     );
     expect(res.status).toBe(401);
   });
@@ -69,7 +69,7 @@ describe("POST /api/forge/tasks/:id/transition — auth gates", () => {
     okSession(false);
     const res = await POST(
       req({ from_lane: "backlog", to_lane: "research" }),
-      { params: { id: "t1" } },
+      { params: Promise.resolve({ id: "t1" }) },
     );
     expect(res.status).toBe(403);
   });
@@ -80,7 +80,7 @@ describe("POST /api/forge/tasks/:id/transition — input validation", () => {
     okSession(true);
     const res = await POST(
       req({ from_lane: "nonsense", to_lane: "research" }),
-      { params: { id: "t1" } },
+      { params: Promise.resolve({ id: "t1" }) },
     );
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
@@ -91,7 +91,7 @@ describe("POST /api/forge/tasks/:id/transition — input validation", () => {
     okSession(true);
     const res = await POST(
       req({ from_lane: "research", to_lane: "research_review" }),
-      { params: { id: "t1" } },
+      { params: Promise.resolve({ id: "t1" }) },
     );
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
@@ -121,7 +121,7 @@ describe("POST /api/forge/tasks/:id/transition — lane drift detection", () => 
     ]);
     const res = await POST(
       req({ from_lane: "backlog", to_lane: "research" }),
-      { params: { id: "t1" } },
+      { params: Promise.resolve({ id: "t1" }) },
     );
     expect(res.status).toBe(409);
     const body = (await res.json()) as { error: string };
@@ -150,7 +150,7 @@ describe("POST /api/forge/tasks/:id/transition — invoke path (backlog→resear
     ]);
     const res = await POST(
       req({ from_lane: "backlog", to_lane: "research" }),
-      { params: { id: "t1" } },
+      { params: Promise.resolve({ id: "t1" }) },
     );
     expect(res.status).toBe(200);
 
@@ -216,7 +216,7 @@ describe("POST /api/forge/tasks/:id/transition — resume path (research_review�
     ]);
     const res = await POST(
       req({ from_lane: "research_review", to_lane: "production" }),
-      { params: { id: "t1" } },
+      { params: Promise.resolve({ id: "t1" }) },
     );
     expect(res.status).toBe(200);
 
@@ -250,7 +250,7 @@ describe("POST /api/forge/tasks/:id/transition — resume path (research_review�
     ]);
     const res = await POST(
       req({ from_lane: "research_review", to_lane: "production" }),
-      { params: { id: "t1" } },
+      { params: Promise.resolve({ id: "t1" }) },
     );
     expect(res.status).toBe(409);
     const body = (await res.json()) as { error: string };

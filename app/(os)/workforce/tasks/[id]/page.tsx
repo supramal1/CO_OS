@@ -1,11 +1,13 @@
 "use client";
 
+import { use } from "react";
 import { TaskDetailView } from "@/components/workforce/task-detail-view";
 
 export default function WorkforceTaskPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
-  return <TaskDetailView taskId={params.id} />;
+  const { id } = use(params);
+  return <TaskDetailView taskId={id} />;
 }

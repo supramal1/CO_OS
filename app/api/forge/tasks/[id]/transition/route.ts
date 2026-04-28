@@ -61,7 +61,7 @@ function isForgeLane(v: unknown): v is ForgeLane {
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await getServerSession(authOptions);
   if (!session?.apiKey) {
@@ -71,7 +71,7 @@ export async function POST(
     return jsonError(403, "admin_only");
   }
 
-  const taskId = params.id;
+  const { id: taskId } = await params;
   const bodyText = await req.text();
   let body: TransitionBody;
   try {

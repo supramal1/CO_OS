@@ -65,7 +65,7 @@ function parsePrUrl(
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await getServerSession(authOptions);
   if (!session?.apiKey) return jsonError(401, "unauthenticated");
@@ -79,10 +79,11 @@ export async function GET(
     auth: { persistSession: false },
   });
 
+  const { id } = await params;
   const { data: runs, error } = await sb
     .from("forge_task_runs")
     .select("id, task_id, pr_url, output, completed_at, created_at")
-    .eq("task_id", params.id)
+    .eq("task_id", id)
     .eq("run_type", "build")
     .eq("stage", "awaiting_review")
     .order("created_at", { ascending: false })

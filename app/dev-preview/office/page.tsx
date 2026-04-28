@@ -1,7 +1,7 @@
 // Internal dev preview for the pixel office. Renders the default AI Ops
 // template (what /workforce ships) plus the Platform Ops demo template,
 // stacked, so template portability is visible at a glance. Lives outside
-// the /workforce middleware matcher → no auth required.
+// the /workforce proxy matcher -> no auth required.
 
 import { PixelOffice } from "@/components/workforce/office/pixel-office";
 import {

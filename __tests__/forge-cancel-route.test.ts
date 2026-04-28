@@ -78,13 +78,13 @@ beforeEach(() => {
 describe("POST /api/forge/tasks/:id/cancel — auth gates", () => {
   it("returns 401 when unauthenticated", async () => {
     mockSession.mockResolvedValue(null);
-    const res = await POST(req(), { params: { id: "t1" } });
+    const res = await POST(req(), { params: Promise.resolve({ id: "t1" }) });
     expect(res.status).toBe(401);
   });
 
   it("returns 403 when authenticated but not admin", async () => {
     okSession(false);
-    const res = await POST(req(), { params: { id: "t1" } });
+    const res = await POST(req(), { params: Promise.resolve({ id: "t1" }) });
     expect(res.status).toBe(403);
   });
 });
@@ -100,7 +100,7 @@ describe("POST /api/forge/tasks/:id/cancel", () => {
       },
     ]);
 
-    const res = await POST(req(), { params: { id: "t1" } });
+    const res = await POST(req(), { params: Promise.resolve({ id: "t1" }) });
 
     expect(res.status).toBe(409);
     const body = (await res.json()) as { error: string };
@@ -120,7 +120,7 @@ describe("POST /api/forge/tasks/:id/cancel", () => {
       { ok: true, status: 200, body: cancelled },
     ]);
 
-    const res = await POST(req(), { params: { id: "t1" } });
+    const res = await POST(req(), { params: Promise.resolve({ id: "t1" }) });
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual(cancelled);
@@ -144,7 +144,7 @@ describe("POST /api/forge/tasks/:id/cancel", () => {
       { ok: false, status: 500, body: { error: "write_failed" } },
     ]);
 
-    const res = await POST(req(), { params: { id: "t1" } });
+    const res = await POST(req(), { params: Promise.resolve({ id: "t1" }) });
 
     expect(res.status).toBe(500);
     expect(await res.json()).toEqual({ error: "write_failed" });

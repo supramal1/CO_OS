@@ -6,14 +6,15 @@ import { applyForgeNamespace } from "@/lib/forge-namespace";
 
 export const dynamic = "force-dynamic";
 
-type RouteContext = { params: { id: string } };
+type RouteContext = { params: Promise<{ id: string }> };
 
 export async function GET(req: NextRequest, { params }: RouteContext) {
   const session = await getServerSession(authOptions);
   if (!session?.apiKey) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
-  const url = new URL(`${CORNERSTONE_URL}/forge/briefs/${params.id}`);
+  const { id } = await params;
+  const url = new URL(`${CORNERSTONE_URL}/forge/briefs/${id}`);
   applyForgeNamespace(url, req);
   const upstream = await fetch(url.toString(), {
     headers: { "X-API-Key": session.apiKey },
@@ -35,7 +36,8 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ error: "admin_only" }, { status: 403 });
   }
   const payload = await req.text();
-  const url = new URL(`${CORNERSTONE_URL}/forge/briefs/${params.id}`);
+  const { id } = await params;
+  const url = new URL(`${CORNERSTONE_URL}/forge/briefs/${id}`);
   applyForgeNamespace(url, req, payload);
   const upstream = await fetch(url.toString(), {
     method: "PATCH",
@@ -61,7 +63,8 @@ export async function DELETE(req: NextRequest, { params }: RouteContext) {
   if (!session.isAdmin) {
     return NextResponse.json({ error: "admin_only" }, { status: 403 });
   }
-  const url = new URL(`${CORNERSTONE_URL}/forge/briefs/${params.id}`);
+  const { id } = await params;
+  const url = new URL(`${CORNERSTONE_URL}/forge/briefs/${id}`);
   applyForgeNamespace(url, req);
   const upstream = await fetch(url.toString(), {
     method: "DELETE",
