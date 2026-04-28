@@ -3,10 +3,9 @@ import type { NextRequest } from "next/server";
 import type { ForgeTask } from "@/lib/agents-types";
 
 const mockSession = vi.fn();
-vi.mock("next-auth", () => ({
-  getServerSession: () => mockSession(),
+vi.mock("@/auth", () => ({
+  auth: () => mockSession(),
 }));
-vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/cornerstone", () => ({
   CORNERSTONE_URL: "https://cornerstone.test",
 }));

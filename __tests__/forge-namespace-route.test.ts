@@ -2,10 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 
 const mockSession = vi.fn();
-vi.mock("next-auth", () => ({
-  getServerSession: () => mockSession(),
+vi.mock("@/auth", () => ({
+  auth: () => mockSession(),
 }));
-vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/cornerstone", () => ({
   CORNERSTONE_URL: "https://cornerstone.test",
 }));

@@ -1,13 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { NextRequest } from "next/server";
 
-// Mock next-auth before importing the route — the route reads
-// getServerSession at top of handler.
+// Mock Auth.js before importing the route because handlers read auth() at runtime.
 const mockSession = vi.fn();
-vi.mock("next-auth", () => ({
-  getServerSession: () => mockSession(),
+vi.mock("@/auth", () => ({
+  auth: () => mockSession(),
 }));
-vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/cornerstone", () => ({
   CORNERSTONE_URL: "https://cornerstone.test",
 }));

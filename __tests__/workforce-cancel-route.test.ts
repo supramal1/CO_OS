@@ -9,10 +9,9 @@ const approvals = vi.hoisted(() => ({
   cancelPendingApprovalsForTask: vi.fn(),
 }));
 
-vi.mock("next-auth", () => ({
-  getServerSession: () => mockSession(),
+vi.mock("@/auth", () => ({
+  auth: () => mockSession(),
 }));
-vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/workforce/runner", () => runner);
 vi.mock("@/lib/workforce/approvals", () => approvals);
 
