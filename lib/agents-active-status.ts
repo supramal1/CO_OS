@@ -4,7 +4,6 @@ export type ForgeActiveRunRow = {
   status: string | null;
   run_type: string | null;
   stage?: string | null;
-  agent_role?: string | null;
   started_at: string | null;
   created_at: string;
 };
@@ -29,7 +28,7 @@ export function activeStatusForTask(
   if (!latest) return { active: false };
 
   const runLabel = humanizeLabel(latest.run_type) || "Run";
-  const workerLabel = humanizeLabel(latest.agent_role) || runLabel || "Agent";
+  const workerLabel = runLabel || "Agent";
   return {
     active: true,
     taskId,

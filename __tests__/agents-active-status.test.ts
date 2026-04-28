@@ -20,7 +20,6 @@ describe("agents active status", () => {
         task_id: "task-1",
         status: "running",
         run_type: "build",
-        agent_role: "ada",
         started_at: "2026-04-29T10:05:00.000Z",
       }),
     ];
@@ -29,8 +28,8 @@ describe("agents active status", () => {
       active: true,
       taskId: "task-1",
       runId: "new-running",
-      label: "Ada working",
-      workerLabel: "Ada",
+      label: "Build working",
+      workerLabel: "Build",
       runLabel: "Build",
       startedAt: "2026-04-29T10:05:00.000Z",
     });
@@ -48,7 +47,7 @@ describe("agents active status", () => {
     expect(activeStatusForTask(rows, "task-1")).toEqual({ active: false });
   });
 
-  it("falls back to a humanised run type when agent_role is not present", () => {
+  it("uses a humanised run type for the active worker label", () => {
     const rows: ForgeActiveRunRow[] = [
       run({
         task_id: "task-1",
@@ -82,7 +81,6 @@ function run(overrides: Partial<ForgeActiveRunRow>): ForgeActiveRunRow {
     status: "running",
     run_type: null,
     stage: null,
-    agent_role: null,
     started_at: null,
     created_at: "2026-04-29T09:00:00.000Z",
     ...overrides,
