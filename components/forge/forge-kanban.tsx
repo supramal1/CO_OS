@@ -621,17 +621,12 @@ function KanbanCardPresentational({
   };
   return (
     <div style={style}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          minWidth: 0,
-        }}
-      >
-        <div style={{ fontWeight: 500, flex: 1, minWidth: 0 }}>{task.title}</div>
-        <AgentActivityBadge status={activityStatus} />
-      </div>
+      <div style={{ fontWeight: 500 }}>{task.title}</div>
+      {activityStatus?.active ? (
+        <div style={{ marginTop: 6, maxWidth: "100%" }}>
+          <AgentActivityBadge status={activityStatus} compact />
+        </div>
+      ) : null}
       {task.description ? (
         <div
           style={{

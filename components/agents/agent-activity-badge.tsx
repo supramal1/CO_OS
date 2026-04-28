@@ -6,15 +6,25 @@ type ActiveStatus = Extract<AgentActiveStatus, { active: true }>;
 
 export function AgentActivityBadge({
   status,
+  compact = false,
 }: {
   status: AgentActiveStatus | null | undefined;
+  compact?: boolean;
 }) {
   if (!status?.active) return null;
+  const label = compact ? status.workerLabel : status.label;
   return (
     <>
-      <span aria-label={status.label} title={status.label} style={badgeStyle}>
+      <span
+        aria-label={status.label}
+        title={status.label}
+        style={{
+          ...badgeStyle,
+          ...(compact ? compactBadgeStyle : null),
+        }}
+      >
         <span aria-hidden="true" className="agent-activity-dot" style={dotStyle} />
-        <span style={textStyle}>{status.label}</span>
+        <span style={textStyle}>{label}</span>
       </span>
       <AgentActivityPulseStyle />
     </>
@@ -78,6 +88,13 @@ const badgeStyle: React.CSSProperties = {
   textTransform: "uppercase",
 };
 
+const compactBadgeStyle: React.CSSProperties = {
+  padding: "3px 7px",
+  fontSize: 10,
+  letterSpacing: 0,
+  textTransform: "none",
+};
+
 const dotStyle: React.CSSProperties = {
   width: 7,
   height: 7,
@@ -88,6 +105,7 @@ const dotStyle: React.CSSProperties = {
 };
 
 const textStyle: React.CSSProperties = {
+  minWidth: 0,
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",

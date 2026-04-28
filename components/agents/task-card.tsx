@@ -74,7 +74,6 @@ export function TaskCard({
             P{task.priority}
           </span>
         ) : null}
-        <AgentActivityBadge status={activityStatus} />
       </div>
       <div
         style={{
@@ -86,6 +85,11 @@ export function TaskCard({
       >
         {task.title}
       </div>
+      {activityStatus?.active ? (
+        <div style={{ marginTop: 8, maxWidth: "100%" }}>
+          <AgentActivityBadge status={activityStatus} compact />
+        </div>
+      ) : null}
       {costUsd !== null ? (
         <div
           aria-label="Task cost"
