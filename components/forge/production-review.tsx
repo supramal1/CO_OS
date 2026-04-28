@@ -68,7 +68,6 @@ export function ProductionReview() {
           "id, title, description, lane, status, agent_id, priority, creator_type, creator_id, assignee_type, assignee_id, metadata, namespace, created_at, updated_at",
         )
         .eq("lane", "production_review")
-        .eq("namespace", "default")
         .order("updated_at", { ascending: false });
       if (error) throw error;
       if (!data || data.length === 0) {
@@ -100,6 +99,7 @@ export function ProductionReview() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          namespace: task.namespace,
           from_lane: "production_review",
           to_lane: "done",
         }),
@@ -253,6 +253,18 @@ function TaskRow({
       }}
     >
       <div style={{ fontSize: 13, fontWeight: 500 }}>{task.title}</div>
+      <div
+        style={{
+          marginTop: 4,
+          fontFamily: "var(--font-plex-mono)",
+          fontSize: 10,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          color: "var(--ink-faint)",
+        }}
+      >
+        {task.namespace}
+      </div>
       {task.description ? (
         <div
           style={{
@@ -345,6 +357,18 @@ function PrPane({
           >
             {task.title}
           </h2>
+          <div
+            style={{
+              marginTop: 6,
+              fontFamily: "var(--font-plex-mono)",
+              fontSize: 10,
+              letterSpacing: "0.12em",
+              textTransform: "uppercase",
+              color: "var(--ink-faint)",
+            }}
+          >
+            {task.namespace}
+          </div>
         </div>
         <button
           type="button"
