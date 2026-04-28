@@ -17,18 +17,19 @@ export async function POST(
   if (!session.isAdmin) {
     return NextResponse.json({ error: "admin_only" }, { status: 403 });
   }
-  const ok = cancelTask(params.id, session.principalId);
-  if (!ok) {
-    return NextResponse.json({ error: "not_found_or_not_owner" }, { status: 404 });
-  }
+  const taskCancelled = cancelTask(params.id, session.principalId);
   const cancelledApprovals = await cancelPendingApprovalsForTask(
     params.id,
     session.principalId,
   );
+  if (!taskCancelled && cancelledApprovals === 0) {
+    return NextResponse.json({ error: "not_found_or_not_owner" }, { status: 404 });
+  }
   return NextResponse.json({
     ok: true,
     taskId: params.id,
     state: "cancelled",
     cancelledApprovals,
+    taskCancelled,
   });
 }

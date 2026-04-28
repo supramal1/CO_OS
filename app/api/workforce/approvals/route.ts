@@ -1,7 +1,7 @@
 // GET /api/workforce/approvals — list pending approvals for the current
-// principal. Source of truth is the in-memory PENDING map in
-// lib/workforce/approvals.ts; we return only entries owned by the caller
-// so cross-principal visibility is impossible.
+// principal. Live approvals live in the in-memory PENDING map; cold-started
+// processes first rehydrate pending tool_approvals rows as orphaned approvals
+// so operators can clear the durable inbox.
 //
 // Note: persisted history (resolved approvals) lives in tool_approvals on
 // Supabase — see persistence.ts. This route deliberately does not surface
@@ -22,6 +22,6 @@ export async function GET() {
   if (!session.isAdmin) {
     return NextResponse.json({ error: "admin_only" }, { status: 403 });
   }
-  const approvals = listPendingApprovals(session.principalId);
+  const approvals = await listPendingApprovals(session.principalId);
   return NextResponse.json({ approvals });
 }

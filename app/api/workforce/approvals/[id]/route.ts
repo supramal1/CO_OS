@@ -49,7 +49,7 @@ export async function POST(
   }
   const reason = typeof body.reason === "string" ? body.reason : undefined;
 
-  const ok = resolveApproval(
+  const ok = await resolveApproval(
     params.id,
     {
       approved: body.approved,

@@ -8,16 +8,21 @@
 // in the runner's running task because the substrate is in-memory synchronous.
 //
 // Constraints inherited from the design:
-//   - Process-local: a Vercel cold start drops every pending approval. The
-//     parent task transitions to `failed` (the substrate cancels via the
-//     AbortSignal on shutdown). Same blast radius as any in-flight task.
-//   - Idempotent resolve: double-clicking approve twice is a no-op the
-//     second time.
+//   - Live Promise resolution is process-local. A Vercel cold start destroys
+//     the suspended Promise and invocation closure.
+//   - Pending rows in tool_approvals are rehydrated as orphaned approvals so
+//     operators can clear the durable inbox honestly; resolving an orphan does
+//     not resume the lost invocation.
 //   - No timeout in v0. Operators close the panel by deciding.
 
 import { randomUUID } from "node:crypto";
 import type { ApprovalDecision, ApprovalRequest } from "@workforce/substrate";
-import { persistApprovalRequested, persistApprovalResolved } from "./persistence";
+import {
+  fetchPendingApprovalRows,
+  persistApprovalRequested,
+  persistApprovalResolved,
+  type PendingApprovalRow,
+} from "./persistence";
 
 export interface PendingApproval {
   approvalId: string;
@@ -33,12 +38,17 @@ export interface PendingApproval {
 
 interface DeferredApproval {
   pending: PendingApproval;
-  resolve: (decision: ApprovalDecision) => void;
+  source: "live" | "rehydrated_orphan";
+  resolve?: (decision: ApprovalDecision) => void;
 }
 
 declare global {
   // eslint-disable-next-line no-var
   var __wf_pending: Map<string, DeferredApproval> | undefined;
+  // eslint-disable-next-line no-var
+  var __wf_approvals_rehydrated: boolean | undefined;
+  // eslint-disable-next-line no-var
+  var __wf_approvals_rehydrate_promise: Promise<void> | undefined;
 }
 
 const PENDING: Map<string, DeferredApproval> =
@@ -76,7 +86,7 @@ export function makeApprovalHook(ctx: RegisterContext) {
       ownerPrincipalId: ctx.ownerPrincipalId,
     };
     const decisionPromise = new Promise<ApprovalDecision>((resolve) => {
-      PENDING.set(approvalId, { pending, resolve });
+      PENDING.set(approvalId, { pending, source: "live", resolve });
     });
     // Persist alongside the in-memory entry so the inbox UI can rebuild
     // pending state after a process restart and so audit history survives.
@@ -90,21 +100,32 @@ export function makeApprovalHook(ctx: RegisterContext) {
  * the principal isn't the owner — both surface as a 404 to avoid leaking
  * existence across principals.
  */
-export function resolveApproval(
+export async function resolveApproval(
   approvalId: string,
   decision: ApprovalDecision,
   principalId: string,
-): boolean {
+): Promise<boolean> {
+  await ensureApprovalsRehydrated();
   const entry = PENDING.get(approvalId);
   if (!entry) return false;
   if (entry.pending.ownerPrincipalId !== principalId) return false;
+  if (entry.source === "live") {
+    PENDING.delete(approvalId);
+    void persistApprovalResolved(approvalId, decision);
+    entry.resolve?.(decision);
+    return true;
+  }
+  const persisted = await persistApprovalResolved(approvalId, decision);
+  if (!persisted) return false;
   PENDING.delete(approvalId);
-  void persistApprovalResolved(approvalId, decision);
-  entry.resolve(decision);
+  entry.resolve?.(decision);
   return true;
 }
 
-export function listPendingApprovals(principalId: string): PendingApproval[] {
+export async function listPendingApprovals(
+  principalId: string,
+): Promise<PendingApproval[]> {
+  await ensureApprovalsRehydrated();
   const out: PendingApproval[] = [];
   for (const entry of PENDING.values()) {
     if (entry.pending.ownerPrincipalId !== principalId) continue;
@@ -113,10 +134,11 @@ export function listPendingApprovals(principalId: string): PendingApproval[] {
   return out.sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
 }
 
-export function getPendingApproval(
+export async function getPendingApproval(
   approvalId: string,
   principalId: string,
-): PendingApproval | null {
+): Promise<PendingApproval | null> {
+  await ensureApprovalsRehydrated();
   const entry = PENDING.get(approvalId);
   if (!entry) return null;
   if (entry.pending.ownerPrincipalId !== principalId) return null;
@@ -127,12 +149,13 @@ export async function cancelPendingApprovalsForTask(
   taskId: string,
   principalId: string,
 ): Promise<number> {
+  await ensureApprovalsRehydrated();
   const matches = [...PENDING.entries()].filter(
     ([, entry]) =>
       entry.pending.taskId === taskId &&
       entry.pending.ownerPrincipalId === principalId,
   );
-  await Promise.all(
+  const resolved = await Promise.all(
     matches.map(async ([approvalId, entry]) => {
       const decision: ApprovalDecision = {
         approved: false,
@@ -140,10 +163,61 @@ export async function cancelPendingApprovalsForTask(
         reason: "task_cancelled",
         resolvedBy: "system:task_cancelled",
       };
+      if (entry.source === "live") {
+        PENDING.delete(approvalId);
+        void persistApprovalResolved(approvalId, decision);
+        entry.resolve?.(decision);
+        return true;
+      }
+      const persisted = await persistApprovalResolved(approvalId, decision);
+      if (!persisted) return false;
       PENDING.delete(approvalId);
-      await persistApprovalResolved(approvalId, decision);
-      entry.resolve(decision);
+      entry.resolve?.(decision);
+      return true;
     }),
   );
-  return matches.length;
+  return resolved.filter(Boolean).length;
+}
+
+export async function ensureApprovalsRehydrated(): Promise<void> {
+  if (globalThis.__wf_approvals_rehydrated) return;
+  if (globalThis.__wf_approvals_rehydrate_promise) {
+    return globalThis.__wf_approvals_rehydrate_promise;
+  }
+
+  const promise = (async () => {
+    const rows = await fetchPendingApprovalRows();
+    for (const row of rows) {
+      if (PENDING.has(row.id)) continue;
+      PENDING.set(row.id, {
+        pending: pendingApprovalFromRow(row),
+        source: "rehydrated_orphan",
+      });
+    }
+    globalThis.__wf_approvals_rehydrated = true;
+  })().finally(() => {
+    globalThis.__wf_approvals_rehydrate_promise = undefined;
+  });
+
+  globalThis.__wf_approvals_rehydrate_promise = promise;
+  return promise;
+}
+
+function pendingApprovalFromRow(row: PendingApprovalRow): PendingApproval {
+  return {
+    approvalId: row.id,
+    taskId: row.task_id,
+    agentId: row.agent_id,
+    toolName: row.tool_name,
+    preview: row.preview ?? `${row.tool_name} approval`,
+    detail: row.detail ?? undefined,
+    input: inputFromRow(row.tool_args),
+    createdAt: row.created_at,
+    ownerPrincipalId: row.principal_id,
+  };
+}
+
+function inputFromRow(input: Record<string, unknown> | null): Record<string, unknown> {
+  if (!input || Array.isArray(input) || typeof input !== "object") return {};
+  return input;
 }
