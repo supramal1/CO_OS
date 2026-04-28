@@ -61,21 +61,3 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
     headers: { "Content-Type": "application/json" },
   });
 }
-
-export async function DELETE(req: NextRequest, { params }: RouteContext) {
-  const auth = await guard();
-  if ("error" in auth) return auth.error;
-  const { id } = await params;
-  const url = new URL(`${CORNERSTONE_URL}/forge/tasks/${id}`);
-  applyForgeNamespace(url, req);
-  const upstream = await fetch(url.toString(), {
-    method: "DELETE",
-    headers: { "X-API-Key": auth.apiKey },
-    cache: "no-store",
-  });
-  const body = await upstream.text();
-  return new NextResponse(body, {
-    status: upstream.status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
