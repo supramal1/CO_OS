@@ -10,6 +10,11 @@ import type {
   TaskSummary,
 } from "@/lib/workforce/types";
 import { runningCostUsdFromEvents } from "@/lib/workforce/cost-observability";
+import {
+  WORKFORCE_DETAIL_POLL_MS,
+  mergeTaskEventLogs,
+  shouldPollTaskDetail,
+} from "@/lib/workforce/task-detail-sync";
 import { StateChip } from "./state-chip";
 import { TaskCostMeter } from "./cost-observability";
 
@@ -39,7 +44,7 @@ export function TaskDetailView({ taskId }: Props) {
         if (!cancelled) {
           setDetail(body);
           setLoading(false);
-          setLiveEvents(body.events);
+          setLiveEvents((prev) => mergeTaskEventLogs(prev, body.events));
         }
       } catch (err) {
         if (!cancelled) {
@@ -61,12 +66,7 @@ export function TaskDetailView({ taskId }: Props) {
     es.addEventListener("event", (e) => {
       try {
         const entry = JSON.parse((e as MessageEvent).data) as PublicEventLogEntry;
-        setLiveEvents((prev) => {
-          if (prev.some((p) => p.seq === entry.seq && p.taskId === entry.taskId)) return prev;
-          return [...prev, entry].sort((a, b) =>
-            a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : a.seq - b.seq,
-          );
-        });
+        setLiveEvents((prev) => mergeTaskEventLogs(prev, [entry]));
       } catch {
         // ignore parse errors
       }
@@ -79,7 +79,10 @@ export function TaskDetailView({ taskId }: Props) {
       void fetch(`/api/workforce/tasks/${taskId}`, { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : null))
         .then((b: TaskDetail | null) => {
-          if (b && !closed) setDetail(b);
+          if (b && !closed) {
+            setDetail(b);
+            setLiveEvents((prev) => mergeTaskEventLogs(prev, b.events));
+          }
         });
     });
     es.onerror = () => {
@@ -90,6 +93,33 @@ export function TaskDetailView({ taskId }: Props) {
     return () => {
       closed = true;
       es.close();
+    };
+  }, [taskId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refreshDetail() {
+      if (!shouldPollTaskDetail(detailRef.current?.state)) return;
+      try {
+        const res = await fetch(`/api/workforce/tasks/${taskId}`, {
+          cache: "no-store",
+        });
+        if (!res.ok) return;
+        const body = (await res.json()) as TaskDetail;
+        if (cancelled) return;
+        setDetail(body);
+        setLiveEvents((prev) => mergeTaskEventLogs(prev, body.events));
+      } catch {
+        // Polling is a fallback for dropped SSE; keep the existing UI state
+        // through transient fetch failures.
+      }
+    }
+
+    const id = window.setInterval(refreshDetail, WORKFORCE_DETAIL_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
     };
   }, [taskId]);
 

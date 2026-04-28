@@ -27,6 +27,7 @@ import {
   runningCostUsdFromEvents,
 } from "./cost-observability";
 import {
+  fetchChildTasks,
   fetchEvents,
   fetchRecentTasks,
   fetchResult,
@@ -40,6 +41,7 @@ import {
   type PersistedResultRow,
   type PersistedTaskRow,
 } from "./persistence";
+import { mergeTaskEventLogs } from "./task-detail-sync";
 import type {
   CreateTaskRequest,
   InvocationState,
@@ -285,11 +287,15 @@ export async function getTaskDetail(
   // Process restart / older task — read from Supabase.
   const row = await fetchTask(taskId, principalId);
   if (!row) return null;
-  const [result, events] = await Promise.all([
+  const [result, events, childRows] = await Promise.all([
     fetchResult(taskId),
     fetchEvents(taskId),
+    fetchChildTasks(taskId, principalId),
   ]);
-  return rowToDetail(row, result, events);
+  const childEventLists = await Promise.all(
+    childRows.map((child) => fetchEvents(child.id)),
+  );
+  return rowToDetail(row, result, events, childRows, childEventLists.flat());
 }
 
 export async function listRecentTasks(
@@ -549,21 +555,31 @@ function rowToDetail(
   row: PersistedTaskRow,
   result: PersistedResultRow | null,
   events: PersistedEventRow[],
+  childRows: PersistedTaskRow[] = [],
+  childEvents: PersistedEventRow[] = [],
 ): TaskDetail {
   const summary = rowToSummary(row);
+  const allEvents = mergeTaskEventLogs([], [
+    ...events.map(publicEventFromRow),
+    ...childEvents.map(publicEventFromRow),
+  ]);
   return {
     ...summary,
     output: result?.output ?? "",
     error: row.error ?? undefined,
-    events: events.map((e) => ({
-      type: e.type as EventLogEntry["type"],
-      timestamp: e.timestamp,
-      seq: e.seq,
-      taskId: e.task_id,
-      agentId: e.agent_id,
-      payload: e.payload,
-    })),
-    children: [],
+    events: allEvents,
+    children: childRows.map(rowToSummary),
+  };
+}
+
+function publicEventFromRow(e: PersistedEventRow) {
+  return {
+    type: e.type as EventLogEntry["type"],
+    timestamp: e.timestamp,
+    seq: e.seq,
+    taskId: e.task_id,
+    agentId: e.agent_id,
+    payload: e.payload,
   };
 }
 

@@ -266,6 +266,25 @@ export async function fetchTask(
   return (data as PersistedTaskRow | null) ?? null;
 }
 
+export async function fetchChildTasks(
+  parentTaskId: string,
+  principalId: string,
+): Promise<PersistedTaskRow[]> {
+  const sb = getWorkforceSupabase();
+  if (!sb) return [];
+  const { data, error } = await sb
+    .from("workforce_tasks")
+    .select("*")
+    .eq("parent_task_id", parentTaskId)
+    .eq("principal_id", principalId)
+    .order("started_at", { ascending: true });
+  if (error) {
+    console.warn("[workforce] fetchChildTasks failed:", error.message);
+    return [];
+  }
+  return (data as PersistedTaskRow[]) ?? [];
+}
+
 export async function fetchResult(
   taskId: string,
 ): Promise<PersistedResultRow | null> {
