@@ -13,7 +13,7 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import type { ForgeLane, ForgeTask } from "@/lib/agents-types";
-import { AgentActivityBadge } from "@/components/agents/agent-activity-badge";
+import { AgentActivityBadge } from "@/components/forge/agent-activity-badge";
 import {
   activeStatusMap,
   type AgentActiveStatus,
