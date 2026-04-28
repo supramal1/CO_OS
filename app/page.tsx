@@ -1,13 +1,12 @@
 import { redirect } from "next/navigation";
-import { getServerSession } from "next-auth";
 import { CropMarks } from "@/components/crop-marks";
 import { Monogram } from "@/components/monogram";
 import { SignInButton } from "@/components/sign-in-button";
-import { authOptions } from "@/lib/auth";
+import { auth } from "@/auth";
 import { DEFAULT_LANDING } from "@/lib/modules";
 
 export default async function SplashPage() {
-  const session = await getServerSession(authOptions);
+  const session = await auth();
   if (session?.user?.email) {
     redirect(DEFAULT_LANDING);
   }

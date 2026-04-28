@@ -1,7 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getServerSession } from "next-auth";
 import Anthropic from "@anthropic-ai/sdk";
-import { authOptions } from "@/lib/auth";
+import { auth } from "@/auth";
 import { CORNERSTONE_URL } from "@/lib/cornerstone";
 import { forgeNamespaceFromRequest } from "@/lib/forge-namespace";
 
@@ -162,7 +161,7 @@ async function callSubmitBrief(
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
+  const session = await auth();
   if (!session?.apiKey) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }

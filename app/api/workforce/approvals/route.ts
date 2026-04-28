@@ -8,14 +8,13 @@
 // that history; the inbox is for "what needs me right now?", not audit.
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { auth } from "@/auth";
 import { listPendingApprovals } from "@/lib/workforce/approvals";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const session = await getServerSession(authOptions);
+  const session = await auth();
   if (!session?.apiKey || !session.principalId) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }

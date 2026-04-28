@@ -1,6 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { auth } from "@/auth";
 import {
   CookbookMcpError,
   createSkill,
@@ -11,7 +10,7 @@ import {
 export const dynamic = "force-dynamic";
 
 async function requireKey() {
-  const session = await getServerSession(authOptions);
+  const session = await auth();
   if (!session?.apiKey) {
     return {
       error: NextResponse.json({ error: "unauthenticated" }, { status: 401 }),

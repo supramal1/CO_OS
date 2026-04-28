@@ -1,6 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { auth } from "@/auth";
 import { CORNERSTONE_URL } from "@/lib/cornerstone";
 import { applyForgeNamespace } from "@/lib/forge-namespace";
 import type { ForgeTask } from "@/lib/agents-types";
@@ -26,7 +25,7 @@ async function upstreamText(res: Response): Promise<string> {
 }
 
 export async function POST(req: NextRequest, { params }: RouteContext) {
-  const session = await getServerSession(authOptions);
+  const session = await auth();
   if (!session?.apiKey) {
     return jsonError(401, "unauthenticated");
   }

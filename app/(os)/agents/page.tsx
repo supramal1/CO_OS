@@ -1,14 +1,13 @@
-import { getServerSession } from "next-auth";
 import {
   AdminWorkspaceGate,
   AdminWorkspaceProvider,
 } from "@/components/admin/workspace-selector";
 import { AgentsBoard } from "@/components/agents/agents-board";
-import { authOptions } from "@/lib/auth";
+import { auth } from "@/auth";
 import { listWorkspaces } from "@/lib/cornerstone";
 
 export default async function AgentsPage() {
-  const session = await getServerSession(authOptions);
+  const session = await auth();
   if (!session?.isAdmin) {
     return (
       <Placeholder>

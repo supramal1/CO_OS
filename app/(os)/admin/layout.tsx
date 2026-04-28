@@ -1,11 +1,10 @@
 import { redirect } from "next/navigation";
-import { getServerSession } from "next-auth";
 import { AdminSubNav } from "@/components/admin-sub-nav";
 import {
   AdminWorkspaceGate,
   AdminWorkspaceProvider,
 } from "@/components/admin/workspace-selector";
-import { authOptions } from "@/lib/auth";
+import { auth } from "@/auth";
 import {
   listWorkspaceAccess,
   workspaceNamesForAdminInvites,
@@ -17,7 +16,7 @@ export default async function AdminLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const session = await getServerSession(authOptions);
+  const session = await auth();
   if (!session?.isAdmin) {
     redirect("/speak-to-charlie");
   }

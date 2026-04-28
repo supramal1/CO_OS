@@ -1,6 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { auth } from "@/auth";
 import { cancelPendingApprovalsForTask } from "@/lib/workforce/approvals";
 import { cancelTask } from "@/lib/workforce/runner";
 
@@ -10,7 +9,7 @@ export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const session = await getServerSession(authOptions);
+  const session = await auth();
   if (!session?.apiKey || !session.principalId) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }

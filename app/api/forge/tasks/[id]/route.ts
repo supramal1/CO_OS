@@ -1,6 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { auth } from "@/auth";
 import { CORNERSTONE_URL } from "@/lib/cornerstone";
 import { applyForgeNamespace } from "@/lib/forge-namespace";
 
@@ -9,7 +8,7 @@ export const dynamic = "force-dynamic";
 type RouteContext = { params: Promise<{ id: string }> };
 
 async function guard() {
-  const session = await getServerSession(authOptions);
+  const session = await auth();
   if (!session?.apiKey) {
     return {
       error: NextResponse.json({ error: "unauthenticated" }, { status: 401 }),

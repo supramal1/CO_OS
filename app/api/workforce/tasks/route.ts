@@ -1,13 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { auth } from "@/auth";
 import { listRecentTasks, startTask } from "@/lib/workforce/runner";
 import type { CreateTaskRequest } from "@/lib/workforce/types";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
+  const session = await auth();
   if (!session?.apiKey || !session.principalId) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
@@ -21,7 +20,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
+  const session = await auth();
   if (!session?.apiKey || !session.principalId) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }

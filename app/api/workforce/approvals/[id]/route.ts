@@ -12,8 +12,7 @@
 // "already resolved" and refresh.
 
 import { NextResponse, type NextRequest } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { auth } from "@/auth";
 import { resolveApproval } from "@/lib/workforce/approvals";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +26,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const session = await getServerSession(authOptions);
+  const session = await auth();
   if (!session?.apiKey || !session.principalId) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }

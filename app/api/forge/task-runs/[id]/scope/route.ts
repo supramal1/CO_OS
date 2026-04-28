@@ -1,7 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getServerSession } from "next-auth";
 import { createClient } from "@supabase/supabase-js";
-import { authOptions } from "@/lib/auth";
+import { auth } from "@/auth";
 
 // PATCH /api/forge/task-runs/:id/scope
 // Reviewer-driven scope edit. Merges the posted fields into
@@ -45,7 +44,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const session = await getServerSession(authOptions);
+  const session = await auth();
   if (!session?.apiKey) return jsonError(401, "unauthenticated");
   if (!session.isAdmin) return jsonError(403, "admin_only");
 

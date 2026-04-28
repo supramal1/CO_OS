@@ -1,6 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { auth } from "@/auth";
 import { CORNERSTONE_URL } from "@/lib/cornerstone";
 import { applyForgeNamespace } from "@/lib/forge-namespace";
 
@@ -9,7 +8,7 @@ export const dynamic = "force-dynamic";
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function GET(req: NextRequest, { params }: RouteContext) {
-  const session = await getServerSession(authOptions);
+  const session = await auth();
   if (!session?.apiKey) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
@@ -28,7 +27,7 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
 }
 
 export async function PATCH(req: NextRequest, { params }: RouteContext) {
-  const session = await getServerSession(authOptions);
+  const session = await auth();
   if (!session?.apiKey) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
@@ -56,7 +55,7 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
 }
 
 export async function DELETE(req: NextRequest, { params }: RouteContext) {
-  const session = await getServerSession(authOptions);
+  const session = await auth();
   if (!session?.apiKey) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
