@@ -364,12 +364,14 @@ async function callApi(
   rt: CornerstoneRuntime,
   method: "GET" | "POST",
   path: string,
-  options: { body?: Record<string, unknown>; query?: Record<string, string> } = {},
+  options: { body?: Record<string, unknown>; query?: Record<string, unknown> } = {},
 ): Promise<ApiOk | ApiErr> {
   const url = new URL(`${rt.baseUrl.replace(/\/+$/, "")}${path}`);
   if (options.query) {
     for (const [k, v] of Object.entries(options.query)) {
-      if (v !== undefined && v !== "") url.searchParams.set(k, v);
+      if (v !== undefined && v !== null && v !== "") {
+        url.searchParams.set(k, String(v));
+      }
     }
   }
   const res = await rt.fetchImpl(url.toString(), {
@@ -656,10 +658,21 @@ async function runStewardMeta(
     };
   const res =
     method === "GET"
-      ? await callApi(rt, "GET", path, { query: { namespace: ns } })
+      ? await callApi(rt, "GET", path, {
+          query: stewardInspectQuery(input, ns),
+        })
       : await callApi(rt, "POST", path, { body: { ...input, namespace: ns } });
   if (!res.ok) return mapApiError(res, ns, rt.taskWorkspace);
   return { status: "ok", output: res.body };
+}
+
+function stewardInspectQuery(
+  input: Record<string, unknown>,
+  namespace: string,
+): Record<string, unknown> {
+  const query: Record<string, unknown> = { ...input, namespace };
+  delete query.operation;
+  return query;
 }
 
 async function runStewardPreview(

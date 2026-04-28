@@ -152,6 +152,40 @@ describe("cornerstone — read tools", () => {
   });
 });
 
+describe("cornerstone — steward_inspect query params", () => {
+  it("forwards all scalar GET inspect params alongside the resolved namespace", async () => {
+    let calledUrl = "";
+    const fetchMock = vi.fn(async (input: unknown) => {
+      calledUrl = typeof input === "string" ? input : (input as Request).url;
+      return jsonResponse(200, { total: 0, items: [] });
+    }) as unknown as typeof fetch;
+    const tool = cornerstoneToolForTest("steward_inspect", fetchMock)(
+      makeCtx(makeTask("aiops")),
+    );
+
+    const out = await tool.dispatch({
+      name: "steward_inspect",
+      toolUseId: "u1",
+      input: {
+        operation: "missing-dates",
+        namespace: "default",
+        limit: 200,
+        threshold: 0.91,
+        include_resolved: true,
+      },
+    });
+
+    expect(out.status).toBe("ok");
+    const url = new URL(calledUrl);
+    expect(url.pathname).toBe("/ops/steward/inspect/missing-dates");
+    expect(url.searchParams.get("namespace")).toBe("default");
+    expect(url.searchParams.get("limit")).toBe("200");
+    expect(url.searchParams.get("threshold")).toBe("0.91");
+    expect(url.searchParams.get("include_resolved")).toBe("true");
+    expect(url.searchParams.has("operation")).toBe(false);
+  });
+});
+
 describe("cornerstone — write namespace forcing", () => {
   it("add_fact forces the task targetWorkspace even if the agent passes a different namespace", async () => {
     let payload: Record<string, unknown> | undefined;
