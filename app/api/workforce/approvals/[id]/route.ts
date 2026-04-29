@@ -12,7 +12,7 @@
 // "already resolved" and refresh.
 
 import { NextResponse, type NextRequest } from "next/server";
-import { auth } from "@/auth";
+import { authWithApiKey as auth } from "@/lib/server-auth";
 import { resolveApproval } from "@/lib/workforce/approvals";
 
 export const dynamic = "force-dynamic";

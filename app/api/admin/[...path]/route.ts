@@ -1,10 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { auth } from "@/auth";
+import { authWithApiKey as auth } from "@/lib/server-auth";
 import { CORNERSTONE_URL } from "@/lib/cornerstone";
 
 // Governance proxy. Browser → /api/admin/* → Cornerstone /admin/*.
-// Auth model: per-principal session.apiKey. Admin gating is enforced both
-// here (session.isAdmin) and upstream (capability check on the API key).
+// Auth model: per-principal API key is resolved server-side. Admin gating is
+// enforced both here (session.isAdmin) and upstream (capability check on key).
 
 export const dynamic = "force-dynamic";
 

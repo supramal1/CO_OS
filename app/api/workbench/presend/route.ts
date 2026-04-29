@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { auth } from "@/auth";
+import { authWithApiKey as auth } from "@/lib/server-auth";
 import { CookbookMcpError } from "@/lib/cookbook-client";
 import { runWorkbenchPresend } from "@/lib/workbench/presend-start";
 

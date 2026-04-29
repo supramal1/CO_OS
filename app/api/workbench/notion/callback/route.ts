@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
   const state = verifyWorkbenchNotionOAuthState({
     state: url.searchParams.get("state"),
     principalId: session.principalId,
-    sessionBinding: session.apiKey ?? session.principalId,
+    sessionBinding: session.principalId,
   });
 
   if (state.status === "invalid") {

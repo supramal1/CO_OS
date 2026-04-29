@@ -155,7 +155,7 @@ describe("Workbench Notion OAuth foundation", () => {
       verifyWorkbenchNotionOAuthState({
         state: state ?? "",
         principalId: "principal_123",
-        sessionBinding: "session-key-123",
+        sessionBinding: "principal_123",
         now: new Date(),
       }),
     ).toMatchObject({ status: "valid" });
@@ -191,7 +191,7 @@ describe("Workbench Notion OAuth foundation", () => {
     mocks.persistWorkbenchNotionOAuthToken.mockResolvedValue({ status: "stored" });
     const state = signWorkbenchNotionOAuthState({
       principalId: "principal_123",
-      sessionBinding: "session-key-123",
+      sessionBinding: "principal_123",
       nonce: "nonce-123",
     });
     const fetchCalls: Array<{

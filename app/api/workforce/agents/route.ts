@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { authWithApiKey as auth } from "@/lib/server-auth";
 import { listPublicAgents } from "@/lib/workforce/agent-info";
 
 export const dynamic = "force-dynamic";

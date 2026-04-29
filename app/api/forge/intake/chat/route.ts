@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { auth } from "@/auth";
+import { authWithApiKey as auth } from "@/lib/server-auth";
 import { CORNERSTONE_URL } from "@/lib/cornerstone";
 import { forgeNamespaceFromRequest } from "@/lib/forge-namespace";
 

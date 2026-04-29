@@ -4,7 +4,7 @@ import {
   AdminWorkspaceGate,
   AdminWorkspaceProvider,
 } from "@/components/admin/workspace-selector";
-import { auth } from "@/auth";
+import { authWithApiKey as auth } from "@/lib/server-auth";
 import {
   listWorkspaceAccess,
   workspaceNamesForAdminInvites,

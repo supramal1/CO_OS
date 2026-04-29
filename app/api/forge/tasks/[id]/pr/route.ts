@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { auth } from "@/auth";
+import { authWithApiKey as auth } from "@/lib/server-auth";
 
 // GET /api/forge/tasks/:id/pr
 // Returns the paused Builder run's PR embed for Production Review.

@@ -787,7 +787,7 @@ export function deriveWorkbenchRunPaneSummary(
       tone: "loading",
       label: "Running",
       title: "Workbench is running",
-      detail: "Retrieving context and drafting the pre-flight response.",
+      detail: "Retrieving context and preparing the task output.",
     };
   }
 
@@ -802,9 +802,9 @@ export function deriveWorkbenchRunPaneSummary(
 
   return {
     tone: "idle",
-    label: "Ready for ask",
-    title: "Ready when setup is ready",
-    detail: "Paste an ask and run Workbench.",
+    label: "Ready for task",
+    title: "Ready to run a task",
+    detail: "Paste the task request and run Workbench.",
   };
 }
 
@@ -821,7 +821,7 @@ export function deriveWorkbenchPostRunActions(
       {
         id: "presend",
         label: "Prepare save-back artifact",
-        detail: "Pre-send/save-back route is not available in this build.",
+        detail: "Pre-send save-back is not available in this build.",
         status: "disabled",
         disabledReason: "presend_route_unavailable",
       },
@@ -834,7 +834,7 @@ export function deriveWorkbenchPostRunActions(
       id: "presend",
       label: "Prepare save-back artifact",
       detail:
-        "Run pre-send checks and save a staff-ready artifact to Drive when required.",
+        "Run pre-send checks and save the task output to Drive when required.",
       status: "ready",
       endpoint: "/api/workbench/presend",
       method: "POST",
@@ -1319,7 +1319,7 @@ export function WorkbenchShell() {
               letterSpacing: 0,
             }}
           >
-            Pre-flight
+            Task run
           </h1>
         </header>
 
@@ -1372,13 +1372,13 @@ export function WorkbenchShell() {
               color: "var(--ink-faint)",
             }}
           >
-            Ask
+            Task request
           </label>
           <textarea
             id="workbench-ask"
             value={ask}
             onChange={(event) => setAsk(event.target.value)}
-            placeholder="Paste ask"
+            placeholder="Paste the task request and required output."
             style={{
               flex: 1,
               minHeight: 260,
@@ -1408,7 +1408,7 @@ export function WorkbenchShell() {
               textTransform: "uppercase",
             }}
           >
-            Start
+            Run task
           </button>
         </form>
       </section>
@@ -1469,7 +1469,7 @@ function formatConnectorList(labels: string[]) {
 
 function truncateSnippet(value: string, maxLength: number) {
   const normalized = value.trim().replace(/\s+/g, " ");
-  if (normalized.length <= maxLength) return normalized || "Empty ask";
+  if (normalized.length <= maxLength) return normalized || "Empty request";
   return `${normalized.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
 }
 
@@ -1482,11 +1482,11 @@ function buildWorkbenchPostRunArtifactSpecInput(
 ) {
   const task = response.result.decoded_task;
   return [
-    task.summary || "Workbench pre-flight result",
+    task.summary || "Workbench task result",
     `Deliverable: ${task.deliverable_type || "Not specified"}`,
     `Task type: ${task.task_type || "Not specified"}`,
-    `Clarifying message: ${
-      response.result.drafted_clarifying_message.trim() || "No message."
+    `Clarification: ${
+      response.result.drafted_clarifying_message.trim() || "None returned."
     }`,
   ].join("\n");
 }
@@ -1696,7 +1696,7 @@ function ResultView({ response }: { response: WorkbenchStartResponse }) {
         <RetrievalStatusList rows={uiSummary.retrievalRows} />
       </ResultSection>
 
-      <ResultSection title="Decoded Task">
+      <ResultSection title="Task Details">
         <KeyValue label="Summary" value={result.decoded_task.summary} />
         <KeyValue label="Requester" value={result.decoded_task.requester} />
         <KeyValue
@@ -1710,15 +1710,17 @@ function ResultView({ response }: { response: WorkbenchStartResponse }) {
         <MissingContextList items={result.missing_context} />
       </ResultSection>
 
-      <ResultSection title="Clarifying Message">
-        <TextBlock text={result.drafted_clarifying_message || "No message."} />
+      <ResultSection title="Clarification">
+        <TextBlock
+          text={result.drafted_clarifying_message || "None returned."}
+        />
       </ResultSection>
 
       <ResultSection title="Retrieved Context">
         <RetrievedContextList items={result.retrieved_context} />
       </ResultSection>
 
-      <ResultSection title="Suggested Approach">
+      <ResultSection title="Run Plan">
         <ApproachList items={result.suggested_approach} />
       </ResultSection>
 
@@ -2315,7 +2317,7 @@ function RunHistoryPanel({
           gap: 10,
         }}
       >
-        <SectionEyebrow>Recent Runs</SectionEyebrow>
+        <SectionEyebrow>Recent Task Runs</SectionEyebrow>
         <SmallActionButton
           type="button"
           onClick={onRefresh}
@@ -2340,7 +2342,7 @@ function RunHistoryPanel({
 
       {state.status === "loaded" && state.runs.length === 0 ? (
         <div style={{ color: "var(--ink-dim)", fontSize: 12, lineHeight: 1.35 }}>
-          No recent runs.
+          No task runs yet.
         </div>
       ) : null}
 
@@ -2821,7 +2823,7 @@ function StatusPill({ status }: { status: string }) {
 }
 
 function ApproachList({ items }: { items: WorkbenchApproachStep[] }) {
-  if (items.length === 0) return <TextBlock text="No approach returned." />;
+  if (items.length === 0) return <TextBlock text="No run plan returned." />;
   return (
     <ol style={{ margin: 0, paddingLeft: 18 }}>
       {items.map((item, index) => (

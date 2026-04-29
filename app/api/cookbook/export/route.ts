@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { authWithApiKey as auth } from "@/lib/server-auth";
 import { CookbookMcpError, exportVisibleSkills } from "@/lib/cookbook-client";
 
 export const dynamic = "force-dynamic";

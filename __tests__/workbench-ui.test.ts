@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   buildWorkbenchConfigPayload,
@@ -705,6 +706,37 @@ describe("Workbench UI summary", () => {
     });
   });
 
+  it("uses task-run language in the visible shell", () => {
+    const source = readFileSync(
+      "components/workbench/workbench-shell.tsx",
+      "utf8",
+    );
+
+    expect(source).toContain("Task run");
+    expect(source).toContain("Task request");
+    expect(source).toContain("Paste the task request and required output.");
+    expect(source).toContain("Run task");
+    expect(source).toContain("Ready for task");
+    expect(source).toContain("Ready to run a task");
+    expect(source).toContain("Recent Task Runs");
+    expect(source).toContain("No task runs yet.");
+    expect(source).toContain("Clarification");
+    expect(source).toContain("None returned.");
+
+    [
+      `>${["A", "sk"].join("")}<`,
+      ["Paste", "a", "sk"].join(" "),
+      ["Ready", "for", "a", "sk"].join(" "),
+      ["Clarifying", "Message"].join(" "),
+      ["No", "message."].join(" "),
+      ["ch", "at"].join(""),
+      ["G", "mail"].join(""),
+      ["P", "OC"].join(""),
+      ["de", "mo"].join(""),
+      "\u2014",
+    ].forEach((oldCopy) => expect(source).not.toContain(oldCopy));
+  });
+
   it("derives operational QA state from the start response", () => {
     const response: WorkbenchStartResponse = {
       result: {
@@ -828,14 +860,14 @@ describe("Workbench UI summary", () => {
       {
         id: "presend",
         label: "Prepare save-back artifact",
-        detail: "Run pre-send checks and save a staff-ready artifact to Drive when required.",
+        detail: "Run pre-send checks and save the task output to Drive when required.",
         status: "ready",
         endpoint: "/api/workbench/presend",
         method: "POST",
         payload: {
           preflight_result: response.result,
           artifact_spec_input:
-            "Prepare QBR response\nDeliverable: written_response\nTask type: ask_decode\nClarifying message: No message.",
+            "Prepare QBR response\nDeliverable: written_response\nTask type: ask_decode\nClarification: None returned.",
         },
       },
       {
@@ -880,7 +912,7 @@ describe("Workbench UI summary", () => {
       {
         id: "presend",
         label: "Prepare save-back artifact",
-        detail: "Pre-send/save-back route is not available in this build.",
+        detail: "Pre-send save-back is not available in this build.",
         status: "disabled",
         disabledReason: "presend_route_unavailable",
       },
@@ -964,6 +996,22 @@ describe("Workbench UI summary", () => {
         created_at: run.created_at,
       },
     });
+
+    expect(
+      deriveWorkbenchRunHistoryRows(
+        [
+          {
+            ...run,
+            id: "22222222-2222-4222-8222-222222222222",
+            ask: "   ",
+          },
+        ],
+        {
+          formatCreatedAt: () => "12:01",
+          askSnippetLength: 32,
+        },
+      )[0]?.askSnippet,
+    ).toBe("Empty request");
   });
 
   it("derives connector management repair and disconnect actions from setup affordances", () => {

@@ -182,10 +182,20 @@ async function getCalendarClient(input: {
     input.googleAccessTokenProvider ??
     createDefaultGoogleAccessTokenProvider(input.googleTokenStore);
 
-  const tokenResult = await tokenProvider({
-    userId: input.userId,
-    now: input.now,
-  });
+  let tokenResult: WorkbenchGoogleAccessTokenProviderResult;
+  try {
+    tokenResult = await tokenProvider({
+      userId: input.userId,
+      now: input.now,
+    });
+  } catch (error) {
+    const unavailableReason = googleTokenUnavailableReasonFromError(error);
+    if (unavailableReason) {
+      return { status: "unavailable", reason: unavailableReason };
+    }
+    throw error;
+  }
+
   const token = normalizeAccessToken(tokenResult);
   if (!token.accessToken) {
     return {
@@ -321,6 +331,14 @@ function uniqueWarnings(warnings: string[]): string[] {
     unique.push(normalized);
   }
   return unique;
+}
+
+function googleTokenUnavailableReasonFromError(error: unknown): string | null {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/google_token_refresh_failed|invalid_grant/i.test(message)) {
+    return "google_token_refresh_failed";
+  }
+  return null;
 }
 
 export type {

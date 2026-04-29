@@ -12,7 +12,7 @@ export async function GET() {
 
   const result = createWorkbenchNotionAuthorizationUrl({
     principalId: session.principalId,
-    sessionBinding: session.apiKey ?? session.principalId,
+    sessionBinding: session.principalId,
   });
 
   if (result.status === "unavailable") {

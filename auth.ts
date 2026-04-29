@@ -2,6 +2,7 @@ import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 import authConfig from "./auth.config";
 import { canSignInEmail, parseAllowedEmails } from "./lib/auth-access";
+import { buildClientSession } from "./lib/auth-session";
 import {
   checkAdminCapability,
   hasPendingInvitation,
@@ -113,20 +114,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return token;
     },
     async session({ session, token }) {
-      const principalName =
-        typeof token.principalName === "string" ? token.principalName : null;
-      const principalId =
-        typeof token.principalId === "string" ? token.principalId : null;
-      const apiKey = typeof token.apiKey === "string" ? token.apiKey : null;
-      session.user = {
-        ...session.user,
-        email: session.user?.email ?? null,
-        name: principalName ?? session.user?.name ?? null,
-      };
-      session.principalId = principalId;
-      session.apiKey = apiKey;
-      session.isAdmin = Boolean(token.isAdmin);
-      return session;
+      return buildClientSession(session, token);
     },
   },
 });

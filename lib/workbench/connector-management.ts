@@ -480,6 +480,11 @@ async function getGoogleAccessTokenForRepair(
       ? { status: "available", accessToken }
       : { status: "redirect", reason: "google_access_token_missing" };
   } catch (error) {
+    const reconnectReason = googleReconnectReasonFromError(error);
+    if (reconnectReason) {
+      return { status: "redirect", reason: reconnectReason };
+    }
+
     return {
       status: "error",
       reason: "google_access_token_lookup_failed",
@@ -551,4 +556,12 @@ async function patchConfigOrThrow(
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function googleReconnectReasonFromError(error: unknown): string | null {
+  const message = errorMessage(error);
+  if (/google_token_refresh_failed|invalid_grant/i.test(message)) {
+    return "google_token_refresh_failed";
+  }
+  return null;
 }
