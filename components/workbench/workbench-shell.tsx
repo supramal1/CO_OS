@@ -10,7 +10,9 @@ import type {
   WorkbenchStartResponse,
 } from "@/lib/workbench/types";
 import type { WorkbenchPresendResponse } from "@/lib/workbench/presend-types";
+import type { WorkbenchOutputActionOutcome } from "@/lib/workbench/output-actions";
 import type { WorkbenchUserConfig } from "@/lib/workbench/retrieval/types";
+import type { WorkbenchRunHistoryRow } from "@/lib/workbench/run-history";
 
 type RunState =
   | { status: "idle" }
@@ -118,6 +120,17 @@ type WorkbenchSetupConnectorState =
   | "error";
 
 type WorkbenchSetupAction = "notion_start" | "google_sign_in";
+type WorkbenchConnectorManagementSource = "notion" | "google_workspace";
+type WorkbenchConnectorManagementActionType = "repair" | "disconnect";
+
+type WorkbenchConnectorManagementAction = {
+  id: string;
+  label: string;
+  source: WorkbenchConnectorManagementSource;
+  endpoint: `/api/workbench/connectors/${WorkbenchConnectorManagementSource}`;
+  method: "POST";
+  payload: { action: WorkbenchConnectorManagementActionType };
+};
 
 type WorkbenchSetupAffordance = {
   id: "notion" | "googleWorkspace";
@@ -180,15 +193,23 @@ type WorkbenchPostRunAction =
       detail: string;
       status: "disabled";
       disabledReason: string;
-    };
-
-type WorkbenchRunHistoryAffordance =
-  | { visible: false }
+    }
   | {
-      visible: true;
+      id: "feedback_useful" | "feedback_not_useful";
       label: string;
       detail: string;
-      href: "/api/workbench/runs";
+      status: "ready";
+      endpoint: "/api/workbench/actions";
+      method: "POST";
+      payload: {
+        action: "feedback_useful" | "feedback_not_useful";
+        run_id?: string;
+        payload: {
+          task_type: string;
+          source_count: number;
+          warning_count: number;
+        };
+      };
     };
 
 type SetupState =
@@ -209,12 +230,45 @@ type PostRunState =
     }
   | { status: "error"; actionId: WorkbenchPostRunAction["id"]; message: string };
 
+type WorkbenchRunHistoryDisplayRow = {
+  id: string;
+  createdLabel: string;
+  askSnippet: string;
+  status: WorkbenchStartResponse["invocation"]["status"];
+  countLabel: string;
+};
+
+type WorkbenchRunHistoryState =
+  | { status: "loading" }
+  | { status: "loaded"; runs: WorkbenchRunHistoryRow[] }
+  | { status: "error"; message: string };
+
+type WorkbenchRunHistoryListResponse =
+  | { runs: WorkbenchRunHistoryRow[] }
+  | { error?: string; detail?: string; runs?: [] };
+
+type WorkbenchConnectorManagementState =
+  | { status: "idle" }
+  | { status: "running"; actionId: string }
+  | { status: "loaded"; actionId: string; message: string }
+  | { status: "error"; actionId: string; message: string };
+
+type WorkbenchConnectorManagementResponse = {
+  source?: WorkbenchConnectorManagementSource;
+  status?: string;
+  action?: string;
+  next_url?: string;
+  message?: string;
+  reason?: string;
+  error?: string;
+  detail?: string;
+};
+
 const CALENDAR_READONLY_SCOPE =
   "https://www.googleapis.com/auth/calendar.readonly";
 const NOTION_SETUP_HREF = "/api/workbench/notion/start";
 const WORKBENCH_CALLBACK_URL = "/workbench?google_oauth=returned";
 const WORKBENCH_PRESEND_ROUTE_AVAILABLE = true;
-const WORKBENCH_RUN_HISTORY_ROUTE_AVAILABLE = true;
 
 const CONNECTOR_LABELS: Array<Pick<WorkbenchConnectorRow, "id" | "label">> = [
   { id: "notion", label: "Notion config" },
@@ -760,6 +814,7 @@ export function deriveWorkbenchPostRunActions(
 ): WorkbenchPostRunAction[] {
   const presendRouteAvailable =
     options?.presendRouteAvailable ?? WORKBENCH_PRESEND_ROUTE_AVAILABLE;
+  const feedbackActions = buildWorkbenchFeedbackActions(response);
 
   if (!presendRouteAvailable) {
     return [
@@ -770,6 +825,7 @@ export function deriveWorkbenchPostRunActions(
         status: "disabled",
         disabledReason: "presend_route_unavailable",
       },
+      ...feedbackActions,
     ];
   }
 
@@ -787,20 +843,88 @@ export function deriveWorkbenchPostRunActions(
         artifact_spec_input: buildWorkbenchPostRunArtifactSpecInput(response),
       },
     },
+    ...feedbackActions,
   ];
 }
 
-export function deriveWorkbenchRunHistoryAffordance(options?: {
-  routeAvailable?: boolean;
-}): WorkbenchRunHistoryAffordance {
-  const routeAvailable =
-    options?.routeAvailable ?? WORKBENCH_RUN_HISTORY_ROUTE_AVAILABLE;
-  if (!routeAvailable) return { visible: false };
+export function deriveWorkbenchRunHistoryRows(
+  runs: WorkbenchRunHistoryRow[],
+  options?: {
+    formatCreatedAt?: (value: string) => string;
+    askSnippetLength?: number;
+  },
+): WorkbenchRunHistoryDisplayRow[] {
+  const formatCreatedAt = options?.formatCreatedAt ?? formatCompactDate;
+  const askSnippetLength = options?.askSnippetLength ?? 72;
+
+  return runs.map((run) => {
+    const warningCount = dedupeWarnings([
+      ...run.result.warnings,
+      ...(run.retrieval.warnings ?? []),
+    ]).length;
+    const sourceCount = run.result.retrieved_context.length;
+
+    return {
+      id: run.id,
+      createdLabel: formatCreatedAt(run.created_at),
+      askSnippet: truncateSnippet(run.ask, askSnippetLength),
+      status: run.invocation.status,
+      countLabel:
+        warningCount > 0
+          ? pluralize(warningCount, "warning")
+          : pluralize(sourceCount, "source"),
+    };
+  });
+}
+
+export function toWorkbenchStartResponseFromHistoryRun(
+  run: WorkbenchRunHistoryRow,
+): WorkbenchStartResponse {
   return {
-    visible: true,
-    label: "Run history",
-    detail: "Recent Workbench runs are stored for this staff account.",
-    href: "/api/workbench/runs",
+    result: run.result,
+    retrieval: run.retrieval,
+    invocation: run.invocation,
+    run_history: {
+      status: "stored",
+      id: run.id,
+      created_at: run.created_at,
+    },
+  };
+}
+
+export function deriveWorkbenchConnectorManagementActions(
+  affordance: WorkbenchSetupAffordance,
+): WorkbenchConnectorManagementAction[] {
+  const source = connectorManagementSourceForSetupAffordance(affordance);
+  if (!source) return [];
+
+  const actions: WorkbenchConnectorManagementAction[] = [];
+  if (
+    ["reauth_required", "resource_missing", "repair_available"].includes(
+      affordance.state,
+    )
+  ) {
+    actions.push(buildConnectorManagementAction(source, "repair"));
+  }
+
+  if (affordance.state === "ready") {
+    actions.push(buildConnectorManagementAction(source, "disconnect"));
+  }
+
+  return actions;
+}
+
+function buildConnectorManagementAction(
+  source: WorkbenchConnectorManagementSource,
+  action: WorkbenchConnectorManagementActionType,
+): WorkbenchConnectorManagementAction {
+  return {
+    id: `${source}-${action}`,
+    label: action === "repair" ? "Repair" : "Disconnect",
+    source,
+    endpoint: `/api/workbench/connectors/${source}`,
+    method: "POST",
+    payload: { action },
   };
 }
 
@@ -847,8 +971,16 @@ export function WorkbenchShell() {
   const [oauthNotice, setOauthNotice] = useState<WorkbenchOAuthNotice | null>(
     null,
   );
+  const [runHistoryState, setRunHistoryState] =
+    useState<WorkbenchRunHistoryState>({ status: "loading" });
+  const [connectorManagementState, setConnectorManagementState] =
+    useState<WorkbenchConnectorManagementState>({ status: "idle" });
 
   const canSubmit = ask.trim().length > 0 && state.status !== "loading";
+  const selectedRunId =
+    state.status === "loaded" && state.response.run_history?.status === "stored"
+      ? state.response.run_history.id
+      : null;
   const connectorSummary = useMemo(
     () => deriveWorkbenchConnectorSummary(connectorState),
     [connectorState],
@@ -924,6 +1056,56 @@ export function WorkbenchShell() {
     setOauthNotice(deriveWorkbenchOAuthNotice(window.location.search));
   }, []);
 
+  const loadRunHistory = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) {
+      setRunHistoryState({ status: "loading" });
+    }
+
+    try {
+      const res = await fetch("/api/workbench/runs?limit=5", {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      });
+      const body = (await res.json().catch(() => null)) as
+        | WorkbenchRunHistoryListResponse
+        | null;
+
+      if (!res.ok) {
+        const detail =
+          body && "detail" in body && body.detail
+            ? body.detail
+            : body && "error" in body && body.error
+              ? body.error
+              : `HTTP ${res.status}`;
+        throw new Error(detail);
+      }
+
+      setRunHistoryState({
+        status: "loaded",
+        runs: Array.isArray(body?.runs) ? body.runs : [],
+      });
+    } catch (err) {
+      setRunHistoryState({
+        status: "error",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadInitialHistory() {
+      if (!cancelled) await loadRunHistory();
+    }
+
+    loadInitialHistory();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loadRunHistory]);
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canSubmit) return;
@@ -948,12 +1130,20 @@ export function WorkbenchShell() {
         throw new Error(detail);
       }
       setState({ status: "loaded", response: body as WorkbenchStartResponse });
+      await loadRunHistory({ silent: true });
     } catch (err) {
       setState({
         status: "error",
         message: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  function handleOpenHistoryRun(run: WorkbenchRunHistoryRow) {
+    setState({
+      status: "loaded",
+      response: toWorkbenchStartResponseFromHistoryRun(run),
+    });
   }
 
   async function handleConfigSave(event: FormEvent<HTMLFormElement>) {
@@ -1035,6 +1225,61 @@ export function WorkbenchShell() {
     }
   }
 
+  async function handleConnectorManagementAction(
+    action: WorkbenchConnectorManagementAction,
+  ) {
+    setConnectorManagementState({ status: "running", actionId: action.id });
+    try {
+      const res = await fetch(action.endpoint, {
+        method: action.method,
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(action.payload),
+      });
+      const body = (await res.json().catch(() => null)) as
+        | WorkbenchConnectorManagementResponse
+        | null;
+
+      if (!res.ok) {
+        const detail =
+          body && body.detail
+            ? body.detail
+            : body && body.message
+              ? body.message
+              : body && body.error
+                ? body.error
+                : `HTTP ${res.status}`;
+        throw new Error(detail);
+      }
+
+      const message =
+        body?.message ??
+        body?.reason ??
+        `${action.label} request accepted.`;
+      setConnectorManagementState({
+        status: "loaded",
+        actionId: action.id,
+        message,
+      });
+
+      if (body?.next_url) {
+        window.location.assign(body.next_url);
+        return;
+      }
+
+      await loadConfig({ silent: true });
+      await handleCheck();
+    } catch (err) {
+      setConnectorManagementState({
+        status: "error",
+        actionId: action.id,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   function handleNotionSetup() {
     window.location.assign(NOTION_SETUP_HREF);
   }
@@ -1086,15 +1331,24 @@ export function WorkbenchShell() {
           onSave={handleConfigSave}
           onSetupNotion={handleNotionSetup}
           onCheck={handleCheck}
+          onConnectorManagementAction={handleConnectorManagementAction}
           onConnectGoogle={() =>
             signIn("google", { callbackUrl: WORKBENCH_CALLBACK_URL })
           }
           setupState={setupState}
+          connectorManagementState={connectorManagementState}
           setupAffordances={setupAffordances}
           setupSummary={setupSummary}
           oauthNotice={oauthNotice}
           healthRows={healthRows}
           healthGeneratedAt={healthGeneratedAt}
+        />
+
+        <RunHistoryPanel
+          state={runHistoryState}
+          selectedRunId={selectedRunId}
+          onRefresh={() => loadRunHistory()}
+          onOpenRun={handleOpenHistoryRun}
         />
 
         <form
@@ -1189,6 +1443,14 @@ function firstDetail(
   return fallback;
 }
 
+function connectorManagementSourceForSetupAffordance(
+  affordance: WorkbenchSetupAffordance,
+): WorkbenchConnectorManagementSource | null {
+  if (affordance.id === "notion") return "notion";
+  if (affordance.id === "googleWorkspace") return "google_workspace";
+  return null;
+}
+
 function toSearchParams(
   search: string | URLSearchParams | null | undefined,
 ): URLSearchParams | null {
@@ -1205,6 +1467,16 @@ function formatConnectorList(labels: string[]) {
   return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
 }
 
+function truncateSnippet(value: string, maxLength: number) {
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (normalized.length <= maxLength) return normalized || "Empty ask";
+  return `${normalized.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+}
+
+function pluralize(count: number, noun: string) {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
 function buildWorkbenchPostRunArtifactSpecInput(
   response: WorkbenchStartResponse,
 ) {
@@ -1217,6 +1489,52 @@ function buildWorkbenchPostRunArtifactSpecInput(
       response.result.drafted_clarifying_message.trim() || "No message."
     }`,
   ].join("\n");
+}
+
+function buildWorkbenchFeedbackActions(
+  response: WorkbenchStartResponse,
+): WorkbenchPostRunAction[] {
+  const runId =
+    response.run_history?.status === "stored"
+      ? response.run_history.id
+      : undefined;
+  const payload = {
+    task_type: response.invocation.task_type,
+    source_count: response.result.retrieved_context.length,
+    warning_count: dedupeWarnings([
+      ...response.result.warnings,
+      ...(response.retrieval.warnings ?? []),
+    ]).length,
+  };
+
+  return [
+    {
+      id: "feedback_useful",
+      label: "Useful",
+      detail: "Mark this Workbench run as useful.",
+      status: "ready",
+      endpoint: "/api/workbench/actions",
+      method: "POST",
+      payload: {
+        action: "feedback_useful",
+        ...(runId ? { run_id: runId } : {}),
+        payload,
+      },
+    },
+    {
+      id: "feedback_not_useful",
+      label: "Not useful",
+      detail: "Mark this Workbench run as not useful.",
+      status: "ready",
+      endpoint: "/api/workbench/actions",
+      method: "POST",
+      payload: {
+        action: "feedback_not_useful",
+        ...(runId ? { run_id: runId } : {}),
+        payload,
+      },
+    },
+  ];
 }
 
 function summarizePresendResponse(response: WorkbenchPresendResponse): {
@@ -1253,10 +1571,6 @@ function ResultView({ response }: { response: WorkbenchStartResponse }) {
     () => deriveWorkbenchPostRunActions(response),
     [response],
   );
-  const runHistoryAffordance = useMemo(
-    () => deriveWorkbenchRunHistoryAffordance(),
-    [],
-  );
   const meta = useMemo(
     () => [
       `task_type ${invocation.task_type}`,
@@ -1281,6 +1595,7 @@ function ResultView({ response }: { response: WorkbenchStartResponse }) {
       });
       const body = (await res.json().catch(() => null)) as
         | WorkbenchPresendResponse
+        | WorkbenchOutputActionOutcome
         | { error?: string; detail?: string }
         | null;
 
@@ -1294,7 +1609,10 @@ function ResultView({ response }: { response: WorkbenchStartResponse }) {
         throw new Error(detail);
       }
 
-      const summary = summarizePresendResponse(body as WorkbenchPresendResponse);
+      const summary =
+        action.id === "presend"
+          ? summarizePresendResponse(body as WorkbenchPresendResponse)
+          : summarizeFeedbackResponse(body as WorkbenchOutputActionOutcome);
       setPostRunState({
         status: "loaded",
         actionId: action.id,
@@ -1370,7 +1688,6 @@ function ResultView({ response }: { response: WorkbenchStartResponse }) {
 
       <PostRunActionPanel
         actions={postRunActions}
-        runHistory={runHistoryAffordance}
         state={postRunState}
         onAction={handlePostRunAction}
       />
@@ -1506,16 +1823,14 @@ function ResultSection({
 
 function PostRunActionPanel({
   actions,
-  runHistory,
   state,
   onAction,
 }: {
   actions: WorkbenchPostRunAction[];
-  runHistory: WorkbenchRunHistoryAffordance;
   state: PostRunState;
   onAction: (action: WorkbenchPostRunAction) => void;
 }) {
-  if (actions.length === 0 && !runHistory.visible) return null;
+  if (actions.length === 0) return null;
 
   return (
     <ResultSection title="Post-run Actions">
@@ -1562,46 +1877,39 @@ function PostRunActionPanel({
                 onClick={() => onAction(action)}
                 disabled={disabled}
               >
-                {running ? "Preparing" : action.status === "ready" ? "Run" : "Disabled"}
+                {postRunButtonLabel(action, running)}
               </SmallActionButton>
             </div>
           );
         })}
 
-        {runHistory.visible ? (
-          <div
-            style={{
-              border: "1px solid var(--rule)",
-              padding: "10px 11px",
-              fontSize: 12,
-              lineHeight: 1.35,
-              color: "var(--ink-dim)",
-            }}
-          >
-            <span
-              style={{
-                color: "var(--ink)",
-                fontFamily: "var(--font-plex-mono)",
-                fontSize: 10,
-                letterSpacing: "0.08em",
-                textTransform: "uppercase",
-                marginRight: 8,
-              }}
-            >
-              {runHistory.label}
-            </span>
-            {runHistory.detail}
-            {" "}
-            <a href={runHistory.href} target="_blank" rel="noreferrer">
-              Open
-            </a>
-          </div>
-        ) : null}
-
         <PostRunStatus state={state} />
       </div>
     </ResultSection>
   );
+}
+
+function summarizeFeedbackResponse(response: WorkbenchOutputActionOutcome): {
+  message: string;
+  href?: string;
+} {
+  if (response.status === "unavailable") {
+    return { message: `Feedback unavailable: ${response.reason}` };
+  }
+  if (response.reason === "feedback_recorded") {
+    return { message: "Feedback recorded." };
+  }
+  if (response.reason === "feedback_storage_unavailable") {
+    return { message: "Feedback accepted. Storage is unavailable." };
+  }
+  return { message: `Feedback accepted: ${response.reason}` };
+}
+
+function postRunButtonLabel(action: WorkbenchPostRunAction, running: boolean) {
+  if (running) return action.id === "presend" ? "Preparing" : "Sending";
+  if (action.status === "disabled") return "Disabled";
+  if (action.id === "presend") return "Run";
+  return "Send";
 }
 
 function PostRunStatus({ state }: { state: PostRunState }) {
@@ -1718,8 +2026,10 @@ function WorkbenchSetupPanel({
   onSave,
   onSetupNotion,
   onCheck,
+  onConnectorManagementAction,
   onConnectGoogle,
   setupState,
+  connectorManagementState,
   setupAffordances,
   setupSummary,
   oauthNotice,
@@ -1731,8 +2041,12 @@ function WorkbenchSetupPanel({
   onSave: (event: FormEvent<HTMLFormElement>) => void;
   onSetupNotion: () => void;
   onCheck: () => void;
+  onConnectorManagementAction: (
+    action: WorkbenchConnectorManagementAction,
+  ) => void;
   onConnectGoogle: () => void;
   setupState: SetupState;
+  connectorManagementState: WorkbenchConnectorManagementState;
   setupAffordances: WorkbenchSetupAffordanceSummary;
   setupSummary: WorkbenchSetupSummary;
   oauthNotice: WorkbenchOAuthNotice | null;
@@ -1786,12 +2100,18 @@ function WorkbenchSetupPanel({
         <SetupActionRow
           affordance={setupAffordances.notion}
           onAction={onSetupNotion}
+          managementState={connectorManagementState}
+          onManagementAction={onConnectorManagementAction}
         />
         <SetupActionRow
           affordance={setupAffordances.googleWorkspace}
           onAction={onConnectGoogle}
+          managementState={connectorManagementState}
+          onManagementAction={onConnectorManagementAction}
         />
       </div>
+
+      <ConnectorManagementStatus state={connectorManagementState} />
 
       <details
         {...(setupAffordances.manualConfig.initiallyOpen ? { open: true } : {})}
@@ -1959,6 +2279,140 @@ function WorkbenchSetupPanel({
   );
 }
 
+function RunHistoryPanel({
+  state,
+  selectedRunId,
+  onRefresh,
+  onOpenRun,
+}: {
+  state: WorkbenchRunHistoryState;
+  selectedRunId: string | null;
+  onRefresh: () => void;
+  onOpenRun: (run: WorkbenchRunHistoryRow) => void;
+}) {
+  const rows = useMemo(
+    () =>
+      state.status === "loaded" ? deriveWorkbenchRunHistoryRows(state.runs) : [],
+    [state],
+  );
+
+  return (
+    <section
+      aria-label="Recent runs"
+      style={{
+        borderBottom: "1px solid var(--rule)",
+        padding: "14px 24px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 9,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 10,
+        }}
+      >
+        <SectionEyebrow>Recent Runs</SectionEyebrow>
+        <SmallActionButton
+          type="button"
+          onClick={onRefresh}
+          disabled={state.status === "loading"}
+        >
+          {state.status === "loading" ? "Loading" : "Refresh"}
+        </SmallActionButton>
+      </div>
+
+      {state.status === "error" ? (
+        <div
+          role="alert"
+          style={{
+            color: "var(--danger, #9f1d1d)",
+            fontSize: 12,
+            lineHeight: 1.35,
+          }}
+        >
+          {state.message}
+        </div>
+      ) : null}
+
+      {state.status === "loaded" && state.runs.length === 0 ? (
+        <div style={{ color: "var(--ink-dim)", fontSize: 12, lineHeight: 1.35 }}>
+          No recent runs.
+        </div>
+      ) : null}
+
+      {state.status === "loaded" && state.runs.length > 0 ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {state.runs.map((run) => {
+            const row = rows.find((item) => item.id === run.id);
+            if (!row) return null;
+            const selected = selectedRunId === run.id;
+            return (
+              <button
+                key={run.id}
+                type="button"
+                onClick={() => onOpenRun(run)}
+                style={{
+                  border: "1px solid var(--rule)",
+                  background: selected ? "var(--bg)" : "var(--panel)",
+                  color: "var(--ink)",
+                  padding: "8px 9px",
+                  textAlign: "left",
+                  display: "grid",
+                  gridTemplateColumns: "54px minmax(0, 1fr)",
+                  gap: 8,
+                  alignItems: "start",
+                }}
+              >
+                <span
+                  style={{
+                    color: "var(--ink-faint)",
+                    fontFamily: "var(--font-plex-mono)",
+                    fontSize: 10,
+                    lineHeight: 1.3,
+                  }}
+                >
+                  {row.createdLabel}
+                </span>
+                <span style={{ minWidth: 0 }}>
+                  <span
+                    style={{
+                      display: "block",
+                      fontSize: 12,
+                      lineHeight: 1.25,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {row.askSnippet}
+                  </span>
+                  <span
+                    style={{
+                      display: "block",
+                      marginTop: 3,
+                      color: "var(--ink-dim)",
+                      fontFamily: "var(--font-plex-mono)",
+                      fontSize: 10,
+                      lineHeight: 1.25,
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {row.status} | {row.countLabel}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function SetupSummaryBanner({ summary }: { summary: WorkbenchSetupSummary }) {
   return (
     <div
@@ -2016,10 +2470,30 @@ function SetupNotice({ notice }: { notice: WorkbenchOAuthNotice }) {
 function SetupActionRow({
   affordance,
   onAction,
+  managementState,
+  onManagementAction,
 }: {
   affordance: WorkbenchSetupAffordance;
   onAction: () => void;
+  managementState: WorkbenchConnectorManagementState;
+  onManagementAction: (action: WorkbenchConnectorManagementAction) => void;
 }) {
+  const managementActions = deriveWorkbenchConnectorManagementActions(affordance);
+  const repairAction = managementActions.find(
+    (action) => action.payload.action === "repair",
+  );
+  const secondaryActions = managementActions.filter(
+    (action) => action.payload.action !== "repair",
+  );
+  const primaryAction = repairAction ?? null;
+  const primaryActionRunning =
+    primaryAction &&
+    managementState.status === "running" &&
+    managementState.actionId === primaryAction.id;
+  const primaryDisabled = primaryAction
+    ? Boolean(primaryActionRunning)
+    : affordance.disabled;
+
   return (
     <div
       style={{
@@ -2059,14 +2533,57 @@ function SetupActionRow({
       </div>
       <StatusPill status={affordance.statusLabel} />
       <div style={{ justifySelf: "end" }}>
-        <SmallActionButton
-          type="button"
-          onClick={onAction}
-          disabled={affordance.disabled}
-        >
-          {affordance.buttonLabel}
-        </SmallActionButton>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <SmallActionButton
+            type="button"
+            onClick={() =>
+              primaryAction ? onManagementAction(primaryAction) : onAction()
+            }
+            disabled={primaryDisabled}
+          >
+            {primaryActionRunning ? "Repairing" : affordance.buttonLabel}
+          </SmallActionButton>
+          {secondaryActions.map((action) => {
+            const running =
+              managementState.status === "running" &&
+              managementState.actionId === action.id;
+            return (
+              <SmallActionButton
+                key={action.id}
+                type="button"
+                onClick={() => onManagementAction(action)}
+                disabled={running}
+              >
+                {running ? "Working" : action.label}
+              </SmallActionButton>
+            );
+          })}
+        </div>
       </div>
+    </div>
+  );
+}
+
+function ConnectorManagementStatus({
+  state,
+}: {
+  state: WorkbenchConnectorManagementState;
+}) {
+  if (state.status === "idle" || state.status === "running") return null;
+
+  return (
+    <div
+      role={state.status === "error" ? "alert" : "status"}
+      style={{
+        color:
+          state.status === "error"
+            ? "var(--danger, #9f1d1d)"
+            : "var(--ink-dim)",
+        fontSize: 12,
+        lineHeight: 1.35,
+      }}
+    >
+      {state.message}
     </div>
   );
 }

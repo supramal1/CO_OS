@@ -98,6 +98,7 @@ export async function gatherWorkbenchRetrieval(
           retrieveCalendarWithRuntime({
             ask: input.ask,
             userId: input.userId,
+            config,
             now: input.now,
             googleAccessTokenProvider: input.googleAccessTokenProvider,
             googleTokenStore: input.googleTokenStore,
@@ -124,6 +125,7 @@ export async function gatherWorkbenchRetrieval(
 async function retrieveCalendarWithRuntime(input: {
   ask: string;
   userId: string;
+  config: WorkbenchUserConfig | null;
   now?: Date;
   googleAccessTokenProvider?: WorkbenchGoogleAccessTokenProvider;
   googleTokenStore?: WorkbenchGoogleTokenStore;
@@ -132,6 +134,7 @@ async function retrieveCalendarWithRuntime(input: {
 }): Promise<WorkbenchRetrievalAdapterResult> {
   const clientResult = await getCalendarClient({
     userId: input.userId,
+    config: input.config,
     now: input.now,
     googleAccessTokenProvider: input.googleAccessTokenProvider,
     googleTokenStore: input.googleTokenStore,
@@ -160,6 +163,7 @@ async function retrieveCalendarWithRuntime(input: {
 
 async function getCalendarClient(input: {
   userId: string;
+  config: WorkbenchUserConfig | null;
   now?: Date;
   googleAccessTokenProvider?: WorkbenchGoogleAccessTokenProvider;
   googleTokenStore?: WorkbenchGoogleTokenStore;
@@ -169,6 +173,11 @@ async function getCalendarClient(input: {
   | { status: "available"; client: WorkbenchCalendarClient }
   | { status: "unavailable"; reason: string }
 > {
+  const grant = validateCalendarGrant(input.config);
+  if (grant.status === "unavailable") {
+    return { status: "unavailable", reason: grant.reason };
+  }
+
   const tokenProvider =
     input.googleAccessTokenProvider ??
     createDefaultGoogleAccessTokenProvider(input.googleTokenStore);
@@ -195,6 +204,22 @@ async function getCalendarClient(input: {
   }
 
   return { status: "available", client: clientResult.client };
+}
+
+function validateCalendarGrant(
+  config: WorkbenchUserConfig | null,
+): { status: "available" } | { status: "unavailable"; reason: string } {
+  if (config?.google_oauth_grant_status !== "granted") {
+    return { status: "unavailable", reason: "google_oauth_grant_not_active" };
+  }
+  if (
+    !(config.google_oauth_scopes ?? []).includes(
+      "https://www.googleapis.com/auth/calendar.readonly",
+    )
+  ) {
+    return { status: "unavailable", reason: "google_calendar_scope_missing" };
+  }
+  return { status: "available" };
 }
 
 function createDefaultGoogleAccessTokenProvider(

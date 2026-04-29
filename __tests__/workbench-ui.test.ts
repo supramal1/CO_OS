@@ -1,18 +1,21 @@
 import { describe, expect, it } from "vitest";
 import {
   buildWorkbenchConfigPayload,
+  deriveWorkbenchConnectorManagementActions,
   deriveWorkbenchConnectorSummary,
   deriveWorkbenchOAuthNotice,
   deriveWorkbenchPostRunActions,
-  deriveWorkbenchRunHistoryAffordance,
+  deriveWorkbenchRunHistoryRows,
   deriveWorkbenchRunPaneSummary,
   deriveWorkbenchSetupAffordances,
   deriveWorkbenchSetupSummary,
   deriveWorkbenchUiSummary,
   getInitialWorkbenchConfigForm,
   shouldShowGoogleConnect,
+  toWorkbenchStartResponseFromHistoryRun,
   toWorkbenchHealthRows,
 } from "@/components/workbench/workbench-shell";
+import type { WorkbenchRunHistoryRow } from "@/lib/workbench/run-history";
 import type { WorkbenchStartResponse } from "@/lib/workbench/types";
 
 describe("Workbench UI summary", () => {
@@ -811,8 +814,15 @@ describe("Workbench UI summary", () => {
     ]);
   });
 
-  it("derives staff-visible post-run actions from the current presend contract", () => {
-    const response = buildWorkbenchStartResponse();
+  it("derives staff-visible post-run actions from the current action contracts", () => {
+    const response: WorkbenchStartResponse = {
+      ...buildWorkbenchStartResponse(),
+      run_history: {
+        status: "stored",
+        id: "run-123",
+        created_at: "2026-04-29T12:00:02.000Z",
+      },
+    };
 
     expect(deriveWorkbenchPostRunActions(response)).toEqual([
       {
@@ -828,6 +838,40 @@ describe("Workbench UI summary", () => {
             "Prepare QBR response\nDeliverable: written_response\nTask type: ask_decode\nClarifying message: No message.",
         },
       },
+      {
+        id: "feedback_useful",
+        label: "Useful",
+        detail: "Mark this Workbench run as useful.",
+        status: "ready",
+        endpoint: "/api/workbench/actions",
+        method: "POST",
+        payload: {
+          action: "feedback_useful",
+          run_id: "run-123",
+          payload: {
+            task_type: "ask_decode",
+            source_count: 1,
+            warning_count: 0,
+          },
+        },
+      },
+      {
+        id: "feedback_not_useful",
+        label: "Not useful",
+        detail: "Mark this Workbench run as not useful.",
+        status: "ready",
+        endpoint: "/api/workbench/actions",
+        method: "POST",
+        payload: {
+          action: "feedback_not_useful",
+          run_id: "run-123",
+          payload: {
+            task_type: "ask_decode",
+            source_count: 1,
+            warning_count: 0,
+          },
+        },
+      },
     ]);
 
     expect(
@@ -840,27 +884,133 @@ describe("Workbench UI summary", () => {
         status: "disabled",
         disabledReason: "presend_route_unavailable",
       },
+      {
+        id: "feedback_useful",
+        label: "Useful",
+        detail: "Mark this Workbench run as useful.",
+        status: "ready",
+        endpoint: "/api/workbench/actions",
+        method: "POST",
+        payload: {
+          action: "feedback_useful",
+          run_id: "run-123",
+          payload: {
+            task_type: "ask_decode",
+            source_count: 1,
+            warning_count: 0,
+          },
+        },
+      },
+      {
+        id: "feedback_not_useful",
+        label: "Not useful",
+        detail: "Mark this Workbench run as not useful.",
+        status: "ready",
+        endpoint: "/api/workbench/actions",
+        method: "POST",
+        payload: {
+          action: "feedback_not_useful",
+          run_id: "run-123",
+          payload: {
+            task_type: "ask_decode",
+            source_count: 1,
+            warning_count: 0,
+          },
+        },
+      },
     ]);
   });
 
-  it("shows run-history affordance once the backend route exists", () => {
-    expect(deriveWorkbenchRunHistoryAffordance()).toEqual({
-      visible: true,
-      label: "Run history",
-      detail: "Recent Workbench runs are stored for this staff account.",
-      href: "/api/workbench/runs",
-    });
+  it("derives staff-readable run history rows and opens a stored run as a start response", () => {
+    const response = buildWorkbenchStartResponse();
+    const run: WorkbenchRunHistoryRow = {
+      id: "11111111-1111-4111-8111-111111111111",
+      user_id: "principal_user_1",
+      ask: "  Prepare the QBR response with context from the kickoff notes and calendar.  ",
+      result: {
+        ...response.result,
+        warnings: ["Ask is missing a final deadline."],
+      },
+      retrieval: {
+        ...response.retrieval,
+        warnings: ["Calendar returned partial context."],
+      },
+      invocation: response.invocation,
+      created_at: "2026-04-29T12:00:02.000Z",
+    };
+
     expect(
-      deriveWorkbenchRunHistoryAffordance({ routeAvailable: false }),
-    ).toEqual({ visible: false });
-    expect(
-      deriveWorkbenchRunHistoryAffordance({ routeAvailable: true }),
-    ).toEqual({
-      visible: true,
-      label: "Run history",
-      detail: "Recent Workbench runs are stored for this staff account.",
-      href: "/api/workbench/runs",
+      deriveWorkbenchRunHistoryRows([run], {
+        formatCreatedAt: () => "12:00",
+        askSnippetLength: 32,
+      }),
+    ).toEqual([
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        createdLabel: "12:00",
+        askSnippet: "Prepare the QBR response with...",
+        status: "succeeded",
+        countLabel: "2 warnings",
+      },
+    ]);
+
+    expect(toWorkbenchStartResponseFromHistoryRun(run)).toEqual({
+      result: run.result,
+      retrieval: run.retrieval,
+      invocation: run.invocation,
+      run_history: {
+        status: "stored",
+        id: run.id,
+        created_at: run.created_at,
+      },
     });
+  });
+
+  it("derives connector management repair and disconnect actions from setup affordances", () => {
+    const repair = deriveWorkbenchConnectorManagementActions({
+      id: "googleWorkspace",
+      label: "Google Workspace",
+      state: "repair_available",
+      statusLabel: "Repair available",
+      detail: "google_stored_token_missing",
+      buttonLabel: "Repair Google Workspace",
+      action: "google_sign_in",
+      callbackUrl: "/workbench?google_oauth=returned",
+    });
+
+    expect(repair).toEqual([
+      {
+        id: "google_workspace-repair",
+        label: "Repair",
+        source: "google_workspace",
+        endpoint: "/api/workbench/connectors/google_workspace",
+        method: "POST",
+        payload: { action: "repair" },
+      },
+    ]);
+
+    const disconnect = deriveWorkbenchConnectorManagementActions({
+      id: "notion",
+      label: "Notion",
+      state: "ready",
+      statusLabel: "Ready",
+      detail: "Connected to Notion workspace",
+      buttonLabel: "Connected",
+      action: "notion_start",
+      href: "/api/workbench/notion/start",
+      disabled: true,
+    });
+
+    expect(disconnect).toEqual([
+      {
+        id: "notion-disconnect",
+        label: "Disconnect",
+        source: "notion",
+        endpoint: "/api/workbench/connectors/notion",
+        method: "POST",
+        payload: { action: "disconnect" },
+      },
+    ]);
   });
 });
 

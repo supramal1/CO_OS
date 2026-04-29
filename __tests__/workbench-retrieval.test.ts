@@ -94,7 +94,7 @@ describe("Workbench retrieval orchestrator", () => {
       ask: "Prep Nike QBR response",
       userId: "principal_live",
       apiKey: "csk_test",
-      config: null,
+      config: googleGrantedConfig(),
       now: new Date("2026-04-29T12:00:00.000Z"),
       googleAccessTokenProvider: async ({ userId }) => {
         expect(userId).toBe("principal_live");
@@ -160,7 +160,7 @@ describe("Workbench retrieval orchestrator", () => {
       ask: "Prep Nike QBR response",
       userId: "principal_without_token",
       apiKey: "csk_test",
-      config: null,
+      config: googleGrantedConfig(),
       now: new Date("2026-04-29T12:00:00.000Z"),
       googleAccessTokenProvider: async () => ({
         status: "unavailable",
@@ -226,7 +226,7 @@ describe("Workbench retrieval orchestrator", () => {
       ask: "Prep Nike QBR response",
       userId: "principal_with_stored_token",
       apiKey: "csk_test",
-      config: null,
+      config: googleGrantedConfig(),
       now: new Date("2026-04-29T12:00:00.000Z"),
       googleTokenStore,
       calendarFetch: async (_url, init) => {
@@ -269,4 +269,65 @@ describe("Workbench retrieval orchestrator", () => {
         status: "available",
       });
   });
+
+  it("keeps Calendar unavailable after Google disconnect even if a stored token remains", async () => {
+    let tokenRequested = false;
+
+    const result = await gatherWorkbenchRetrieval({
+      ask: "Prep Nike QBR response",
+      userId: "principal_revoked_google",
+      apiKey: "csk_test",
+      config: {
+        ...googleGrantedConfig(),
+        google_oauth_grant_status: "revoked",
+        google_oauth_scopes: [],
+      },
+      now: new Date("2026-04-29T12:00:00.000Z"),
+      googleAccessTokenProvider: async () => {
+        tokenRequested = true;
+        return { status: "available", accessToken: "stale-calendar-token" };
+      },
+      adapters: {
+        cornerstone: async () => ({
+          source: "cornerstone",
+          status: "available",
+          items: [],
+          warnings: [],
+        }),
+        notion: async () => ({
+          source: "notion",
+          status: "available",
+          items: [],
+          warnings: [],
+        }),
+      },
+    });
+
+    expect(tokenRequested).toBe(false);
+    expect(result.sources.find((source) => source.source === "calendar"))
+      .toMatchObject({
+        source: "calendar",
+        status: "unavailable",
+        items: [],
+        warnings: ["google_oauth_grant_not_active"],
+      });
+  });
 });
+
+function googleGrantedConfig() {
+  return {
+    user_id: "principal_1",
+    notion_parent_page_id: "notion-parent-1",
+    drive_folder_id: "drive-folder-1",
+    drive_folder_url: "https://drive.google.com/drive/folders/drive-folder-1",
+    google_oauth_grant_status: "granted",
+    google_oauth_scopes: [
+      "https://www.googleapis.com/auth/drive.file",
+      "https://www.googleapis.com/auth/spreadsheets",
+      "https://www.googleapis.com/auth/calendar.readonly",
+    ],
+    voice_register: null,
+    feedback_style: null,
+    friction_tasks: null,
+  };
+}
