@@ -23,13 +23,13 @@ export function TabNav() {
     >
       {NAV_ITEMS.map((item) => {
         if (item.type === "module") {
-          const module = moduleById(item.id);
-          if (!module || (module.adminOnly && !isAdmin)) return null;
+          const moduleDef = moduleById(item.id);
+          if (!moduleDef || (moduleDef.adminOnly && !isAdmin)) return null;
           return (
             <ModuleLink
-              key={module.id}
-              module={module}
-              active={active === module.id}
+              key={moduleDef.id}
+              module={moduleDef}
+              active={active === moduleDef.id}
             />
           );
         }
@@ -42,6 +42,15 @@ export function TabNav() {
           );
         if (children.length === 0) return null;
         const isActive = children.some((module) => module.id === active);
+        if (children.length === 1) {
+          return (
+            <ModuleLink
+              key={item.id}
+              module={children[0]}
+              active={isActive}
+            />
+          );
+        }
         return (
           <div
             key={item.id}

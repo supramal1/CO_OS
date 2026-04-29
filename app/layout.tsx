@@ -37,7 +37,7 @@ export default function RootLayout({
       lang="en"
       className={`${plexSans.variable} ${plexMono.variable} ${plexSerif.variable}`}
     >
-      <body>
+      <body suppressHydrationWarning>
         <AuthSessionProvider>{children}</AuthSessionProvider>
       </body>
     </html>
