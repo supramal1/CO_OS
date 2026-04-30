@@ -74,21 +74,69 @@ describe("Newsroom ranking", () => {
         id: "b",
         title: "Client X draft needs evidence.",
         confidence: "high",
-        sourceRefs: ["review:flag-1"],
+        sourceRefs: ["calendar:event-1"],
+        action: { label: "Open Review", target: "review", href: "/forge/production-review" },
+      }),
+      candidate({
+        id: "c",
+        title: "Workbench run needs review",
+        confidence: "low",
+        action: undefined,
+        sourceRefs: ["workbench:run-1", "notion:page-1"],
+      }),
+      candidate({
+        id: "d",
+        title: "Review flag needs review",
+        confidence: "high",
+        sourceRefs: ["review:flag-2", "notion:page-1"],
         action: { label: "Open Review", target: "review", href: "/forge/production-review" },
       }),
     ]);
 
-    expect(deduped).toHaveLength(1);
+    expect(deduped).toHaveLength(2);
     expect(deduped[0]).toMatchObject({
       id: "b",
       confidence: "high",
       action: { label: "Open Review" },
     });
+    expect(deduped[1]).toMatchObject({
+      id: "d",
+      confidence: "high",
+      action: { label: "Open Review" },
+    });
+  });
+
+  it("uses deterministic tie-breakers when items have equal scores", () => {
+    const ranked = rankNewsroomItems([
+      candidate({
+        id: "z",
+        title: "Beta item",
+        source: "workbench",
+        signals: ["active_work"],
+      }),
+      candidate({
+        id: "z",
+        title: "Alpha item",
+        source: "workbench",
+        signals: ["active_work"],
+      }),
+      candidate({
+        id: "a",
+        title: "Alpha item",
+        source: "workbench",
+        signals: ["active_work"],
+      }),
+    ]);
+
+    expect(ranked.map((item) => `${item.title}:${item.id}`)).toEqual([
+      "Alpha item:a",
+      "Alpha item:z",
+      "Beta item:z",
+    ]);
   });
 
   it("limits sections and suggested actions to the MVP defaults", () => {
-    const many = Array.from({ length: 6 }, (_, index) =>
+    const today = Array.from({ length: 6 }, (_, index) =>
       candidate({
         id: `today-${index}`,
         title: `Today item ${index}`,
@@ -96,11 +144,30 @@ describe("Newsroom ranking", () => {
         sourceRefs: [`calendar:${index}`],
       }),
     );
+    const changedSinceYesterday = Array.from({ length: 6 }, (_, index) =>
+      candidate({
+        id: `changed-${index}`,
+        title: `Changed item ${index}`,
+        section: "changedSinceYesterday",
+        sourceRefs: [`notion:${index}`],
+      }),
+    );
+    const needsAttention = Array.from({ length: 6 }, (_, index) =>
+      candidate({
+        id: `attention-${index}`,
+        title: `Attention item ${index}`,
+        section: "needsAttention",
+        sourceRefs: [`review:${index}`],
+      }),
+    );
+    const many = [...today, ...changedSinceYesterday, ...needsAttention];
 
     const sections = limitNewsroomSections(many);
     const actions = buildSuggestedActions(many);
 
     expect(sections.today).toHaveLength(3);
+    expect(sections.changedSinceYesterday).toHaveLength(4);
+    expect(sections.needsAttention).toHaveLength(4);
     expect(actions).toHaveLength(4);
   });
 });
