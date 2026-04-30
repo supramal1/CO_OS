@@ -362,25 +362,25 @@ describe("Workbench staff-ready V1 acceptance", () => {
     expect(matches).toEqual([]);
   });
 
-  it("keeps Workbench top-level and outside the Dispatch nav group", () => {
+  it("keeps Workbench in AI Studio and outside the Dispatch nav group", () => {
     const dispatch = NAV_ITEMS.find(
       (item) => item.type === "group" && item.id === "dispatch",
     );
-    const workbench = NAV_ITEMS.find(
-      (item) => item.type === "group" && item.id === "workbench",
+    const aiStudio = NAV_ITEMS.find(
+      (item) => item.type === "group" && item.id === "ai-studio",
     );
 
     expect(dispatch).toMatchObject({
       type: "group",
       id: "dispatch",
       label: "Dispatch",
-      children: expect.not.arrayContaining(["workbench"]),
+      children: expect.not.arrayContaining(["workbench", "newsroom"]),
     });
-    expect(workbench).toMatchObject({
+    expect(aiStudio).toMatchObject({
       type: "group",
-      id: "workbench",
-      label: "Workbench",
-      children: ["workbench"],
+      id: "ai-studio",
+      label: "AI Studio",
+      children: ["workbench", "newsroom"],
     });
   });
 });

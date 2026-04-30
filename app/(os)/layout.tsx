@@ -1,4 +1,5 @@
 import { AppBar } from "@/components/app-bar";
+import { NewsroomPrefetcher } from "@/components/newsroom/newsroom-prefetcher";
 
 export default function OsLayout({
   children,
@@ -6,6 +7,7 @@ export default function OsLayout({
   return (
     <>
       <AppBar />
+      <NewsroomPrefetcher />
       <main
         style={{
           paddingTop: "var(--shell-h)",

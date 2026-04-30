@@ -118,6 +118,7 @@ export function notionContextItemsToNewsroomSnapshot(
 ): NewsroomSourceSnapshot {
   const candidates = items.flatMap((item, index): NewsroomSourceSnapshot["candidates"] => {
     if (item.source_type !== "notion") return [];
+    if (isNoisyNotionProfileItem(item)) return [];
 
     const claim = stringValue(item.claim);
     const sourceLabel = stringValue(item.source_label);
@@ -152,6 +153,20 @@ export function notionContextItemsToNewsroomSnapshot(
   });
 
   return snapshotFromCandidates("notion", candidates);
+}
+
+function isNoisyNotionProfileItem(item: WorkbenchRetrievedContext): boolean {
+  const text = normalizeWhitespace(
+    [item.claim, item.source_label].flatMap((value) => stringValue(value) ?? []).join(" "),
+  ).toLowerCase();
+  if (!text) return false;
+
+  return (
+    text.includes("workbench onboarding source onboarding") ||
+    /^personal profile:\s*workbench:\s*workbench onboarding/i.test(
+      stringValue(item.claim) ?? "",
+    )
+  );
 }
 
 export async function loadWorkbenchNewsroomSnapshot(

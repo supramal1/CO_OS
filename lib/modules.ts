@@ -17,7 +17,7 @@ export type ModuleDef = {
 
 export type ModuleGroupDef = {
   type: "group";
-  id: "dispatch" | "workbench";
+  id: "dispatch" | "ai-studio";
   label: string;
   children: ModuleId[];
   accentVar: string;
@@ -83,13 +83,12 @@ export const NAV_ITEMS: ModuleNavItem[] = [
     children: ["speak-to-charlie", "forge", "workforce"],
     accentVar: "var(--c-forge)",
   },
-  { type: "module", id: "newsroom" },
   {
     type: "group",
-    id: "workbench",
-    label: "Workbench",
-    children: ["workbench"],
-    accentVar: "var(--c-cowork)",
+    id: "ai-studio",
+    label: "AI Studio",
+    children: ["workbench", "newsroom"],
+    accentVar: "var(--c-cornerstone)",
   },
   { type: "module", id: "cookbook" },
   { type: "module", id: "admin" },

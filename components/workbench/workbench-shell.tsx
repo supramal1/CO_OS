@@ -2,6 +2,7 @@
 
 import { signIn } from "next-auth/react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { CoLoading } from "@/components/co-loading";
 import type {
   WorkbenchPreflightResult,
   WorkbenchStartResponse,
@@ -1484,7 +1485,6 @@ export function WorkbenchShell() {
               onAskChange={setAsk}
               onStart={handleStart}
               setupSummary={setupSummary}
-              profileSummary={setupProfileSummary}
             />
           ) : loadedResponse ? (
             <ResultView
@@ -1636,7 +1636,6 @@ function WorkbenchSetupStep({
   onAskChange,
   onStart,
   setupSummary,
-  profileSummary,
 }: {
   ask: string;
   canSubmit: boolean;
@@ -1645,7 +1644,6 @@ function WorkbenchSetupStep({
   onAskChange: (ask: string) => void;
   onStart: () => void;
   setupSummary: WorkbenchSetupSummary;
-  profileSummary: ReturnType<typeof deriveWorkbenchPersonalisationSummary>;
 }) {
   return (
     <div
@@ -1711,18 +1709,14 @@ function WorkbenchSetupStep({
 
           <div style={{ marginTop: 14 }}>
             {runState.status === "loading" ? (
-              <InlineStatus tone="info" message={runPaneSummary.detail} />
+              <CoLoading
+                label="Starting Workbench"
+                detail={runPaneSummary.detail}
+              />
             ) : null}
             {runState.status === "error" ? (
               <InlineStatus tone="error" message={runPaneSummary.detail} />
             ) : null}
-          </div>
-
-          <div style={{ marginTop: 24 }}>
-            <ProfileHubCallout
-              setupSummary={setupSummary}
-              profileSummary={profileSummary}
-            />
           </div>
         </div>
       </div>
@@ -1739,72 +1733,6 @@ function WorkbenchSetupStep({
         }}
       />
     </div>
-  );
-}
-
-function ProfileHubCallout({
-  setupSummary,
-  profileSummary,
-}: {
-  setupSummary: WorkbenchSetupSummary;
-  profileSummary: ReturnType<typeof deriveWorkbenchPersonalisationSummary>;
-}) {
-  return (
-    <section
-      aria-label="Profile hub"
-      style={{
-        border: "1px solid var(--rule)",
-        background: "var(--panel)",
-        padding: "13px 14px",
-        display: "grid",
-        gridTemplateColumns: "minmax(0, 1fr) auto",
-        gap: 14,
-        alignItems: "center",
-      }}
-    >
-      <div style={{ minWidth: 0 }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            flexWrap: "wrap",
-            marginBottom: 7,
-          }}
-        >
-          <StatusPill status={profileSummary.statusLabel} />
-          <StatusPill status={setupSummary.label} />
-        </div>
-        <div style={{ color: "var(--ink)", fontSize: 13, lineHeight: 1.35 }}>
-          Profile is where Workbench connections and personalisation live.
-        </div>
-        <div
-          style={{
-            color: "var(--ink-dim)",
-            fontSize: 12,
-            lineHeight: 1.35,
-            marginTop: 3,
-          }}
-        >
-          {profileSummary.detail}
-        </div>
-      </div>
-      <a
-        href="/profile"
-        style={{
-          border: "1px solid var(--rule-2)",
-          color: "var(--ink)",
-          padding: "7px 10px",
-          fontFamily: "var(--font-plex-mono)",
-          fontSize: 10,
-          letterSpacing: "0.08em",
-          textTransform: "uppercase",
-          whiteSpace: "nowrap",
-        }}
-      >
-        Open Profile
-      </a>
-    </section>
   );
 }
 
@@ -2423,7 +2351,7 @@ function ResultView({
         throw new Error(
           sanitizeWorkbenchDetail(
             detail,
-            "Workbench could not generate a draft. Check the local server logs and try again.",
+            "Workbench could not generate a draft right now. Please try again in a moment.",
           ),
         );
       }
@@ -2639,7 +2567,10 @@ function GenerateWizardStep({
             <TextBlock text="Generate a draft when the brief looks right." />
           ) : null}
           {makeState.status === "running" ? (
-            <InlineStatus tone="info" message="Generating the first draft." />
+            <CoLoading
+              label="Generating the first draft"
+              detail="Using your task, context, and profile."
+            />
           ) : null}
           {makeState.status === "loaded" ? (
             <ArtifactPreview artifact={makeState.result.artifact} />
@@ -2690,7 +2621,10 @@ function ReviewWizardStep({
             <TextBlock text="Run review when the draft is ready." />
           ) : null}
           {state.status === "running" ? (
-            <InlineStatus tone="info" message="Reviewing the draft." />
+            <CoLoading
+              label="Reviewing the draft"
+              detail="Checking assumptions, evidence, tone, and next steps."
+            />
           ) : null}
           {state.status === "loaded" ? <ReviewSummary result={state.result} /> : null}
           {state.status === "error" ? (
@@ -3267,7 +3201,7 @@ function InlineStatus({
     <div
       role={tone === "error" ? "alert" : "status"}
       style={{
-        color: tone === "error" ? "var(--danger, #9f1d1d)" : "var(--ink-dim)",
+        color: tone === "error" ? "var(--c-cornerstone)" : "var(--ink-dim)",
         fontSize: 12,
         lineHeight: 1.35,
       }}
@@ -3516,7 +3450,7 @@ function ContextResumeStatus({
 
   if (state.status === "error") {
     return (
-      <div role="alert" style={{ color: "var(--danger, #9f1d1d)", fontSize: 12 }}>
+      <div role="alert" style={{ color: "var(--c-cornerstone)", fontSize: 12 }}>
         {sanitizeWorkbenchDetail(state.message)}
       </div>
     );
@@ -3550,7 +3484,7 @@ function PostRunStatus({ state }: { state: PostRunState }) {
       style={{
         color:
           state.status === "error"
-            ? "var(--danger, #9f1d1d)"
+            ? "var(--c-cornerstone)"
             : "var(--ink-dim)",
         fontSize: 12,
         lineHeight: 1.35,
@@ -3921,7 +3855,7 @@ export function WorkbenchSetupPanel({
             style={{
               color:
                 onboardingState.status === "error"
-                  ? "var(--danger, #9f1d1d)"
+                  ? "var(--c-cornerstone)"
                   : "var(--ink-faint)",
               fontSize: 11,
               lineHeight: 1.3,
@@ -4037,7 +3971,7 @@ export function WorkbenchSetupPanel({
               style={{
                 color:
                   setupState.status === "error"
-                    ? "var(--danger, #9f1d1d)"
+                    ? "var(--c-cornerstone)"
                     : "var(--ink-faint)",
                 fontSize: 11,
                 lineHeight: 1.3,
@@ -4152,7 +4086,7 @@ function RunHistoryPanel({
         <div
           role="alert"
           style={{
-            color: "var(--danger, #9f1d1d)",
+            color: "var(--c-cornerstone)",
             fontSize: 12,
             lineHeight: 1.35,
           }}
@@ -4318,7 +4252,7 @@ function SetupNotice({ notice }: { notice: WorkbenchOAuthNotice }) {
         style={{
           color:
             notice.tone === "error"
-              ? "var(--danger, #9f1d1d)"
+              ? "var(--c-cornerstone)"
               : "var(--ink)",
           fontFamily: "var(--font-plex-mono)",
           fontSize: 10,
@@ -4450,7 +4384,7 @@ function ConnectorManagementStatus({
       style={{
         color:
           state.status === "error"
-            ? "var(--danger, #9f1d1d)"
+            ? "var(--c-cornerstone)"
             : "var(--ink-dim)",
         fontSize: 12,
         lineHeight: 1.35,
@@ -4736,7 +4670,7 @@ function StatusPill({ status }: { status: string }) {
           ? "var(--ink)"
           : isWarn
             ? "var(--ink-dim)"
-            : "var(--danger, #9f1d1d)",
+            : "var(--c-cornerstone)",
         background: isGood ? "var(--bg)" : "var(--panel)",
         fontFamily: "var(--font-plex-mono)",
         fontSize: 10,
@@ -4833,32 +4767,38 @@ function RunPaneStateView({ summary }: { summary: WorkbenchRunPaneSummary }) {
           width: "100%",
         }}
       >
-        <SectionEyebrow>{summary.label}</SectionEyebrow>
-        <h2
-          style={{
-            margin: "8px 0 0",
-            fontFamily: "var(--font-plex-serif)",
-            fontSize: 24,
-            lineHeight: 1.15,
-            fontWeight: 400,
-            letterSpacing: 0,
-          }}
-        >
-          {summary.title}
-        </h2>
-        <p
-          style={{
-            margin: "8px 0 0",
-            color:
-              summary.tone === "error"
-                ? "var(--danger, #9f1d1d)"
-                : "var(--ink-dim)",
-            fontSize: 14,
-            lineHeight: 1.45,
-          }}
-        >
-          {summary.detail}
-        </p>
+        {summary.tone === "loading" ? (
+          <CoLoading label={summary.title} detail={summary.detail} size="md" />
+        ) : (
+          <>
+            <SectionEyebrow>{summary.label}</SectionEyebrow>
+            <h2
+              style={{
+                margin: "8px 0 0",
+                fontFamily: "var(--font-plex-serif)",
+                fontSize: 24,
+                lineHeight: 1.15,
+                fontWeight: 400,
+                letterSpacing: 0,
+              }}
+            >
+              {summary.title}
+            </h2>
+            <p
+              style={{
+                margin: "8px 0 0",
+                color:
+                  summary.tone === "error"
+                    ? "var(--c-cornerstone)"
+                    : "var(--ink-dim)",
+                fontSize: 14,
+                lineHeight: 1.45,
+              }}
+            >
+              {summary.detail}
+            </p>
+          </>
+        )}
       </div>
     </div>
   );

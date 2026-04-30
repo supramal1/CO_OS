@@ -239,6 +239,34 @@ describe("newsroom adapters", () => {
     expect(snapshot.candidates[0]?.title).toBe("Client X workspace");
   });
 
+  it("filters noisy Workbench onboarding profile rows from Newsroom", () => {
+    const items: WorkbenchRetrievedContext[] = [
+      {
+        claim:
+          "Personal Profile: Workbench: Workbench onboarding Source: Onboarding | 2026-04-30 - Head of AI Ops",
+        source_type: "notion",
+        source_label: "Notion: Personal Profile",
+        source_url: "https://notion.so/profile",
+      },
+      {
+        claim: "Working On: Prepare Workbench Epic 1 sell-in note",
+        source_type: "notion",
+        source_label: "Working On",
+        source_url: "https://notion.so/working-on",
+      },
+    ];
+
+    const snapshot = notionContextItemsToNewsroomSnapshot(items);
+
+    expect(snapshot.status.itemsCount).toBe(1);
+    expect(snapshot.candidates).toEqual([
+      expect.objectContaining({
+        title: "Prepare Workbench Epic 1 sell-in note",
+        sourceRefs: ["notion:Working On"],
+      }),
+    ]);
+  });
+
   it("returns Calendar unavailable when readonly scope is missing", async () => {
     mocks.getUserWorkbenchConfig.mockResolvedValue({
       user_id: "principal_123",

@@ -103,7 +103,7 @@ export async function generateWorkbenchArtifact(input: {
       status: "error",
       reason: "workbench_make_failed",
       message:
-        "Workbench could not reach the draft generator. Check the local server logs and try again.",
+        "Workbench could not generate a draft right now. Please try again in a moment.",
     };
   }
 

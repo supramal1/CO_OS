@@ -51,7 +51,8 @@ describe("GET /api/newsroom/brief", () => {
     const res = await GET();
 
     expect(res.status).toBe(200);
-    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expect(res.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(res.headers.get("X-Newsroom-Cache")).toBe("miss");
     expect(await res.json()).toEqual({ brief });
     expect(mocks.generateNewsroomBrief).toHaveBeenCalledExactlyOnceWith({
       userId: "principal_user_1",

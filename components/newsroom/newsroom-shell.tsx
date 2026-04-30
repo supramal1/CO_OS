@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CoLoading } from "@/components/co-loading";
 import type {
   NewsroomAction,
   NewsroomBrief,
@@ -20,6 +21,10 @@ import {
   sourceStatusDetail,
   sourceStatusLabel,
 } from "./newsroom-display";
+import {
+  readCachedNewsroomBrief,
+  writeCachedNewsroomBrief,
+} from "./newsroom-cache";
 
 type NewsroomState =
   | { status: "loading" }
@@ -37,13 +42,17 @@ export function NewsroomShell() {
   const requestSequenceRef = useRef(0);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  const loadBrief = useCallback(async () => {
+  const loadBrief = useCallback(async (options?: { preserveLoaded?: boolean }) => {
     const sequence = requestSequenceRef.current + 1;
     requestSequenceRef.current = sequence;
     abortControllerRef.current?.abort();
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
-    setState({ status: "loading" });
+    setState((current) =>
+      options?.preserveLoaded && current.status === "loaded"
+        ? current
+        : { status: "loading" },
+    );
     try {
       const response = await fetch("/api/newsroom/brief", {
         cache: "no-store",
@@ -54,6 +63,7 @@ export function NewsroomShell() {
         throw new Error(payload.error ?? "Could not load Newsroom brief.");
       }
       if (sequence !== requestSequenceRef.current) return;
+      writeCachedNewsroomBrief(payload.brief);
       setState({ status: "loaded", brief: payload.brief });
     } catch (error) {
       if (abortController.signal.aborted || sequence !== requestSequenceRef.current) {
@@ -72,7 +82,13 @@ export function NewsroomShell() {
   }, []);
 
   useEffect(() => {
-    void loadBrief();
+    const cached = readCachedNewsroomBrief();
+    if (cached) {
+      setState({ status: "loaded", brief: cached });
+      void loadBrief({ preserveLoaded: true });
+    } else {
+      void loadBrief();
+    }
     return () => {
       requestSequenceRef.current += 1;
       abortControllerRef.current?.abort();
@@ -136,7 +152,7 @@ export function NewsroomShell() {
             </h1>
           </div>
           <div style={{ flex: 1 }} />
-          <button type="button" onClick={loadBrief} style={buttonStyle}>
+          <button type="button" onClick={() => loadBrief()} style={buttonStyle}>
             Refresh
           </button>
         </header>
@@ -153,7 +169,10 @@ export function NewsroomShell() {
           }}
         >
           {state.status === "loading" ? (
-            <EmptyLine>Loading Newsroom brief...</EmptyLine>
+            <LoadingPanel
+              label="Loading Newsroom brief"
+              detail="Pulling together Workbench, Notion, Calendar, and Cornerstone."
+            />
           ) : state.status === "error" ? (
             <EmptyLine>Could not load Newsroom brief. {state.message}</EmptyLine>
           ) : (
@@ -215,9 +234,13 @@ export function NewsroomShell() {
         ) : (
           <div style={{ padding: 20 }}>
             <MetaLabel>Source health</MetaLabel>
-            <EmptyLine>
-              {state.status === "error" ? "Unavailable until the brief loads." : "Checking sources..."}
-            </EmptyLine>
+            {state.status === "error" ? (
+              <EmptyLine>Unavailable until the brief loads.</EmptyLine>
+            ) : (
+              <div style={{ marginTop: 12 }}>
+                <CoLoading label="Checking sources" />
+              </div>
+            )}
           </div>
         )}
       </aside>
@@ -238,6 +261,26 @@ export function NewsroomShell() {
           }
         }
       `}</style>
+    </div>
+  );
+}
+
+function LoadingPanel({
+  label,
+  detail,
+}: {
+  label: string;
+  detail?: string;
+}) {
+  return (
+    <div
+      style={{
+        border: "1px solid var(--rule)",
+        background: "var(--panel)",
+        padding: 18,
+      }}
+    >
+      <CoLoading label={label} detail={detail} size="md" />
     </div>
   );
 }
@@ -501,6 +544,8 @@ function SourceHealth({ statuses }: { statuses: NewsroomSourceStatus[] }) {
 
 function SourceHealthRow({ status }: { status: NewsroomSourceStatus }) {
   const detail = sourceStatusDetail(status);
+  const needsAttention =
+    status.status === "error" || status.status === "unavailable";
 
   return (
     <div
@@ -518,7 +563,7 @@ function SourceHealthRow({ status }: { status: NewsroomSourceStatus }) {
           gap: 12,
           fontFamily: "var(--font-plex-sans)",
           fontSize: 13,
-          color: "var(--ink)",
+          color: needsAttention ? "var(--c-cornerstone)" : "var(--ink)",
         }}
       >
         <span>{sourceStatusLabel(status)}</span>
@@ -599,7 +644,7 @@ const linkStyle: React.CSSProperties = {
   fontSize: 10,
   letterSpacing: "0.12em",
   textTransform: "uppercase",
-  color: "var(--ink)",
+  color: "var(--c-cornerstone)",
   textDecoration: "underline",
   textUnderlineOffset: 3,
 };

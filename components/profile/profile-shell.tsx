@@ -20,6 +20,7 @@ import {
   deriveWorkbenchPersonalisationSummary,
   sanitizeWorkbenchDetail,
 } from "@/lib/workbench/ui-state";
+import { CoLoading } from "@/components/co-loading";
 import type { WorkbenchOnboardingDraft } from "@/lib/workbench/personalisation";
 import type { WorkbenchProfileContext } from "@/lib/workbench/profile";
 import type { WorkbenchUserConfig } from "@/lib/workbench/retrieval/types";
@@ -304,10 +305,6 @@ export function ProfileShell() {
     }
   }, []);
 
-  useEffect(() => {
-    if (profileReady) setShowProfileBuilder(false);
-  }, [profileReady]);
-
   async function handleConfigSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSetupState({ status: "saving" });
@@ -486,7 +483,8 @@ export function ProfileShell() {
     }
   }
 
-  const shouldShowBuilder = showProfileBuilder || !profileReady;
+  const isEditingProfile =
+    showProfileBuilder || (profileState.status === "loaded" && !profileReady);
 
   return (
     <div
@@ -538,14 +536,7 @@ export function ProfileShell() {
           }}
         >
           <div style={{ display: "grid", gap: 22 }}>
-            <PersonalisationCard
-              profileState={profileState}
-              profileReady={profileReady}
-              personalisationSummary={personalisationSummary}
-              onRefresh={() => loadProfile()}
-              onEdit={() => setShowProfileBuilder(true)}
-            />
-            {shouldShowBuilder ? (
+            {isEditingProfile ? (
               <ProfileBuilder
                 form={onboardingForm}
                 state={onboardingState}
@@ -554,7 +545,15 @@ export function ProfileShell() {
                 onDraft={handleOnboardingDraft}
                 onSave={handleOnboardingSave}
               />
-            ) : null}
+            ) : (
+              <PersonalisationCard
+                profileState={profileState}
+                profileReady={profileReady}
+                personalisationSummary={personalisationSummary}
+                onRefresh={() => loadProfile()}
+                onEdit={() => setShowProfileBuilder(true)}
+              />
+            )}
           </div>
 
           <div style={{ display: "grid", gap: 22 }}>
@@ -658,7 +657,10 @@ function PersonalisationCard({
         </div>
 
         {profileState.status === "loading" ? (
-          <MutedText>Loading your profile.</MutedText>
+          <CoLoading
+            label="Loading your profile"
+            detail="Checking your Notion second brain."
+          />
         ) : null}
         {profileState.status === "error" ? (
           <InlineStatus
@@ -867,6 +869,11 @@ function ConnectorHub({
   onConnectGoogle: () => void;
   onConnectorManagementAction: (action: ConnectorManagementAction) => void;
 }) {
+  const setupActions = [
+    setupAffordances.notion,
+    setupAffordances.googleWorkspace,
+  ].filter(shouldShowConnectorSetupAction);
+
   return (
     <ProfileSection title="Connected Tools" meta="Setup">
       <div style={{ borderTop: "1px solid var(--rule)", paddingTop: 16 }}>
@@ -892,26 +899,33 @@ function ConnectorHub({
         {oauthNotice ? <SetupNotice notice={oauthNotice} /> : null}
         <MutedText>{setupSummary.detail}</MutedText>
 
-        <div style={{ display: "grid", gap: 9, marginTop: 14 }}>
-          <SetupActionRow
-            affordance={setupAffordances.notion}
-            managementState={connectorManagementState}
-            onAction={onSetupNotion}
-            onManagementAction={onConnectorManagementAction}
-          />
-          <SetupActionRow
-            affordance={setupAffordances.googleWorkspace}
-            managementState={connectorManagementState}
-            onAction={onConnectGoogle}
-            onManagementAction={onConnectorManagementAction}
-          />
-        </div>
+        {setupActions.length > 0 ? (
+          <div style={{ display: "grid", gap: 9, marginTop: 14 }}>
+            {setupActions.map((affordance) => (
+              <SetupActionRow
+                key={affordance.id}
+                affordance={affordance}
+                managementState={connectorManagementState}
+                onAction={
+                  affordance.id === "notion" ? onSetupNotion : onConnectGoogle
+                }
+                onManagementAction={onConnectorManagementAction}
+              />
+            ))}
+          </div>
+        ) : null}
         <ConnectorManagementStatus state={connectorManagementState} />
         <ConnectorList summary={connectorSummary} />
         <ConnectorHealthRows rows={healthRows} generatedAt={healthGeneratedAt} />
       </div>
     </ProfileSection>
   );
+}
+
+function shouldShowConnectorSetupAction(
+  affordance: WorkbenchSetupAffordance,
+): boolean {
+  return affordance.state !== "ready";
 }
 
 function ManualConfigPanel({
@@ -1421,7 +1435,13 @@ function ConnectorManagementStatus({
 }
 
 function StateMessage({ state }: { state: WorkbenchOnboardingState }) {
-  if (state.status === "idle" || state.status === "drafting") return null;
+  if (state.status === "idle") return null;
+  if (state.status === "drafting") {
+    return <CoLoading label="Previewing profile" />;
+  }
+  if (state.status === "saving") {
+    return <CoLoading label="Saving profile" />;
+  }
   if (state.status === "error") {
     return (
       <InlineStatus
@@ -1588,7 +1608,7 @@ function InlineStatus({
       style={{
         border: "1px solid var(--rule)",
         padding: "8px 10px",
-        color: tone === "error" ? "var(--danger, #9f1d1d)" : "var(--ink-dim)",
+        color: tone === "error" ? "var(--c-cornerstone)" : "var(--ink-dim)",
         fontSize: 12,
         lineHeight: 1.35,
       }}
@@ -1787,7 +1807,7 @@ function statusColor(status: string): string {
     return "var(--c-cornerstone)";
   }
   if (normalized.includes("error") || normalized.includes("failed")) {
-    return "var(--danger, #9f1d1d)";
+    return "var(--c-cornerstone)";
   }
   return "var(--ink-dim)";
 }

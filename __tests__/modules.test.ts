@@ -30,7 +30,7 @@ describe("top-level CO OS modules", () => {
     });
   });
 
-  it("keeps Workbench out of Dispatch under its own nav heading", () => {
+  it("keeps Workbench and Newsroom out of Dispatch under AI Studio", () => {
     expect(NAV_ITEMS).toEqual([
       {
         type: "group",
@@ -40,15 +40,11 @@ describe("top-level CO OS modules", () => {
         accentVar: "var(--c-forge)",
       },
       {
-        type: "module",
-        id: "newsroom",
-      },
-      {
         type: "group",
-        id: "workbench",
-        label: "Workbench",
-        children: ["workbench"],
-        accentVar: "var(--c-cowork)",
+        id: "ai-studio",
+        label: "AI Studio",
+        children: ["workbench", "newsroom"],
+        accentVar: "var(--c-cornerstone)",
       },
       { type: "module", id: "cookbook" },
       { type: "module", id: "admin" },
