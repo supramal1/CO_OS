@@ -6,6 +6,7 @@ import type {
   WorkbenchRetrievedContext,
   WorkbenchTimeEstimate,
 } from "./types";
+import type { WorkbenchProfileContext } from "./profile";
 import type {
   WorkbenchRetrievalSourceResult,
   WorkbenchRetrievalStatus,
@@ -18,6 +19,7 @@ export type BuildPreflightPromptInput = {
   retrievedContext: WorkbenchRetrievedContext[];
   retrievalStatuses?: WorkbenchRetrievalStatus[];
   retrievalSources?: WorkbenchRetrievalSourceResult[];
+  profileContext?: WorkbenchProfileContext | null;
 };
 
 export function buildPreflightPrompt(input: BuildPreflightPromptInput): string {
@@ -76,6 +78,9 @@ export function buildPreflightPrompt(input: BuildPreflightPromptInput): string {
     "Retrieved context:",
     JSON.stringify(retrievedContext, null, 2),
     "",
+    "Effective staff profile:",
+    JSON.stringify(promptProfileContext(input.profileContext), null, 2),
+    "",
     "Retrieval status:",
     retrievalStatusText(input),
     JSON.stringify(input.retrievalStatuses ?? [], null, 2),
@@ -83,6 +88,36 @@ export function buildPreflightPrompt(input: BuildPreflightPromptInput): string {
     "User ask:",
     input.ask,
   ].join("\n");
+}
+
+function promptProfileContext(
+  profile: WorkbenchProfileContext | null | undefined,
+) {
+  if (!profile) {
+    return {
+      summary_text: "No effective staff profile was available.",
+      warnings: ["profile_context_missing"],
+      source_refs: [],
+    };
+  }
+
+  return {
+    summary_text:
+      profile.summary_text.trim() || "No effective staff profile was available.",
+    role: profile.role,
+    current_work: profile.current_work,
+    communication_style: profile.communication_style,
+    challenge_style: profile.challenge_style,
+    working_context: profile.working_context,
+    do_not_assume: profile.do_not_assume,
+    warnings: profile.warnings,
+    source_refs: profile.source_refs.map((ref) => ({
+      source: ref.source,
+      label: ref.label,
+      page_title: ref.page_title ?? null,
+      updated_at: ref.updated_at ?? null,
+    })),
+  };
 }
 
 function retrievalStatusText(input: BuildPreflightPromptInput): string {

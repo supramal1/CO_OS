@@ -13,6 +13,7 @@ describe("My OS Profile model", () => {
     expect(PROFILE_SECTIONS.map((section) => section.id)).toEqual([
       "my-work",
       "connected-tools",
+      "personalisation",
       "privacy",
     ]);
     expect(PROFILE_SECTIONS.find((section) => section.id === "connected-tools")).toMatchObject({
@@ -42,11 +43,13 @@ describe("My OS Profile model", () => {
     expect(PROFILE_STATS.map((stat) => stat.label)).toEqual([
       "Active projects",
       "Connected tools",
+      "Default reviewer",
     ]);
     expect(PROFILE_FACT_ROWS.map((row) => row.label)).toEqual([
       "Role",
       "Team",
       "Active work",
+      "Output preference",
       "Private to you",
       "Visible to team",
       "Admin only",

@@ -14,6 +14,8 @@ import type { WorkbenchPreflightResult, WorkbenchStartResponse } from "./types";
 const TABLE = "workbench_profile_updates";
 const UPDATE_COLUMNS =
   "id,user_id,target_page,source_run_id,candidate_text,status,classification,source_signal,confidence,previous_value,new_value,user_decision,notion_page_id,notion_block_id,undo_of_update_id,undo_reason,undo_metadata,undone_at,created_at,updated_at" as const;
+const DEFAULT_PROFILE_UPDATE_LIMIT = 25;
+const MAX_PROFILE_UPDATE_LIMIT = 100;
 
 export const WORKBENCH_PROFILE_UPDATE_STATUSES = [
   "pending",
@@ -187,8 +189,12 @@ type SupabaseResult<T> = PromiseLike<{
   data: T | null;
   error: SupabaseErrorLike;
 }>;
+type SupabaseListResult<T> = PromiseLike<{
+  data: T[] | null;
+  error: SupabaseErrorLike;
+}>;
 
-type SupabaseLike = {
+type SupabaseProfileUpdateStoreLike = {
   from(table: string): {
     insert(payload: WorkbenchProfileUpdateInsertPayload): {
       select(columns: string): {
@@ -206,6 +212,35 @@ type SupabaseLike = {
     };
   };
 };
+
+type SupabaseProfileUpdateListLike = {
+  from(table: string): {
+    select(columns: string): {
+      eq(column: string, value: string): {
+        order(
+          column: string,
+          options: { ascending: boolean },
+        ): {
+          limit(count: number): SupabaseListResult<WorkbenchProfileUpdateRow>;
+        };
+      };
+    };
+  };
+};
+
+export type WorkbenchProfileUpdateListResult =
+  | { status: "ok"; updates: WorkbenchProfileUpdateRow[] }
+  | {
+      status: "unavailable";
+      updates: [];
+      error: "workbench_profile_updates_unavailable";
+    }
+  | {
+      status: "error";
+      updates: [];
+      error: "workbench_profile_update_failed";
+      detail: string;
+    };
 
 const SENSITIVE_PATTERNS: Array<{ flag: string; pattern: RegExp }> = [
   {
@@ -556,8 +591,49 @@ export async function markWorkbenchProfileUpdateUndone(
   }
 }
 
+export async function listWorkbenchProfileUpdates(input: {
+  userId: string;
+  limit?: number;
+}): Promise<WorkbenchProfileUpdateListResult> {
+  const sb = getWorkbenchSupabase() as unknown as SupabaseProfileUpdateListLike | null;
+  if (!sb) {
+    return {
+      status: "unavailable",
+      updates: [],
+      error: "workbench_profile_updates_unavailable",
+    };
+  }
+
+  try {
+    const { data, error } = await sb
+      .from(TABLE)
+      .select(UPDATE_COLUMNS)
+      .eq("user_id", input.userId.trim())
+      .order("created_at", { ascending: false })
+      .limit(normalizeProfileUpdateLimit(input.limit));
+
+    if (error) {
+      return {
+        status: "error",
+        updates: [],
+        error: "workbench_profile_update_failed",
+        detail: errorMessage(error, "Unknown profile update list error."),
+      };
+    }
+
+    return { status: "ok", updates: data ?? [] };
+  } catch (err) {
+    return {
+      status: "error",
+      updates: [],
+      error: "workbench_profile_update_failed",
+      detail: errorMessage(err, "Unknown profile update list error."),
+    };
+  }
+}
+
 export function createSupabaseWorkbenchProfileUpdateStore(
-  supabase: SupabaseLike,
+  supabase: SupabaseProfileUpdateStoreLike,
 ): WorkbenchProfileUpdateStore {
   return {
     async insertProfileUpdate(payload) {
@@ -587,6 +663,13 @@ export function createSupabaseWorkbenchProfileUpdateStore(
       return data;
     },
   };
+}
+
+function normalizeProfileUpdateLimit(limit: number | undefined): number {
+  if (!Number.isFinite(limit)) return DEFAULT_PROFILE_UPDATE_LIMIT;
+  const rounded = Math.trunc(limit ?? DEFAULT_PROFILE_UPDATE_LIMIT);
+  if (rounded < 1) return DEFAULT_PROFILE_UPDATE_LIMIT;
+  return Math.min(rounded, MAX_PROFILE_UPDATE_LIMIT);
 }
 
 function fallbackClassification(
@@ -859,7 +942,8 @@ function resolveProfileUpdateStore(
   options: PersistWorkbenchProfileUpdateOptions,
 ): WorkbenchProfileUpdateStore | null {
   if ("store" in options) return options.store ?? null;
-  const supabase = getWorkbenchSupabase() as unknown as SupabaseLike | null;
+  const supabase =
+    getWorkbenchSupabase() as unknown as SupabaseProfileUpdateStoreLike | null;
   return supabase ? createSupabaseWorkbenchProfileUpdateStore(supabase) : null;
 }
 

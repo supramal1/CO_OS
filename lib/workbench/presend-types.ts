@@ -67,10 +67,10 @@ export type RunWorkbenchPresendInput = {
   preflightResult: WorkbenchPreflightResult | Record<string, unknown>;
   draftInput?: string | null;
   artifactSpecInput?: string | null;
-  reviewedArtifact?: WorkbenchPresendReviewedArtifact | null;
   userId: string;
   apiKey: string;
   anthropicApiKey: string;
+  reviewedArtifact?: WorkbenchPresendReviewedArtifact | null;
   now?: Date;
   getUserConfig?: (userId: string) => Promise<WorkbenchUserConfig | null>;
   googleAccessTokenProvider?: WorkbenchPresendGoogleAccessTokenProvider;

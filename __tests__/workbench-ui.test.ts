@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   buildWorkbenchConfigPayload,
+  buildWorkbenchContextAugmentedAsk,
   buildWorkbenchOnboardingPayload,
   deriveWorkbenchConnectorManagementActions,
   deriveWorkbenchConnectorSummary,
@@ -11,15 +12,15 @@ import {
   deriveWorkbenchRunPaneSummary,
   deriveWorkbenchSetupAffordances,
   deriveWorkbenchSetupSummary,
+  deriveWorkbenchStageRows,
   deriveWorkbenchUiSummary,
   getInitialWorkbenchConfigForm,
+  hasWorkbenchProfileSeed,
   shouldShowGoogleConnect,
   toWorkbenchStartResponseFromHistoryRun,
   toWorkbenchHealthRows,
 } from "@/components/workbench/workbench-shell";
 import {
-  deriveWorkbenchProfileLearningControls,
-  deriveWorkbenchStageRows,
   deriveWorkbenchPersonalisationSummary,
   deriveWorkbenchProfileUpdateStatus,
   toStaffWorkbenchDetail,
@@ -27,6 +28,7 @@ import {
 } from "@/lib/workbench/ui-state";
 import type { WorkbenchRunHistoryRow } from "@/lib/workbench/run-history";
 import type { WorkbenchStartResponse } from "@/lib/workbench/types";
+import type { WorkbenchWorkflowState } from "@/lib/workbench/workflow";
 
 describe("Workbench UI summary", () => {
   it("maps setup states to staff-facing labels and sanitized details", () => {
@@ -95,26 +97,17 @@ describe("Workbench UI summary", () => {
       actionLabel: "Undo last profile update",
       actionDisabled: false,
     });
+
     expect(
-      deriveWorkbenchProfileLearningControls({
-        status: "updated",
-        targetLabel: "Voice",
-        canUndo: true,
+      deriveWorkbenchProfileUpdateStatus({
+        status: "error",
+        message: "Unsupported state or unable to authenticate data",
       }),
-    ).toEqual([
-      { id: "view", label: "View", enabled: true },
-      { id: "undo", label: "Undo", enabled: true },
-    ]);
-    expect(
-      deriveWorkbenchProfileLearningControls({
-        status: "skipped",
-        reason: "low_confidence",
-      }),
-    ).toEqual([
-      { id: "remember", label: "Remember", enabled: true },
-      { id: "not_now", label: "Not now", enabled: true },
-      { id: "edit", label: "Edit", enabled: true },
-    ]);
+    ).toMatchObject({
+      state: "error",
+      label: "Profile update paused",
+      detail: "Reconnect Notion to save profile updates.",
+    });
   });
 
   it("initializes and serializes the staff setup config form", () => {
@@ -185,6 +178,36 @@ describe("Workbench UI summary", () => {
       challenge_style: ["Flag weak logic", "Suggest stronger framing"],
       helpful_context: ["Need source links", "Working across multiple clients"],
     });
+  });
+
+  it("detects existing profile seeds so staff do not need to refill onboarding", () => {
+    expect(hasWorkbenchProfileSeed(null)).toBe(false);
+    expect(
+      hasWorkbenchProfileSeed({
+        user_id: "principal_user_1",
+        notion_parent_page_id: "notion-parent-1",
+        drive_folder_id: null,
+        drive_folder_url: null,
+        google_oauth_grant_status: "granted",
+        google_oauth_scopes: [],
+        voice_register: null,
+        feedback_style: null,
+        friction_tasks: null,
+      }),
+    ).toBe(true);
+    expect(
+      hasWorkbenchProfileSeed({
+        user_id: "principal_user_1",
+        notion_parent_page_id: null,
+        drive_folder_id: null,
+        drive_folder_url: null,
+        google_oauth_grant_status: null,
+        google_oauth_scopes: [],
+        voice_register: "Concise",
+        feedback_style: null,
+        friction_tasks: null,
+      }),
+    ).toBe(true);
   });
 
   it("shows Google connect only for readiness states that need consent or token repair", () => {
@@ -849,16 +872,16 @@ describe("Workbench UI summary", () => {
       "utf8",
     );
 
-    expect(source).toContain("Task run");
-    expect(source).toContain("Task request");
-    expect(source).toContain("Paste the task request and required output.");
-    expect(source).toContain("Run task");
-    expect(source).toContain("Ready for task");
-    expect(source).toContain("Ready to run a task");
-    expect(source).toContain("Recent Task Runs");
-    expect(source).toContain("No task runs yet.");
-    expect(source).toContain("Clarification");
-    expect(source).toContain("None returned.");
+    expect(source).toContain("Workbench");
+    expect(source).toContain("What are you working on?");
+    expect(source).toContain("Paste the task, brief, message, or output you need.");
+    expect(source).toContain("Start Workbench");
+    expect(source).toContain("Ready");
+    expect(source).toContain("Ready to start");
+    expect(source).toContain("Recent work");
+    expect(source).toContain("No recent work yet.");
+    expect(source).toContain("Task summary");
+    expect(source).toContain("Sources");
     expect(source).toContain("Personalisation");
     expect(source).toContain("Role / title");
     expect(source).toContain("What sorts of things are you working on?");
@@ -867,16 +890,12 @@ describe("Workbench UI summary", () => {
     expect(source).toContain("Helpful working context");
     expect(source).toContain("Preview profile");
     expect(source).toContain("Save to Notion");
-    expect(source).toContain("Profile Learning");
-    expect(source).toContain("Undo last profile update");
-    expect(source).toContain("Understand");
-    expect(source).toContain("Gather");
-    expect(source).toContain("Make");
-    expect(source).toContain("Review");
-    expect(source).toContain("Save");
+    expect(source).toContain("No profile context was available.");
+    expect(source).toContain("profile sources");
     expect(source).toContain("Generate draft");
     expect(source).toContain("Review draft");
-    expect(source).not.toContain("Learn tab");
+    expect(source).toContain("Add context and continue");
+    expect(source).toContain("Continue without this");
     expect(source).not.toContain("Voice fallback");
     expect(source).not.toContain("Personal context");
     expect(source).not.toContain("Tenure");
@@ -887,6 +906,7 @@ describe("Workbench UI summary", () => {
       ["Ready", "for", "a", "sk"].join(" "),
       ["Clarifying", "Message"].join(" "),
       ["No", "message."].join(" "),
+      "Use context",
       ["ch", "at"].join(""),
       ["G", "mail"].join(""),
       ["P", "OC"].join(""),
@@ -986,65 +1006,114 @@ describe("Workbench UI summary", () => {
     expect(summary.hoursSavedLabel).toBe("0.4h saved");
     expect(summary.baselineLabel).toBe("45m baseline");
     expect(summary.warningCount).toBe(2);
+    expect(summary.currentStage).toBe("gather");
+    expect(summary.missingContextCount).toBe(0);
     expect(summary.retrievalRows).toEqual([
       {
         source: "notion",
+        label: "Notion",
         status: "available",
         itemsCount: 1,
         reason: null,
+        detail: "Connected",
         warnings: [],
       },
       {
         source: "calendar",
+        label: "Calendar",
         status: "unavailable",
         itemsCount: 0,
         reason: "Google OAuth grant missing.",
-        warnings: ["Google OAuth grant missing."],
+        detail: "Reconnect Google Workspace",
+        warnings: ["Reconnect Google Workspace"],
       },
     ]);
   });
 
-  it("derives visible workflow stage rows from the start response", () => {
-    expect(
-      deriveWorkbenchStageRows({
-        current_stage: "understand",
-        stages: [
+  it("turns connector retrieval failures into staff-safe repair actions", () => {
+    const response: WorkbenchStartResponse = {
+      ...buildWorkbenchStartResponse(),
+      retrieval: {
+        context: [],
+        statuses: [
           {
-            id: "understand",
-            label: "Understand",
-            status: "complete",
-            summary: "Task decoded.",
+            source: "notion",
+            status: "error",
+            reason: "notion retrieval failed: Notion API request failed with status 404",
+            items_count: 0,
           },
           {
-            id: "gather",
-            label: "Gather",
-            status: "complete",
-            summary: "1 context item gathered.",
-          },
-          {
-            id: "make",
-            label: "Make",
-            status: "available",
-            summary: "Ready to generate.",
-          },
-          {
-            id: "review",
-            label: "Review",
-            status: "locked",
-            summary: "Generate first.",
-          },
-          {
-            id: "save",
-            label: "Save",
-            status: "locked",
-            summary: "Review first.",
+            source: "calendar",
+            status: "error",
+            reason:
+              "calendar retrieval failed: google_token_lookup_failed: Unsupported state or unable to authenticate data",
+            items_count: 0,
           },
         ],
+        sources: [
+          {
+            source: "notion",
+            status: "error",
+            items: [],
+            warnings: [
+              "notion retrieval failed: Notion API request failed with status 404",
+            ],
+          },
+          {
+            source: "calendar",
+            status: "error",
+            items: [],
+            warnings: [
+              "calendar retrieval failed: google_token_lookup_failed: Unsupported state or unable to authenticate data",
+            ],
+          },
+        ],
+        warnings: [],
+        generated_at: "2026-04-29T12:00:00.000Z",
+      },
+    };
+
+    expect(deriveWorkbenchUiSummary(response).retrievalRows).toEqual([
+      expect.objectContaining({
+        source: "notion",
+        label: "Notion",
+        detail: "Repair Workbench pages",
+        warnings: ["Repair Workbench pages"],
       }),
-    ).toEqual([
+      expect.objectContaining({
+        source: "calendar",
+        label: "Calendar",
+        detail: "Reconnect Google Workspace",
+        warnings: ["Reconnect Google Workspace"],
+      }),
+    ]);
+  });
+
+  it("derives friendly workflow stage rows from the context gate", () => {
+    const workflow: WorkbenchWorkflowState = {
+      current_stage: "context_needed",
+      stages: [],
+      context_questions: [
+        {
+          id: "deadline",
+          question: "What deadline should this use?",
+          why: "Needed for priority.",
+          answer_type: "text",
+          required: true,
+          suggested_sources: ["calendar"],
+          assumption_fallback: "Assume the nearest deadline.",
+        },
+      ],
+      context_answers: [],
+      missing_required_context_count: 1,
+      can_continue_with_assumptions: true,
+      using_assumptions: false,
+    };
+
+    expect(deriveWorkbenchStageRows(workflow)).toEqual([
       expect.objectContaining({ label: "Understand", state: "complete" }),
-      expect.objectContaining({ label: "Gather", state: "complete" }),
-      expect.objectContaining({ label: "Make", state: "available" }),
+      expect.objectContaining({ label: "Gather", state: "active" }),
+      expect.objectContaining({ label: "Make", state: "locked" }),
       expect.objectContaining({ label: "Review", state: "locked" }),
       expect.objectContaining({ label: "Save", state: "locked" }),
     ]);
@@ -1064,7 +1133,7 @@ describe("Workbench UI summary", () => {
       {
         id: "presend",
         label: "Prepare save-back artifact",
-        detail: "Run pre-send checks and save the task output to Drive when required.",
+        detail: "Run final checks and save the work to Drive when required.",
         status: "ready",
         endpoint: "/api/workbench/presend",
         method: "POST",
@@ -1122,6 +1191,7 @@ describe("Workbench UI summary", () => {
       })[0],
     ).toMatchObject({
       id: "presend",
+      label: "Save reviewed draft",
       payload: {
         reviewed_artifact: {
           review_status: "approved_with_checks",
@@ -1129,6 +1199,17 @@ describe("Workbench UI summary", () => {
           destination: "drive",
         },
       },
+    });
+
+    expect(
+      deriveWorkbenchPostRunActions(response, {
+        requireReviewedArtifact: true,
+      })[0],
+    ).toMatchObject({
+      id: "presend",
+      label: "Save reviewed draft",
+      status: "disabled",
+      disabledReason: "review_required",
     });
 
     expect(
@@ -1178,6 +1259,29 @@ describe("Workbench UI summary", () => {
     ]);
   });
 
+  it("builds a rerunnable ask from staff-supplied context answers", () => {
+    expect(
+      buildWorkbenchContextAugmentedAsk("Draft the client response.", [
+        {
+          question: "What is the deadline?",
+          answer: "Friday 5pm",
+        },
+        {
+          question: "Who signs off?",
+          answer: "Emma",
+        },
+      ]),
+    ).toBe(
+      [
+        "Draft the client response.",
+        "",
+        "Additional context supplied by staff:",
+        "- What is the deadline?: Friday 5pm",
+        "- Who signs off?: Emma",
+      ].join("\n"),
+    );
+  });
+
   it("derives staff-readable run history rows and opens a stored run as a start response", () => {
     const response = buildWorkbenchStartResponse();
     const run: WorkbenchRunHistoryRow = {
@@ -1213,6 +1317,9 @@ describe("Workbench UI summary", () => {
 
     expect(toWorkbenchStartResponseFromHistoryRun(run)).toEqual({
       result: run.result,
+      workflow: expect.objectContaining({
+        current_stage: "gather",
+      }),
       retrieval: run.retrieval,
       invocation: run.invocation,
       run_history: {

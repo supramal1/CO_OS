@@ -16,6 +16,37 @@ describe("Workbench pre-flight prompt", () => {
     expect(prompt).toContain("retrieved_context");
     expect(prompt).not.toMatch(/poc|demo|until connectors are wired/i);
   });
+
+  it("adds effective profile context without leaking raw profile source urls", () => {
+    const prompt = buildPreflightPrompt({
+      ask: "Draft the status update in my usual style.",
+      retrievedContext: [],
+      profileContext: {
+        role: "Strategist",
+        current_work: ["Nike QBR"],
+        communication_style: "Short, direct bullets",
+        challenge_style: "Challenge weak assumptions",
+        working_context: ["Prefers source-traced context"],
+        do_not_assume: ["Do not invent client facts"],
+        source_refs: [
+          {
+            source: "notion",
+            label: "Notion: Voice",
+            url: "https://notion.test/raw-page-id",
+            page_title: "Voice",
+          },
+        ],
+        updated_at: "2026-04-30T10:00:00.000Z",
+        warnings: [],
+        summary_text: "Communication style: Short, direct bullets",
+      },
+    });
+
+    expect(prompt).toContain("Effective staff profile");
+    expect(prompt).toContain("Communication style: Short, direct bullets");
+    expect(prompt).toContain("Notion: Voice");
+    expect(prompt).not.toContain("raw-page-id");
+  });
 });
 
 describe("Workbench pre-flight parsing", () => {

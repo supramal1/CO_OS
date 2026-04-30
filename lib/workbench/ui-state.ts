@@ -1,8 +1,3 @@
-import type {
-  WorkbenchWorkflowStage,
-  WorkbenchWorkflowState,
-} from "./workflow";
-
 export type WorkbenchStaffConnectorSource =
   | "notion"
   | "drive"
@@ -48,7 +43,6 @@ export type WorkbenchProfileUpdateInput =
       targetLabel?: string | null;
       canUndo?: boolean | null;
       message?: string | null;
-      reason?: string | null;
     };
 
 export type WorkbenchProfileUpdateStatus = {
@@ -58,64 +52,6 @@ export type WorkbenchProfileUpdateStatus = {
   actionLabel?: "Undo last profile update";
   actionDisabled?: boolean;
 };
-
-export type WorkbenchProfileLearningControl = {
-  id: "view" | "undo" | "remember" | "not_now" | "edit";
-  label: "View" | "Undo" | "Remember" | "Not now" | "Edit";
-  enabled: boolean;
-};
-
-export type WorkbenchStageRow = {
-  id: WorkbenchWorkflowStage["id"];
-  label: string;
-  state: WorkbenchWorkflowStage["status"];
-  summary: string;
-};
-
-const DEFAULT_WORKBENCH_STAGE_ROWS: WorkbenchStageRow[] = [
-  {
-    id: "understand",
-    label: "Understand",
-    state: "available",
-    summary: "Decode the task.",
-  },
-  {
-    id: "gather",
-    label: "Gather",
-    state: "locked",
-    summary: "Retrieve relevant context.",
-  },
-  {
-    id: "make",
-    label: "Make",
-    state: "locked",
-    summary: "Generate a first working artefact.",
-  },
-  {
-    id: "review",
-    label: "Review",
-    state: "locked",
-    summary: "Check quality before saving.",
-  },
-  {
-    id: "save",
-    label: "Save",
-    state: "locked",
-    summary: "Save the result back to the work environment.",
-  },
-];
-
-export function deriveWorkbenchStageRows(
-  workflow: WorkbenchWorkflowState | null | undefined,
-): WorkbenchStageRow[] {
-  if (!workflow?.stages?.length) return DEFAULT_WORKBENCH_STAGE_ROWS;
-  return workflow.stages.map((stage) => ({
-    id: stage.id,
-    label: stage.label,
-    state: stage.status,
-    summary: stage.summary,
-  }));
-}
 
 export function toStaffWorkbenchStatusLabel(
   source: WorkbenchStaffConnectorSource,
@@ -158,8 +94,15 @@ export function sanitizeWorkbenchDetail(
   if (!detail) return fallback;
 
   const lower = detail.toLowerCase();
+  if (/anthropic|x-api-key|api key|api_key/.test(lower)) {
+    return "Workbench cannot reach the draft generator. Check the local AI key and restart the dev server.";
+  }
   if (/notion|page|parent/.test(lower)) return "Repair Workbench pages";
-  if (/google|oauth|token|scope|grant|refresh|calendar/.test(lower)) {
+  if (
+    /google|oauth|token|scope|grant|refresh|calendar|authenticate|authentication|encrypted|decrypt|unsupported state/.test(
+      lower,
+    )
+  ) {
     return "Reconnect Google Workspace";
   }
   if (/drive|folder/.test(lower)) return "Set up Drive folder";
@@ -253,31 +196,20 @@ export function deriveWorkbenchProfileUpdateStatus(
   return {
     state: "error",
     label: "Profile update paused",
-    detail: sanitizeWorkbenchDetail(input.message, "Check profile update"),
+    detail: profileUpdateErrorDetail(input.message),
   };
 }
 
-export function deriveWorkbenchProfileLearningControls(
-  input: WorkbenchProfileUpdateInput,
-): WorkbenchProfileLearningControl[] {
-  if (!input || input.status === "idle") return [];
-
-  if (input.status === "updated") {
-    return [
-      { id: "view", label: "View", enabled: true },
-      { id: "undo", label: "Undo", enabled: input.canUndo !== false },
-    ];
+function profileUpdateErrorDetail(message: string | null | undefined): string {
+  const lower = message?.toLowerCase() ?? "";
+  if (
+    /notion|page|parent|unsupported state|authenticate|authentication|encrypted|decrypt/.test(
+      lower,
+    )
+  ) {
+    return "Reconnect Notion to save profile updates.";
   }
-
-  if (input.status === "skipped") {
-    return [
-      { id: "remember", label: "Remember", enabled: true },
-      { id: "not_now", label: "Not now", enabled: true },
-      { id: "edit", label: "Edit", enabled: true },
-    ];
-  }
-
-  return [];
+  return sanitizeWorkbenchDetail(message, "Check profile update");
 }
 
 function setupDetail(source: WorkbenchStaffConnectorSource): string {

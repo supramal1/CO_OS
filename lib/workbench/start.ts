@@ -2,10 +2,14 @@ import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { estimatedBeforeMinutesFor } from "./baselines";
 import { buildWorkbenchInvocationLog } from "./invocation-log";
-import { processWorkbenchRunLearning } from "./learning";
+import {
+  listWorkbenchProfileUpdates,
+  processWorkbenchRunLearning,
+} from "./learning";
 import { createWorkbenchNotionClient } from "./notion-client";
 import { createWorkbenchNotionTokenStore } from "./notion-token-store";
 import { persistWorkbenchInvocation } from "./persistence";
+import { compileWorkbenchProfile } from "./profile";
 import { persistWorkbenchRun } from "./run-history";
 import {
   WORKBENCH_PREFLIGHT_SKILL_NAME,
@@ -15,7 +19,10 @@ import {
 import { gatherWorkbenchRetrieval } from "./retrieval";
 import { getUserWorkbenchConfig } from "./retrieval/config";
 import { loadWorkbenchSkill } from "./skill-loader";
-import type { WorkbenchStartResponse } from "./types";
+import type {
+  WorkbenchRetrievedContext,
+  WorkbenchStartResponse,
+} from "./types";
 import { buildWorkbenchWorkflowState } from "./workflow";
 
 const MODEL = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6";
@@ -35,10 +42,18 @@ export async function runWorkbenchStart(
     input.apiKey,
     WORKBENCH_PREFLIGHT_SKILL_NAME,
   );
+  const config = await getUserWorkbenchConfig(input.userId);
   const retrieval = await gatherWorkbenchRetrieval({
     ask: input.ask,
     userId: input.userId,
     apiKey: input.apiKey,
+    config,
+  });
+  const profileUpdates = await loadProfileUpdates(input.userId);
+  const profile = compileWorkbenchProfile({
+    notionItems: retrieval.context.filter(isNotionContext),
+    userConfig: config,
+    profileUpdates,
   });
 
   const anthropic = new Anthropic({ apiKey: input.anthropicApiKey });
@@ -58,6 +73,7 @@ export async function runWorkbenchStart(
           retrievedContext: retrieval.context,
           retrievalStatuses: retrieval.statuses,
           retrievalSources: retrieval.sources,
+          profileContext: profile,
         }),
       },
     ],
@@ -76,7 +92,7 @@ export async function runWorkbenchStart(
     estimatedBeforeMinutesFor(taskType);
   result.time_estimate.estimated_before_minutes = estimatedBeforeMinutes;
   result.time_estimate.task_type = taskType;
-  const workflow = buildWorkbenchWorkflowState({ result, retrieval });
+  const workflow = buildWorkbenchWorkflowState(result);
 
   const invocation = buildWorkbenchInvocationLog({
     userId: input.userId,
@@ -106,12 +122,28 @@ export async function runWorkbenchStart(
   });
   return {
     result,
-    invocation,
     workflow,
+    profile,
+    invocation,
     retrieval,
     run_history: runHistory,
     ...(profileUpdate ? { profile_update: profileUpdate } : {}),
   };
+}
+
+async function loadProfileUpdates(
+  userId: string,
+): Promise<Parameters<typeof compileWorkbenchProfile>[0]["profileUpdates"]> {
+  const result = await listWorkbenchProfileUpdates({ userId });
+  if (result.status === "ok") return result.updates;
+  if (result.status === "error") {
+    console.warn("[workbench] profile update lookup failed:", result.detail);
+  }
+  return null;
+}
+
+function isNotionContext(item: WorkbenchRetrievedContext): boolean {
+  return item.source_type === "notion";
 }
 
 async function persistRunHistory(input: WorkbenchStartResponse & {

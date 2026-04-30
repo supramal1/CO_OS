@@ -95,8 +95,9 @@ describe("Workbench make stage", () => {
 
     expect(result).toEqual({
       status: "error",
-      reason: "workbench_make_failed",
-      message: "Workbench could not generate a draft. Please try again.",
+      reason: "anthropic_api_key_rejected",
+      message:
+        "Anthropic rejected ANTHROPIC_API_KEY. Update the local key and restart the dev server.",
     });
     expect(JSON.stringify(result)).not.toContain("invalid x-api-key");
     expect(JSON.stringify(result)).not.toContain("req_secret");

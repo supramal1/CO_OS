@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   persistWorkbenchInvocation: vi.fn(),
   persistWorkbenchRun: vi.fn(),
   processWorkbenchRunLearning: vi.fn(),
+  listWorkbenchProfileUpdates: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({
@@ -38,6 +39,8 @@ vi.mock("@/lib/workbench/run-history", () => ({
 }));
 
 vi.mock("@/lib/workbench/learning", () => ({
+  listWorkbenchProfileUpdates: (...args: unknown[]) =>
+    mocks.listWorkbenchProfileUpdates(...args),
   processWorkbenchRunLearning: (...args: unknown[]) =>
     mocks.processWorkbenchRunLearning(...args),
 }));
@@ -71,6 +74,7 @@ beforeEach(() => {
   mocks.persistWorkbenchInvocation.mockReset();
   mocks.persistWorkbenchRun.mockReset();
   mocks.processWorkbenchRunLearning.mockReset();
+  mocks.listWorkbenchProfileUpdates.mockReset();
   process.env.ANTHROPIC_API_KEY = "anthropic-test";
   process.env.ANTHROPIC_MODEL = "claude-sonnet-test";
   mocks.persistWorkbenchRun.mockResolvedValue({
@@ -80,8 +84,13 @@ beforeEach(() => {
   mocks.gatherWorkbenchRetrieval.mockResolvedValue({
     sources: [],
     context: [],
+    statuses: [],
     warnings: [],
     generated_at: "2026-04-29T12:00:00.000Z",
+  });
+  mocks.listWorkbenchProfileUpdates.mockResolvedValue({
+    status: "ok",
+    updates: [],
   });
 });
 
@@ -132,32 +141,31 @@ describe("POST /api/workbench/start", () => {
 
     expect(body.result.decoded_task.summary).toBe("Respond to an EM ask");
     expect(body.workflow).toMatchObject({
-      current_stage: "understand",
+      current_stage: "gather",
       stages: [
         {
-          id: "understand",
-          label: "Understand",
+          stage: "understand",
           status: "complete",
         },
         {
-          id: "gather",
-          label: "Gather",
+          stage: "context_needed",
           status: "complete",
         },
         {
-          id: "make",
-          label: "Make",
-          status: "available",
+          stage: "gather",
+          status: "ready",
         },
         {
-          id: "review",
-          label: "Review",
-          status: "locked",
+          stage: "make",
+          status: "ready",
         },
         {
-          id: "save",
-          label: "Save",
-          status: "locked",
+          stage: "review",
+          status: "pending",
+        },
+        {
+          stage: "save",
+          status: "pending",
         },
       ],
     });

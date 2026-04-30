@@ -3,10 +3,7 @@
 import { signIn } from "next-auth/react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import type {
-  WorkbenchApproachStep,
-  WorkbenchMissingContext,
   WorkbenchPreflightResult,
-  WorkbenchRetrievedContext,
   WorkbenchStartResponse,
 } from "@/lib/workbench/types";
 import type {
@@ -15,23 +12,30 @@ import type {
 } from "@/lib/workbench/presend-types";
 import type { WorkbenchOutputActionOutcome } from "@/lib/workbench/output-actions";
 import type { WorkbenchOnboardingDraft } from "@/lib/workbench/personalisation";
-import type { WorkbenchArtifact, WorkbenchMakeResult } from "@/lib/workbench/make";
-import type { WorkbenchReviewResult } from "@/lib/workbench/review";
 import type { WorkbenchUserConfig } from "@/lib/workbench/retrieval/types";
+import type {
+  WorkbenchResumeAction,
+  WorkbenchResumeSafeResult,
+} from "@/lib/workbench/resume";
+import type {
+  WorkbenchArtifact,
+  WorkbenchMakeResult,
+} from "@/lib/workbench/make";
+import type { WorkbenchReviewResult } from "@/lib/workbench/review";
 import type { WorkbenchRunHistoryRow } from "@/lib/workbench/run-history";
 import {
   deriveWorkbenchPersonalisationSummary,
-  deriveWorkbenchProfileLearningControls,
   deriveWorkbenchProfileUpdateStatus,
-  deriveWorkbenchStageRows,
   sanitizeWorkbenchDetail,
   toStaffWorkbenchDetail,
   toStaffWorkbenchStatusLabel,
   type WorkbenchProfileUpdateInput,
   type WorkbenchProfileUpdateStatus,
-  type WorkbenchProfileLearningControl,
-  type WorkbenchStageRow,
 } from "@/lib/workbench/ui-state";
+import {
+  buildWorkbenchWorkflowState,
+  type WorkbenchWorkflowState,
+} from "@/lib/workbench/workflow";
 
 type RunState =
   | { status: "idle" }
@@ -41,9 +45,11 @@ type RunState =
 
 type WorkbenchRetrievalRow = {
   source: string;
+  label: string;
   status: string;
   itemsCount: number;
   reason: string | null;
+  detail: string;
   warnings: string[];
 };
 
@@ -204,6 +210,21 @@ type WorkbenchRunPaneSummary = {
   detail: string;
 };
 
+type WorkbenchWizardStepId = "setup" | "context" | "generate" | "review";
+
+type WorkbenchWizardStep = {
+  id: WorkbenchWizardStepId;
+  label: string;
+  caption: string;
+};
+
+type WorkbenchStageRow = {
+  id: "understand" | "gather" | "make" | "review" | "save";
+  label: string;
+  state: "complete" | "active" | "available" | "locked" | "error";
+  summary: string;
+};
+
 type WorkbenchPostRunAction =
   | {
       id: "presend";
@@ -269,6 +290,18 @@ type PostRunState =
     }
   | { status: "error"; actionId: WorkbenchPostRunAction["id"]; message: string };
 
+type WorkbenchWizardAction = {
+  label: string;
+  onClick?: () => void;
+  disabled?: boolean;
+};
+
+type ContextResumeState =
+  | { status: "idle" }
+  | { status: "running"; action: WorkbenchResumeAction }
+  | { status: "loaded"; resume: WorkbenchResumeSafeResult }
+  | { status: "error"; action: WorkbenchResumeAction; message: string };
+
 type MakeState =
   | { status: "idle" }
   | { status: "running" }
@@ -280,6 +313,10 @@ type ReviewState =
   | { status: "running" }
   | { status: "loaded"; result: WorkbenchReviewResult }
   | { status: "error"; message: string };
+
+type WorkbenchResumeRouteResponse =
+  | { resume: WorkbenchResumeSafeResult }
+  | { error?: string; detail?: string };
 
 type WorkbenchRunHistoryDisplayRow = {
   id: string;
@@ -304,24 +341,19 @@ type WorkbenchConnectorManagementState =
   | { status: "loaded"; actionId: string; message: string }
   | { status: "error"; actionId: string; message: string };
 
-type WorkbenchConnectorManagementResponse = {
-  source?: WorkbenchConnectorManagementSource;
-  status?: string;
-  action?: string;
-  next_url?: string;
-  message?: string;
-  reason?: string;
-  error?: string;
-  detail?: string;
-};
-
 const CALENDAR_READONLY_SCOPE =
   "https://www.googleapis.com/auth/calendar.readonly";
 const NOTION_SETUP_HREF = "/api/workbench/notion/start";
 const GOOGLE_SETUP_HREF = "/workbench?google_oauth=start";
 const WORKBENCH_CALLBACK_URL = "/workbench?google_oauth=returned";
 const WORKBENCH_PRESEND_ROUTE_AVAILABLE = true;
-const WORKBENCH_WORKFLOW_LABEL = "Understand Gather Make Review Save";
+
+const WORKBENCH_WIZARD_STEPS: WorkbenchWizardStep[] = [
+  { id: "setup", label: "Setup", caption: "Connect and start" },
+  { id: "context", label: "Context", caption: "Fill the gaps" },
+  { id: "generate", label: "Generate", caption: "Create the draft" },
+  { id: "review", label: "Review", caption: "Refine and ship" },
+];
 
 const CONNECTOR_LABELS: Array<Pick<WorkbenchConnectorRow, "id" | "label">> = [
   { id: "notion", label: "Notion" },
@@ -337,17 +369,6 @@ const EMPTY_CONFIG_FORM: WorkbenchConfigForm = {
   voice_register: "",
   feedback_style: "",
   friction_tasks: "",
-};
-
-const EMPTY_ONBOARDING_FORM: WorkbenchOnboardingForm = {
-  role_title: "",
-  current_focus_bullets: "",
-  work_type_chips: [],
-  work_type_other: "",
-  communication_style: [],
-  challenge_style: [],
-  helpful_context: [],
-  helpful_context_other: "",
 };
 
 const WORKBENCH_WORK_TYPE_OPTIONS = [
@@ -471,6 +492,17 @@ export function buildWorkbenchOnboardingPayload(
       form.helpful_context_other,
     ]),
   };
+}
+
+export function hasWorkbenchProfileSeed(
+  config: WorkbenchStaffConfig | null | undefined,
+): boolean {
+  return Boolean(
+    config?.notion_parent_page_id?.trim() ||
+      config?.voice_register?.trim() ||
+      config?.feedback_style?.trim() ||
+      config?.friction_tasks?.some((item) => item.trim()),
+  );
 }
 
 export function shouldShowGoogleConnect(
@@ -600,6 +632,14 @@ export function deriveWorkbenchOAuthNotice(
         params.get("reason"),
         "Repair Workbench pages",
       ),
+    };
+  }
+
+  if (params.get("notion_setup") === "connected") {
+    return {
+      tone: "info",
+      label: "Notion connected",
+      detail: "Workbench pages are ready.",
     };
   }
 
@@ -930,6 +970,7 @@ export function deriveWorkbenchConnectorSummary(
 export function deriveWorkbenchUiSummary(response: WorkbenchStartResponse) {
   const result = response.result;
   const retrieval = response.retrieval;
+  const workflow = readWorkbenchWorkflow(response);
   const beforeMinutes =
     result.time_estimate.estimated_before_minutes ||
     response.invocation.estimated_before_minutes;
@@ -951,6 +992,8 @@ export function deriveWorkbenchUiSummary(response: WorkbenchStartResponse) {
       savedMinutes == null ? "Savings pending" : `${(savedMinutes / 60).toFixed(1)}h saved`,
     warningCount,
     retrievalRows,
+    currentStage: workflow.current_stage,
+    missingContextCount: workflow.missing_required_context_count,
   };
 }
 
@@ -977,9 +1020,9 @@ export function deriveWorkbenchRunPaneSummary(
 
   return {
     tone: "idle",
-    label: "Ready for task",
-    title: "Ready to run a task",
-    detail: "Paste the task request and run Workbench.",
+    label: "Ready",
+    title: "Ready to start",
+    detail: "Paste what you are working on and start Workbench.",
   };
 }
 
@@ -988,11 +1031,13 @@ export function deriveWorkbenchPostRunActions(
   options?: {
     presendRouteAvailable?: boolean;
     reviewedArtifact?: WorkbenchPresendReviewedArtifact | null;
+    requireReviewedArtifact?: boolean;
   },
 ): WorkbenchPostRunAction[] {
   const presendRouteAvailable =
     options?.presendRouteAvailable ?? WORKBENCH_PRESEND_ROUTE_AVAILABLE;
   const feedbackActions = buildWorkbenchFeedbackActions(response);
+  const reviewedArtifact = options?.reviewedArtifact ?? null;
 
   if (!presendRouteAvailable) {
     return [
@@ -1007,21 +1052,32 @@ export function deriveWorkbenchPostRunActions(
     ];
   }
 
+  if (options?.requireReviewedArtifact && !reviewedArtifact) {
+    return [
+      {
+        id: "presend",
+        label: "Save reviewed draft",
+        detail: "Generate and review a draft before saving it.",
+        status: "disabled",
+        disabledReason: "review_required",
+      },
+      ...feedbackActions,
+    ];
+  }
+
   return [
     {
       id: "presend",
-      label: "Prepare save-back artifact",
+      label: reviewedArtifact ? "Save reviewed draft" : "Prepare save-back artifact",
       detail:
-        "Run pre-send checks and save the task output to Drive when required.",
+        "Run final checks and save the work to Drive when required.",
       status: "ready",
       endpoint: "/api/workbench/presend",
       method: "POST",
       payload: {
         preflight_result: response.result,
         artifact_spec_input: buildWorkbenchPostRunArtifactSpecInput(response),
-        ...(options?.reviewedArtifact
-          ? { reviewed_artifact: options.reviewedArtifact }
-          : {}),
+        ...(reviewedArtifact ? { reviewed_artifact: reviewedArtifact } : {}),
       },
     },
     ...feedbackActions,
@@ -1063,6 +1119,7 @@ export function toWorkbenchStartResponseFromHistoryRun(
 ): WorkbenchStartResponse {
   return {
     result: run.result,
+    workflow: buildWorkbenchWorkflowState(run.result),
     retrieval: run.retrieval,
     invocation: run.invocation,
     run_history: {
@@ -1119,23 +1176,57 @@ function deriveRetrievalRows(
   if (response.retrieval.sources?.length) {
     return response.retrieval.sources.map((source) => {
       const status = statusesBySource.get(source.source);
+      const rawDetail = [status?.reason, ...source.warnings]
+        .filter(Boolean)
+        .join(" | ");
       return {
         source: source.source,
+        label: retrievalSourceLabel(source.source),
         status: source.status,
         itemsCount: source.items.length,
         reason: status?.reason ?? null,
-        warnings: source.warnings,
+        detail: retrievalDetail(source.source, source.status, rawDetail),
+        warnings: source.warnings.map((warning) =>
+          retrievalDetail(source.source, source.status, warning),
+        ),
       };
     });
   }
 
   return response.retrieval.statuses.map((status) => ({
     source: status.source,
+    label: retrievalSourceLabel(status.source),
     status: status.status,
     itemsCount: status.items_count,
     reason: status.reason ?? null,
+    detail: retrievalDetail(status.source, status.status, status.reason),
     warnings: [],
   }));
+}
+
+function retrievalSourceLabel(source: WorkbenchRetrievalRow["source"]): string {
+  if (source === "cornerstone") return "Cornerstone";
+  if (source === "notion") return "Notion";
+  if (source === "calendar") return "Calendar";
+  return source;
+}
+
+function retrievalDetail(
+  source: WorkbenchRetrievalRow["source"],
+  status: string,
+  rawDetail?: string | null,
+): string {
+  if (status === "available" || status === "ok") return "Connected";
+  if (source === "notion") {
+    return sanitizeWorkbenchDetail(rawDetail, "Repair Workbench pages");
+  }
+  if (source === "calendar") {
+    return sanitizeWorkbenchDetail(rawDetail, "Reconnect Google Workspace");
+  }
+  if (source === "cornerstone") {
+    return sanitizeWorkbenchDetail(rawDetail, "Check memory connection");
+  }
+  return sanitizeWorkbenchDetail(rawDetail, "Check setup");
 }
 
 export function WorkbenchShell() {
@@ -1143,37 +1234,20 @@ export function WorkbenchShell() {
   const [state, setState] = useState<RunState>({ status: "idle" });
   const [connectorState, setConnectorState] =
     useState<WorkbenchConnectorState>({ status: "loading" });
-  const [configForm, setConfigForm] = useState<WorkbenchConfigForm>(
-    EMPTY_CONFIG_FORM,
-  );
-  const [onboardingForm, setOnboardingForm] = useState<WorkbenchOnboardingForm>(
-    EMPTY_ONBOARDING_FORM,
-  );
-  const [onboardingState, setOnboardingState] =
-    useState<WorkbenchOnboardingState>({ status: "idle" });
-  const [setupState, setSetupState] = useState<SetupState>({ status: "idle" });
-  const [healthRows, setHealthRows] = useState<WorkbenchHealthRow[]>([]);
-  const [healthGeneratedAt, setHealthGeneratedAt] = useState<string | null>(null);
-  const [oauthNotice, setOauthNotice] = useState<WorkbenchOAuthNotice | null>(
-    null,
-  );
   const [runHistoryState, setRunHistoryState] =
     useState<WorkbenchRunHistoryState>({ status: "loading" });
-  const [connectorManagementState, setConnectorManagementState] =
-    useState<WorkbenchConnectorManagementState>({ status: "idle" });
+  const [wizardStep, setWizardStep] =
+    useState<WorkbenchWizardStepId>("setup");
 
   const canSubmit = ask.trim().length > 0 && state.status !== "loading";
+  const loadedResponse = state.status === "loaded" ? state.response : null;
   const selectedRunId =
-    state.status === "loaded" && state.response.run_history?.status === "stored"
-      ? state.response.run_history.id
+    loadedResponse?.run_history?.status === "stored"
+      ? loadedResponse.run_history.id
       : null;
-  const connectorSummary = useMemo(
-    () => deriveWorkbenchConnectorSummary(connectorState),
-    [connectorState],
-  );
   const setupAffordances = useMemo(
-    () => deriveWorkbenchSetupAffordances({ connectorState, healthRows }),
-    [connectorState, healthRows],
+    () => deriveWorkbenchSetupAffordances({ connectorState, healthRows: [] }),
+    [connectorState],
   );
   const setupSummary = useMemo(
     () => deriveWorkbenchSetupSummary(setupAffordances),
@@ -1182,6 +1256,27 @@ export function WorkbenchShell() {
   const runPaneSummary = useMemo(
     () => deriveWorkbenchRunPaneSummary(state),
     [state],
+  );
+  const loadedUiSummary = useMemo(
+    () => (loadedResponse ? deriveWorkbenchUiSummary(loadedResponse) : null),
+    [loadedResponse],
+  );
+  const loadedProfileUpdateStatus = useMemo(
+    () =>
+      loadedResponse
+        ? deriveWorkbenchProfileUpdateStatus(
+            readWorkbenchProfileUpdate(loadedResponse),
+          )
+        : null,
+    [loadedResponse],
+  );
+  const setupProfileSummary = useMemo(
+    () =>
+      deriveWorkbenchPersonalisationSummary({
+        setupReady: setupSummary.state === "ready",
+        config: connectorState.status === "loaded" ? connectorState.config : null,
+      }),
+    [connectorState, setupSummary.state],
   );
 
   const loadConfig = useCallback(async (options?: { silent?: boolean }) => {
@@ -1215,7 +1310,6 @@ export function WorkbenchShell() {
         config,
         google_readiness: payload?.google_readiness ?? null,
       });
-      setConfigForm(getInitialWorkbenchConfigForm(config));
     } catch (err) {
       setConnectorState({
         status: "error",
@@ -1240,8 +1334,6 @@ export function WorkbenchShell() {
 
   useEffect(() => {
     const search = window.location.search;
-    setOauthNotice(deriveWorkbenchOAuthNotice(search));
-
     if (isGoogleOAuthStartUrl(`${window.location.pathname}${search}`)) {
       window.history.replaceState(null, "", "/workbench");
       void signIn("google", { callbackUrl: WORKBENCH_CALLBACK_URL });
@@ -1298,15 +1390,16 @@ export function WorkbenchShell() {
     };
   }, [loadRunHistory]);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!canSubmit) return;
+  const runWorkbenchAsk = useCallback(async (nextAsk: string) => {
+    const normalizedAsk = nextAsk.trim();
+    if (!normalizedAsk) return;
+    setAsk(nextAsk);
     setState({ status: "loading" });
     try {
       const res = await fetch("/api/workbench/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ask }),
+        body: JSON.stringify({ ask: normalizedAsk }),
       });
       const body = (await res.json().catch(() => null)) as
         | WorkbenchStartResponse
@@ -1322,6 +1415,7 @@ export function WorkbenchShell() {
         throw new Error(detail);
       }
       setState({ status: "loaded", response: body as WorkbenchStartResponse });
+      setWizardStep("context");
       await loadRunHistory({ silent: true });
     } catch (err) {
       setState({
@@ -1329,6 +1423,11 @@ export function WorkbenchShell() {
         message: err instanceof Error ? err.message : String(err),
       });
     }
+  }, [loadRunHistory]);
+
+  async function handleStart() {
+    if (!canSubmit) return;
+    await runWorkbenchAsk(ask);
   }
 
   function handleOpenHistoryRun(run: WorkbenchRunHistoryRow) {
@@ -1337,389 +1436,598 @@ export function WorkbenchShell() {
       status: "loaded",
       response: toWorkbenchStartResponseFromHistoryRun(run),
     });
-  }
-
-  async function handleConfigSave(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSetupState({ status: "saving" });
-    try {
-      const res = await fetch("/api/workbench/config", {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify(buildWorkbenchConfigPayload(configForm)),
-      });
-      const body = (await res.json().catch(() => null)) as
-        | WorkbenchConfigResponse
-        | { error?: string; detail?: string }
-        | null;
-
-      if (!res.ok) {
-        const detail =
-          body && "detail" in body && body.detail
-            ? body.detail
-            : body && "error" in body && body.error
-              ? body.error
-              : `HTTP ${res.status}`;
-        throw new Error(detail);
-      }
-
-      const payload = body as WorkbenchConfigResponse | null;
-      const config = payload?.config ?? null;
-      setConnectorState({
-        status: "loaded",
-        config,
-        google_readiness: payload?.google_readiness ?? null,
-      });
-      setConfigForm(getInitialWorkbenchConfigForm(config));
-      await loadConfig({ silent: true });
-      setSetupState({ status: "saved" });
-    } catch (err) {
-      setSetupState({
-        status: "error",
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  async function handleOnboardingDraft(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setOnboardingState({ status: "drafting" });
-    try {
-      const res = await fetch("/api/workbench/onboarding", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify({
-          action: "draft",
-          payload: buildWorkbenchOnboardingPayload(onboardingForm, configForm),
-        }),
-      });
-      const body = (await res.json().catch(() => null)) as
-        | { status?: string; draft?: WorkbenchOnboardingDraft; message?: string }
-        | { error?: string; fields?: string[]; message?: string }
-        | null;
-
-      if (!res.ok || !body || !("draft" in body) || !body.draft) {
-        const detail =
-          body && "message" in body && body.message
-            ? body.message
-            : body && "fields" in body && body.fields?.length
-              ? `Add ${body.fields.join(", ")}.`
-              : body && "error" in body && body.error
-                ? body.error
-                : `HTTP ${res.status}`;
-        throw new Error(detail);
-      }
-
-      setOnboardingState({ status: "drafted", draft: body.draft });
-    } catch (err) {
-      setOnboardingState({
-        status: "error",
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  async function handleOnboardingSave() {
-    if (onboardingState.status !== "drafted") return;
-    const draft = onboardingState.draft;
-    setOnboardingState({ status: "saving", draft });
-    try {
-      const res = await fetch("/api/workbench/onboarding", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify({
-          action: "save",
-          payload: buildWorkbenchOnboardingPayload(onboardingForm, configForm),
-          draft,
-        }),
-      });
-      const body = (await res.json().catch(() => null)) as
-        | { status?: string; message?: string }
-        | { error?: string; message?: string }
-        | null;
-
-      if (!res.ok) {
-        const detail =
-          body && "message" in body && body.message
-            ? body.message
-            : body && "error" in body && body.error
-              ? body.error
-              : `HTTP ${res.status}`;
-        throw new Error(detail);
-      }
-
-      await loadConfig({ silent: true });
-      setOnboardingState({
-        status: "saved",
-        message:
-          body && "message" in body && body.message
-            ? body.message
-            : "Your Workbench profile is set up.",
-      });
-    } catch (err) {
-      setOnboardingState({
-        status: "error",
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  async function handleCheck() {
-    setSetupState({ status: "checking" });
-    try {
-      const res = await fetch("/api/workbench/check", {
-        method: "GET",
-        headers: { Accept: "application/json" },
-      });
-      const body = (await res.json().catch(() => null)) as
-        | WorkbenchCheckResponse
-        | { error?: string; detail?: string }
-        | null;
-
-      if (!res.ok) {
-        const detail =
-          body && "detail" in body && body.detail
-            ? body.detail
-            : body && "error" in body && body.error
-              ? body.error
-              : `HTTP ${res.status}`;
-        throw new Error(detail);
-      }
-
-      const payload = body as WorkbenchCheckResponse | null;
-      setHealthRows(toWorkbenchHealthRows(payload));
-      setHealthGeneratedAt(payload?.generated_at ?? null);
-      setSetupState({ status: "idle" });
-    } catch (err) {
-      setSetupState({
-        status: "error",
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  async function handleConnectorManagementAction(
-    action: WorkbenchConnectorManagementAction,
-  ) {
-    setConnectorManagementState({ status: "running", actionId: action.id });
-    try {
-      const res = await fetch(action.endpoint, {
-        method: action.method,
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify(action.payload),
-      });
-      const body = (await res.json().catch(() => null)) as
-        | WorkbenchConnectorManagementResponse
-        | null;
-
-      if (!res.ok) {
-        const detail =
-          body && body.detail
-            ? body.detail
-            : body && body.message
-              ? body.message
-              : body && body.error
-                ? body.error
-                : `HTTP ${res.status}`;
-        throw new Error(detail);
-      }
-
-      const message =
-        body?.message ??
-        body?.reason ??
-        `${action.label} request accepted.`;
-      setConnectorManagementState({
-        status: "loaded",
-        actionId: action.id,
-        message,
-      });
-
-      if (body?.next_url) {
-        if (isGoogleOAuthStartUrl(body.next_url)) {
-          void signIn("google", { callbackUrl: WORKBENCH_CALLBACK_URL });
-          return;
-        }
-        window.location.assign(body.next_url);
-        return;
-      }
-
-      await loadConfig({ silent: true });
-      await handleCheck();
-    } catch (err) {
-      setConnectorManagementState({
-        status: "error",
-        actionId: action.id,
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  function handleNotionSetup() {
-    window.location.assign(NOTION_SETUP_HREF);
+    setWizardStep("context");
   }
 
   return (
     <div
       style={{
         height: "calc(100vh - var(--shell-h))",
-        display: "grid",
-        gridTemplateColumns: "minmax(340px, 420px) minmax(0, 1fr)",
+        display: "flex",
+        flexDirection: "column",
         minHeight: 0,
+        background: "var(--bg)",
       }}
     >
-      <section
+      <WorkbenchWizardStepper
+        current={wizardStep}
+        onJump={(step) => {
+          if (canOpenWorkbenchWizardStep(step, loadedResponse)) {
+            setWizardStep(step);
+          }
+        }}
+        canJumpTo={(step) => canOpenWorkbenchWizardStep(step, loadedResponse)}
+      />
+
+      <div
         style={{
-          borderRight: "1px solid var(--rule)",
-          display: "flex",
-          flexDirection: "column",
+          flex: 1,
           minHeight: 0,
-          background: "var(--panel)",
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1fr) 320px",
+          overflow: "hidden",
         }}
       >
-        <header
+        <main
+          aria-live="polite"
           style={{
-            padding: "20px 24px 16px",
-            borderBottom: "1px solid var(--rule)",
+            minHeight: 0,
+            overflow: "hidden",
           }}
         >
-          <SectionEyebrow>Workbench</SectionEyebrow>
-          <h1
-            style={{
-              margin: "8px 0 0",
-              fontFamily: "var(--font-plex-serif)",
-              fontSize: 34,
-              lineHeight: 1.05,
-              fontWeight: 400,
-              letterSpacing: 0,
-            }}
-          >
-            Task run
-          </h1>
-        </header>
+          {wizardStep === "setup" ? (
+            <WorkbenchSetupStep
+              ask={ask}
+              canSubmit={canSubmit}
+              runState={state}
+              runPaneSummary={runPaneSummary}
+              onAskChange={setAsk}
+              onStart={handleStart}
+              setupSummary={setupSummary}
+              profileSummary={setupProfileSummary}
+            />
+          ) : loadedResponse ? (
+            <ResultView
+              response={loadedResponse}
+              ask={ask}
+              activeStep={wizardStep}
+              onStepChange={setWizardStep}
+            />
+          ) : (
+            <RunPaneStateView summary={runPaneSummary} />
+          )}
+        </main>
 
-        <ConnectorReadinessPanel summary={connectorSummary} />
-
-        <WorkbenchSetupPanel
-          form={configForm}
-          config={connectorState.status === "loaded" ? connectorState.config : null}
-          onboardingForm={onboardingForm}
-          onboardingState={onboardingState}
-          onFormChange={setConfigForm}
-          onOnboardingFormChange={setOnboardingForm}
-          onSave={handleConfigSave}
-          onOnboardingDraft={handleOnboardingDraft}
-          onOnboardingSave={handleOnboardingSave}
-          onSetupNotion={handleNotionSetup}
-          onCheck={handleCheck}
-          onConnectorManagementAction={handleConnectorManagementAction}
-          onConnectGoogle={() =>
-            signIn("google", { callbackUrl: WORKBENCH_CALLBACK_URL })
-          }
-          setupState={setupState}
-          connectorManagementState={connectorManagementState}
-          setupAffordances={setupAffordances}
-          setupSummary={setupSummary}
-          oauthNotice={oauthNotice}
-          healthRows={healthRows}
-          healthGeneratedAt={healthGeneratedAt}
-        />
-
-        <RunHistoryPanel
-          state={runHistoryState}
+        <WorkbenchWizardSideRail
+          profileSummary={setupProfileSummary}
+          response={loadedResponse}
+          uiSummary={loadedUiSummary}
+          profileUpdateStatus={loadedProfileUpdateStatus}
+          runHistoryState={runHistoryState}
           selectedRunId={selectedRunId}
-          onRefresh={() => loadRunHistory()}
+          onRefreshRuns={() => loadRunHistory()}
           onOpenRun={handleOpenHistoryRun}
         />
+      </div>
+    </div>
+  );
+}
 
-        <form
-          onSubmit={handleSubmit}
-          style={{
-            flex: 1,
-            minHeight: 0,
-            display: "flex",
-            flexDirection: "column",
-            gap: 14,
-            padding: 24,
-          }}
-        >
+function WorkbenchWizardStepper({
+  current,
+  onJump,
+  canJumpTo,
+}: {
+  current: WorkbenchWizardStepId;
+  onJump: (step: WorkbenchWizardStepId) => void;
+  canJumpTo: (step: WorkbenchWizardStepId) => boolean;
+}) {
+  const currentIndex = workbenchWizardStepIndex(current);
+
+  return (
+    <nav
+      aria-label="Workbench steps"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 0,
+        padding: "18px 32px",
+        borderBottom: "1px solid var(--rule)",
+        background: "var(--panel)",
+        flex: "0 0 auto",
+      }}
+    >
+      {WORKBENCH_WIZARD_STEPS.map((step, index) => {
+        const isActive = index === currentIndex;
+        const isDone = index < currentIndex;
+        const disabled = !canJumpTo(step.id);
+        return (
+          <div
+            key={step.id}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              flex: index < WORKBENCH_WIZARD_STEPS.length - 1 ? 1 : "0 0 auto",
+              minWidth: 0,
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => onJump(step.id)}
+              disabled={disabled}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                border: "none",
+                background: isActive ? "var(--bg)" : "transparent",
+                color: isActive || isDone ? "var(--ink)" : "var(--ink-dim)",
+                cursor: disabled ? "not-allowed" : "pointer",
+                padding: "8px 10px",
+                textAlign: "left",
+                minWidth: 0,
+              }}
+            >
+              <span
+                style={{
+                  width: 24,
+                  height: 24,
+                  display: "grid",
+                  placeItems: "center",
+                  border: "1px solid var(--rule)",
+                  background: isActive ? "var(--ink)" : "transparent",
+                  color: isActive ? "var(--bg)" : "var(--ink-dim)",
+                  fontFamily: "var(--font-plex-mono)",
+                  fontSize: 11,
+                  lineHeight: 1,
+                }}
+              >
+                {index + 1}
+              </span>
+              <span
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 2,
+                  minWidth: 0,
+                }}
+              >
+                <span style={{ fontSize: 13, lineHeight: 1.2 }}>
+                  {step.label}
+                </span>
+                <span
+                  style={{
+                    color: "var(--ink-faint)",
+                    fontSize: 11,
+                    lineHeight: 1.2,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {step.caption}
+                </span>
+              </span>
+            </button>
+            {index < WORKBENCH_WIZARD_STEPS.length - 1 ? (
+              <div
+                aria-hidden="true"
+                style={{
+                  flex: 1,
+                  height: 1,
+                  background: "var(--rule)",
+                  margin: "0 12px",
+                  minWidth: 20,
+                }}
+              />
+            ) : null}
+          </div>
+        );
+      })}
+    </nav>
+  );
+}
+
+function WorkbenchSetupStep({
+  ask,
+  canSubmit,
+  runState,
+  runPaneSummary,
+  onAskChange,
+  onStart,
+  setupSummary,
+  profileSummary,
+}: {
+  ask: string;
+  canSubmit: boolean;
+  runState: RunState;
+  runPaneSummary: WorkbenchRunPaneSummary;
+  onAskChange: (ask: string) => void;
+  onStart: () => void;
+  setupSummary: WorkbenchSetupSummary;
+  profileSummary: ReturnType<typeof deriveWorkbenchPersonalisationSummary>;
+}) {
+  return (
+    <div
+      style={{
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        minHeight: 0,
+        overflow: "hidden",
+      }}
+    >
+      <div
+        className="scroll"
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: "auto",
+          padding: "32px 48px",
+        }}
+      >
+        <div style={{ maxWidth: 760, margin: "0 auto" }}>
+          <WorkbenchStepHeading
+            step="setup"
+            title="Start a piece of work"
+            detail="Paste the task, brief, message, or output you need. Workbench will check the setup, gather context, and move you through the next step."
+          />
+
           <label
             htmlFor="workbench-ask"
             style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              color: "var(--ink-faint)",
               fontFamily: "var(--font-plex-mono)",
               fontSize: 10,
               letterSpacing: "0.14em",
               textTransform: "uppercase",
-              color: "var(--ink-faint)",
             }}
           >
-            Task request
+            What are you working on?
+            <textarea
+              id="workbench-ask"
+              value={ask}
+              onChange={(event) => onAskChange(event.target.value)}
+              placeholder="Paste the task, brief, message, or output you need."
+              style={{
+                width: "100%",
+                minHeight: 170,
+                resize: "vertical",
+                padding: 14,
+                border: "1px solid var(--rule)",
+                background: "var(--bg)",
+                color: "var(--ink)",
+                fontFamily: "var(--font-plex-sans)",
+                fontSize: 14,
+                lineHeight: 1.5,
+                textTransform: "none",
+                letterSpacing: 0,
+              }}
+            />
           </label>
-          <textarea
-            id="workbench-ask"
-            value={ask}
-            onChange={(event) => setAsk(event.target.value)}
-            placeholder="Paste the task request and required output."
-            style={{
-              flex: 1,
-              minHeight: 260,
-              resize: "none",
-              width: "100%",
-              padding: 14,
-              border: "1px solid var(--rule)",
-              background: "var(--bg)",
-              color: "var(--ink)",
-              fontFamily: "var(--font-plex-sans)",
-              fontSize: 14,
-              lineHeight: 1.5,
-            }}
-          />
-          <button
-            type="submit"
-            disabled={!canSubmit}
-            style={{
-              alignSelf: "flex-start",
-              padding: "10px 14px",
-              border: "1px solid var(--ink)",
-              background: canSubmit ? "var(--ink)" : "transparent",
-              color: canSubmit ? "var(--bg)" : "var(--ink-dim)",
-              fontFamily: "var(--font-plex-mono)",
-              fontSize: 11,
-              letterSpacing: "0.12em",
-              textTransform: "uppercase",
-            }}
-          >
-            Run task
-          </button>
-        </form>
-      </section>
 
-      <section
-        aria-live="polite"
+          <div style={{ marginTop: 14 }}>
+            {runState.status === "loading" ? (
+              <InlineStatus tone="info" message={runPaneSummary.detail} />
+            ) : null}
+            {runState.status === "error" ? (
+              <InlineStatus tone="error" message={runPaneSummary.detail} />
+            ) : null}
+          </div>
+
+          <div style={{ marginTop: 24 }}>
+            <ProfileHubCallout
+              setupSummary={setupSummary}
+              profileSummary={profileSummary}
+            />
+          </div>
+        </div>
+      </div>
+
+      <WorkbenchWizardActionBar
+        summary={[
+          setupSummary.label,
+          "Profile manages connections",
+        ]}
+        primaryAction={{
+          label: runState.status === "loading" ? "Starting" : "Start Workbench",
+          onClick: onStart,
+          disabled: !canSubmit,
+        }}
+      />
+    </div>
+  );
+}
+
+function ProfileHubCallout({
+  setupSummary,
+  profileSummary,
+}: {
+  setupSummary: WorkbenchSetupSummary;
+  profileSummary: ReturnType<typeof deriveWorkbenchPersonalisationSummary>;
+}) {
+  return (
+    <section
+      aria-label="Profile hub"
+      style={{
+        border: "1px solid var(--rule)",
+        background: "var(--panel)",
+        padding: "13px 14px",
+        display: "grid",
+        gridTemplateColumns: "minmax(0, 1fr) auto",
+        gap: 14,
+        alignItems: "center",
+      }}
+    >
+      <div style={{ minWidth: 0 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flexWrap: "wrap",
+            marginBottom: 7,
+          }}
+        >
+          <StatusPill status={profileSummary.statusLabel} />
+          <StatusPill status={setupSummary.label} />
+        </div>
+        <div style={{ color: "var(--ink)", fontSize: 13, lineHeight: 1.35 }}>
+          Profile is where Workbench connections and personalisation live.
+        </div>
+        <div
+          style={{
+            color: "var(--ink-dim)",
+            fontSize: 12,
+            lineHeight: 1.35,
+            marginTop: 3,
+          }}
+        >
+          {profileSummary.detail}
+        </div>
+      </div>
+      <a
+        href="/profile"
         style={{
-          minHeight: 0,
-          overflow: "auto",
-          padding: "22px 28px",
+          border: "1px solid var(--rule-2)",
+          color: "var(--ink)",
+          padding: "7px 10px",
+          fontFamily: "var(--font-plex-mono)",
+          fontSize: 10,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          whiteSpace: "nowrap",
         }}
       >
-        {state.status === "loaded" ? (
-          <ResultView response={state.response} ask={ask} />
-        ) : (
-          <RunPaneStateView summary={runPaneSummary} />
-        )}
+        Open Profile
+      </a>
+    </section>
+  );
+}
+
+function WorkbenchWizardSideRail({
+  profileSummary,
+  response,
+  uiSummary,
+  profileUpdateStatus,
+  runHistoryState,
+  selectedRunId,
+  onRefreshRuns,
+  onOpenRun,
+}: {
+  profileSummary: ReturnType<typeof deriveWorkbenchPersonalisationSummary>;
+  response: WorkbenchStartResponse | null;
+  uiSummary: ReturnType<typeof deriveWorkbenchUiSummary> | null;
+  profileUpdateStatus: WorkbenchProfileUpdateStatus | null;
+  runHistoryState: WorkbenchRunHistoryState;
+  selectedRunId: string | null;
+  onRefreshRuns: () => void;
+  onOpenRun: (run: WorkbenchRunHistoryRow) => void;
+}) {
+  return (
+    <aside
+      style={{
+        borderLeft: "1px solid var(--rule)",
+        background: "var(--panel)",
+        display: "flex",
+        flexDirection: "column",
+        minHeight: 0,
+        overflow: "hidden",
+      }}
+    >
+      <section style={{ padding: "18px 20px 12px" }}>
+        <SectionEyebrow>Your Profile</SectionEyebrow>
+        <div style={{ marginTop: 10 }}>
+          {response && profileUpdateStatus ? (
+            <CompactProfilePanel
+              status={profileUpdateStatus}
+              profile={response.profile ?? null}
+            />
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <StatusPill status={profileSummary.statusLabel} />
+              <div
+                style={{
+                  color: "var(--ink-dim)",
+                  fontSize: 13,
+                  lineHeight: 1.45,
+                }}
+              >
+                {profileSummary.detail}
+              </div>
+            </div>
+          )}
+        </div>
       </section>
+
+      <div style={{ height: 1, background: "var(--rule)" }} />
+
+      <section style={{ padding: "14px 20px" }}>
+        <SectionEyebrow>
+          {uiSummary ? `Sources (${uiSummary.retrievalRows.length})` : "Sources"}
+        </SectionEyebrow>
+        <div style={{ marginTop: 10 }}>
+          {uiSummary ? (
+            <RetrievalStatusList rows={uiSummary.retrievalRows} compact />
+          ) : (
+            <div style={{ color: "var(--ink-dim)", fontSize: 12, lineHeight: 1.4 }}>
+              Connections are managed in{" "}
+              <a href="/profile" style={{ color: "var(--ink)" }}>
+                Profile
+              </a>
+              . Workbench will show sources here after a run.
+            </div>
+          )}
+        </div>
+      </section>
+
+      <div style={{ flex: 1, minHeight: 0 }} />
+
+      <RunHistoryPanel
+        state={runHistoryState}
+        selectedRunId={selectedRunId}
+        onRefresh={onRefreshRuns}
+        onOpenRun={onOpenRun}
+      />
+    </aside>
+  );
+}
+
+function WorkbenchStepHeading({
+  step,
+  title,
+  detail,
+}: {
+  step: WorkbenchWizardStepId;
+  title: string;
+  detail: string;
+}) {
+  const stepIndex = workbenchWizardStepIndex(step) + 1;
+  const stepLabel = WORKBENCH_WIZARD_STEPS.find((item) => item.id === step)?.label;
+
+  return (
+    <div style={{ marginBottom: 28 }}>
+      <SectionEyebrow>
+        Step {String(stepIndex).padStart(2, "0")} | {stepLabel}
+      </SectionEyebrow>
+      <h1
+        style={{
+          margin: "8px 0 8px",
+          fontSize: 28,
+          lineHeight: 1.15,
+          fontWeight: 600,
+          letterSpacing: 0,
+        }}
+      >
+        {title}
+      </h1>
+      <p
+        style={{
+          margin: 0,
+          color: "var(--ink-dim)",
+          fontSize: 15,
+          lineHeight: 1.5,
+          maxWidth: 620,
+        }}
+      >
+        {detail}
+      </p>
     </div>
+  );
+}
+
+function WorkbenchWizardActionBar({
+  summary,
+  backLabel,
+  onBack,
+  secondaryAction,
+  primaryAction,
+}: {
+  summary: string[];
+  backLabel?: string;
+  onBack?: () => void;
+  secondaryAction?: WorkbenchWizardAction | null;
+  primaryAction: WorkbenchWizardAction;
+}) {
+  return (
+    <div
+      style={{
+        flex: "0 0 auto",
+        borderTop: "1px solid var(--rule)",
+        background: "var(--panel)",
+        padding: "14px 24px",
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          color: "var(--ink-dim)",
+          fontSize: 12,
+          minWidth: 0,
+        }}
+      >
+        {summary.map((item, index) => (
+          <span key={`${item}-${index}`} style={{ whiteSpace: "nowrap" }}>
+            {index > 0 ? " | " : ""}
+            {item}
+          </span>
+        ))}
+      </div>
+      <div style={{ flex: 1 }} />
+      {onBack ? (
+        <SmallActionButton type="button" onClick={onBack}>
+          {backLabel ?? "Back"}
+        </SmallActionButton>
+      ) : null}
+      {secondaryAction ? (
+        <SmallActionButton
+          type="button"
+          onClick={secondaryAction.onClick}
+          disabled={secondaryAction.disabled}
+        >
+          {secondaryAction.label}
+        </SmallActionButton>
+      ) : null}
+      <button
+        type="button"
+        onClick={primaryAction.onClick}
+        disabled={primaryAction.disabled}
+        style={{
+          border: "1px solid var(--ink)",
+          background: primaryAction.disabled ? "transparent" : "var(--ink)",
+          color: primaryAction.disabled ? "var(--ink-dim)" : "var(--bg)",
+          padding: "10px 14px",
+          fontFamily: "var(--font-plex-mono)",
+          fontSize: 11,
+          letterSpacing: "0.12em",
+          textTransform: "uppercase",
+        }}
+      >
+        {primaryAction.label}
+      </button>
+    </div>
+  );
+}
+
+function canOpenWorkbenchWizardStep(
+  step: WorkbenchWizardStepId,
+  response: WorkbenchStartResponse | null,
+) {
+  return step === "setup" || Boolean(response);
+}
+
+function workbenchWizardStepIndex(step: WorkbenchWizardStepId) {
+  return Math.max(
+    0,
+    WORKBENCH_WIZARD_STEPS.findIndex((item) => item.id === step),
   );
 }
 
@@ -1815,6 +2123,42 @@ function buildWorkbenchPostRunArtifactSpecInput(
   ].join("\n");
 }
 
+export function buildWorkbenchContextAugmentedAsk(
+  baseAsk: string,
+  answers: WorkbenchResumeSafeResult["context_answers"],
+): string {
+  const contextLines = answers
+    .map((answer) => {
+      const question = answer.question.trim();
+      const value = answer.answer.trim();
+      if (!question || !value) return null;
+      return `- ${question}: ${value}`;
+    })
+    .filter((line): line is string => Boolean(line));
+
+  const normalizedBase = baseAsk.trim() || "Continue the Workbench task.";
+  if (contextLines.length === 0) return normalizedBase;
+
+  return [
+    normalizedBase,
+    "",
+    "Additional context supplied by staff:",
+    ...contextLines,
+  ].join("\n");
+}
+
+function buildWorkbenchMakeAsk(
+  baseAsk: string,
+  fallbackAsk: string,
+  contextResumeState: ContextResumeState,
+): string {
+  const answers =
+    contextResumeState.status === "loaded"
+      ? contextResumeState.resume.context_answers
+      : [];
+  return buildWorkbenchContextAugmentedAsk(baseAsk || fallbackAsk, answers);
+}
+
 function buildWorkbenchFeedbackActions(
   response: WorkbenchStartResponse,
 ): WorkbenchPostRunAction[] {
@@ -1887,12 +2231,17 @@ function summarizePresendResponse(response: WorkbenchPresendResponse): {
 function ResultView({
   response,
   ask,
+  activeStep,
+  onStepChange,
 }: {
   response: WorkbenchStartResponse;
   ask: string;
+  activeStep: Exclude<WorkbenchWizardStepId, "setup">;
+  onStepChange: (step: WorkbenchWizardStepId) => void;
 }) {
   const result = response.result;
-  const invocation = response.invocation;
+  const storedRunId =
+    response.run_history?.status === "stored" ? response.run_history.id : null;
   const [postRunState, setPostRunState] = useState<PostRunState>({
     status: "idle",
   });
@@ -1900,33 +2249,17 @@ function ResultView({
   const [reviewState, setReviewState] = useState<ReviewState>({
     status: "idle",
   });
+  const [contextAnswers, setContextAnswers] = useState<Record<string, string>>({});
+  const [contextResumeState, setContextResumeState] =
+    useState<ContextResumeState>({
+      status: "idle",
+    });
   const uiSummary = useMemo(() => deriveWorkbenchUiSummary(response), [response]);
-  const stageRows = useMemo(
-    () =>
-      applyWorkbenchLocalStageProgress(
-        deriveWorkbenchStageRows(response.workflow),
-        makeState,
-        reviewState,
-      ),
-    [makeState, response.workflow, reviewState],
-  );
-  const profileUpdateStatus = useMemo(
-    () => deriveWorkbenchProfileUpdateStatus(readWorkbenchProfileUpdate(response)),
-    [response],
-  );
-  const profileLearningControls = useMemo(
-    () => deriveWorkbenchProfileLearningControls(readWorkbenchProfileUpdate(response)),
-    [response],
-  );
-  const meta = useMemo(
-    () => [
-      `task_type ${invocation.task_type}`,
-      `skill ${invocation.skill_version ?? "unknown"}`,
-      uiSummary.baselineLabel,
-      `${uiSummary.sourceCount} source items`,
-    ],
-    [invocation, uiSummary.baselineLabel, uiSummary.sourceCount],
-  );
+  const baseWorkflow = useMemo(() => readWorkbenchWorkflow(response), [response]);
+  const workflow =
+    contextResumeState.status === "loaded"
+      ? contextResumeState.resume.workflow
+      : baseWorkflow;
   const makeArtifact =
     makeState.status === "loaded" ? makeState.result.artifact : null;
   const reviewedArtifact = useMemo(
@@ -1934,15 +2267,21 @@ function ResultView({
     [makeArtifact, reviewState],
   );
   const postRunActions = useMemo(
-    () => deriveWorkbenchPostRunActions(response, { reviewedArtifact }),
+    () =>
+      deriveWorkbenchPostRunActions(response, {
+        reviewedArtifact,
+        requireReviewedArtifact: true,
+      }),
     [response, reviewedArtifact],
   );
 
   useEffect(() => {
+    setContextAnswers({});
+    setContextResumeState({ status: "idle" });
     setMakeState({ status: "idle" });
     setReviewState({ status: "idle" });
     setPostRunState({ status: "idle" });
-  }, [response]);
+  }, [storedRunId, result.decoded_task.summary]);
 
   async function handlePostRunAction(action: WorkbenchPostRunAction) {
     if (action.status !== "ready") return;
@@ -1991,6 +2330,59 @@ function ResultView({
     }
   }
 
+  function handleContextAnswerChange(questionId: string, value: string) {
+    setContextAnswers((current) => ({ ...current, [questionId]: value }));
+  }
+
+  async function handleContextResume(action: WorkbenchResumeAction) {
+    if (!storedRunId) return;
+    setContextResumeState({ status: "running", action });
+    try {
+      const res = await fetch(`/api/workbench/runs/${storedRunId}/resume`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          action,
+          ...(action === "answer_context"
+            ? { answers: answeredContextPayload(workflow, contextAnswers) }
+            : {}),
+        }),
+      });
+      const body = (await res.json().catch(() => null)) as
+        | WorkbenchResumeRouteResponse
+        | null;
+
+      if (!res.ok || !body || !("resume" in body)) {
+        const detail =
+          body && "detail" in body && body.detail
+            ? body.detail
+            : body && "error" in body && body.error
+              ? body.error
+              : `HTTP ${res.status}`;
+        throw new Error(detail);
+      }
+
+      const resume = body.resume;
+      setContextResumeState({ status: "loaded", resume });
+      if (
+        resume.status === "resumed" &&
+        (action === "answer_context" ||
+          action === "continue_with_assumptions")
+      ) {
+        onStepChange("generate");
+      }
+    } catch (err) {
+      setContextResumeState({
+        status: "error",
+        action,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   async function handleMake() {
     setMakeState({ status: "running" });
     setReviewState({ status: "idle" });
@@ -2002,7 +2394,11 @@ function ResultView({
           Accept: "application/json",
         },
         body: JSON.stringify({
-          ask: ask.trim() || result.decoded_task.summary,
+          ask: buildWorkbenchMakeAsk(
+            ask,
+            result.decoded_task.summary,
+            contextResumeState,
+          ),
           preflight_result: result,
           retrieved_context:
             response.retrieval.context.length > 0
@@ -2024,7 +2420,12 @@ function ResultView({
               : body && "error" in body && body.error
                 ? body.error
                 : `HTTP ${res.status}`;
-        throw new Error(detail);
+        throw new Error(
+          sanitizeWorkbenchDetail(
+            detail,
+            "Workbench could not generate a draft. Check the local server logs and try again.",
+          ),
+        );
       }
 
       setMakeState({ status: "loaded", result: body });
@@ -2078,548 +2479,445 @@ function ResultView({
     }
   }
 
+  const saveAction = postRunActions.find((action) => action.id === "presend");
+  const primaryAction = buildWorkbenchWizardPrimaryAction({
+    activeStep,
+    workflow,
+    contextAnswers,
+    contextResumeState,
+    makeState,
+    reviewState,
+    saveAction,
+    onStepChange,
+    onResume: handleContextResume,
+    onMake: handleMake,
+    onReview: handleReview,
+    onSave:
+      saveAction?.status === "ready"
+        ? () => handlePostRunAction(saveAction)
+        : undefined,
+  });
+  const secondaryAction = buildWorkbenchWizardSecondaryAction({
+    activeStep,
+    workflow,
+    contextResumeState,
+    onResume: handleContextResume,
+  });
+
   return (
     <div
       style={{
-        display: "grid",
-        gridTemplateColumns: "220px minmax(0, 1fr)",
-        gap: 18,
-        alignItems: "start",
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        minHeight: 0,
+        overflow: "hidden",
       }}
     >
-      <WorkflowStageRail rows={stageRows} />
+      <div
+        className="scroll"
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: "auto",
+          padding: "32px 48px",
+        }}
+      >
+        <div style={{ maxWidth: 760, margin: "0 auto" }}>
+          {activeStep === "context" ? (
+            <ContextWizardStep
+              result={result}
+              workflow={workflow}
+              runId={storedRunId}
+              answers={contextAnswers}
+              resumeState={contextResumeState}
+              onAnswerChange={handleContextAnswerChange}
+              onResume={handleContextResume}
+            />
+          ) : null}
+
+          {activeStep === "generate" ? (
+            <GenerateWizardStep
+              makeState={makeState}
+            />
+          ) : null}
+
+          {activeStep === "review" ? (
+            <ReviewWizardStep
+              makeArtifact={makeArtifact}
+              state={reviewState}
+              actions={postRunActions}
+              postRunState={postRunState}
+              onAction={handlePostRunAction}
+            />
+          ) : null}
+        </div>
+      </div>
+
+      <WorkbenchWizardActionBar
+        summary={[
+          `${uiSummary.sourceCount} source items`,
+          uiSummary.baselineLabel,
+          `${uiSummary.warningCount} warnings`,
+        ]}
+        backLabel={activeStep === "context" ? "Back to Setup" : "Back"}
+        onBack={() => onStepChange(previousWorkbenchWizardStep(activeStep))}
+        secondaryAction={secondaryAction}
+        primaryAction={primaryAction}
+      />
+    </div>
+  );
+}
+
+function ContextWizardStep({
+  result,
+  workflow,
+  runId,
+  answers,
+  resumeState,
+  onAnswerChange,
+  onResume,
+}: {
+  result: WorkbenchPreflightResult;
+  workflow: WorkbenchWorkflowState;
+  runId: string | null;
+  answers: Record<string, string>;
+  resumeState: ContextResumeState;
+  onAnswerChange: (questionId: string, value: string) => void;
+  onResume: (action: WorkbenchResumeAction) => void;
+}) {
+  return (
+    <>
+      <WorkbenchStepHeading
+        step="context"
+        title={
+          workflow.context_questions.length > 0
+            ? "Add the missing context"
+            : "Context is ready"
+        }
+        detail={
+          workflow.context_questions.length > 0
+            ? "Answer what you can below. Workbench reuses the basics, so this should stay short."
+            : "Workbench has enough context to draft. You can still review the task summary before generating."
+        }
+      />
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <CompactPanel title="Task summary">
+          <CompactTaskSummary result={result} workflow={workflow} />
+        </CompactPanel>
+        <ContextNeededPanel
+          workflow={workflow}
+          runId={runId}
+          answers={answers}
+          resumeState={resumeState}
+          onAnswerChange={onAnswerChange}
+          onResume={onResume}
+          showActions={false}
+        />
+      </div>
+    </>
+  );
+}
+
+function GenerateWizardStep({
+  makeState,
+}: {
+  makeState: MakeState;
+}) {
+  return (
+    <>
+      <WorkbenchStepHeading
+        step="generate"
+        title="Generate the first draft"
+        detail="Workbench will use the decoded task, gathered context, and profile signals to create a usable starting point."
+      />
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <CompactPanel title="Generated draft" scroll>
+          {makeState.status === "idle" ? (
+            <TextBlock text="Generate a draft when the brief looks right." />
+          ) : null}
+          {makeState.status === "running" ? (
+            <InlineStatus tone="info" message="Generating the first draft." />
+          ) : null}
+          {makeState.status === "loaded" ? (
+            <ArtifactPreview artifact={makeState.result.artifact} />
+          ) : null}
+          {makeState.status === "error" ? (
+            <InlineStatus tone="error" message={makeState.message} />
+          ) : null}
+        </CompactPanel>
+      </div>
+    </>
+  );
+}
+
+function ReviewWizardStep({
+  makeArtifact,
+  state,
+  actions,
+  postRunState,
+  onAction,
+}: {
+  makeArtifact: WorkbenchArtifact | null;
+  state: ReviewState;
+  actions: WorkbenchPostRunAction[];
+  postRunState: PostRunState;
+  onAction: (action: WorkbenchPostRunAction) => void;
+}) {
+  return (
+    <>
+      <WorkbenchStepHeading
+        step="review"
+        title="Review and ship"
+        detail="Run the quality gate, check the senior challenge, then save or mark the work."
+      />
 
       <div
         style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 18,
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+          gap: 14,
+          alignItems: "start",
         }}
       >
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(4, minmax(140px, 1fr))",
-            gap: 10,
-          }}
-        >
-          <MetricTile label="Invocation" value={uiSummary.invocationState} />
-          <MetricTile label="Retrieval" value={`${uiSummary.sourceCount} items`} />
-          <MetricTile label="Baseline" value={uiSummary.baselineLabel} />
-          <MetricTile label="Savings" value={uiSummary.hoursSavedLabel} />
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            flexWrap: "wrap",
-            alignItems: "center",
-          }}
-        >
-          {meta.map((item) => (
-            <span
-              key={item}
-              style={{
-                border: "1px solid var(--rule)",
-                padding: "5px 8px",
-                color: "var(--ink-dim)",
-                fontFamily: "var(--font-plex-mono)",
-                fontSize: 10,
-                letterSpacing: "0.08em",
-                textTransform: "uppercase",
-              }}
-            >
-              {item}
-            </span>
-          ))}
-        </div>
-
-        <ResultSection title="Run Status">
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(3, minmax(150px, 1fr))",
-              gap: 10,
-            }}
-          >
-            <KeyValue label="State" value={uiSummary.invocationState} />
-            <KeyValue
-              label="Latency"
-              value={formatLatency(invocation.latency_ms)}
-            />
-            <KeyValue label="Warnings" value={uiSummary.warningCount} />
-            <KeyValue
-              label="Skill"
-              value={invocation.skill_version ?? "unknown"}
-            />
-            <KeyValue label="Before" value={uiSummary.baselineLabel} />
-            <KeyValue label="After" value={uiSummary.workbenchLabel} />
-          </div>
-        </ResultSection>
-
-        <ProfileUpdatePanel
-          status={profileUpdateStatus}
-          controls={profileLearningControls}
-        />
-
-        <ResultSection title="Retrieval Sources">
-          <RetrievalStatusList rows={uiSummary.retrievalRows} />
-        </ResultSection>
-
-        <ResultSection title="Task Details">
-          <KeyValue label="Summary" value={result.decoded_task.summary} />
-          <KeyValue label="Requester" value={result.decoded_task.requester} />
-          <KeyValue
-            label="Deliverable"
-            value={result.decoded_task.deliverable_type}
+        <CompactPanel title="Review" scroll>
+          {!makeArtifact ? (
+            <TextBlock text="Generate a draft before reviewing it." />
+          ) : null}
+          {makeArtifact && state.status === "idle" ? (
+            <TextBlock text="Run review when the draft is ready." />
+          ) : null}
+          {state.status === "running" ? (
+            <InlineStatus tone="info" message="Reviewing the draft." />
+          ) : null}
+          {state.status === "loaded" ? <ReviewSummary result={state.result} /> : null}
+          {state.status === "error" ? (
+            <InlineStatus tone="error" message={state.message} />
+          ) : null}
+        </CompactPanel>
+        <CompactPanel title="Save and feedback">
+          <CompactPostRunActions
+            actions={actions}
+            state={postRunState}
+            onAction={onAction}
           />
-          <KeyValue label="Task type" value={result.decoded_task.task_type} />
-        </ResultSection>
-
-        <ResultSection title="Missing Context">
-          <MissingContextList items={result.missing_context} />
-        </ResultSection>
-
-        <ResultSection title="Clarification">
-          <TextBlock
-            text={result.drafted_clarifying_message || "None returned."}
-          />
-        </ResultSection>
-
-        <MakeStagePanel state={makeState} onGenerate={handleMake} />
-
-        <ReviewStagePanel
-          state={reviewState}
-          canReview={Boolean(makeArtifact)}
-          onReview={handleReview}
-        />
-
-        <PostRunActionPanel
-          actions={postRunActions}
-          state={postRunState}
-          onAction={handlePostRunAction}
-        />
-
-        <ResultSection title="Retrieved Context">
-          <RetrievedContextList items={result.retrieved_context} />
-        </ResultSection>
-
-        <ResultSection title="Run Plan">
-          <ApproachList items={result.suggested_approach} />
-        </ResultSection>
-
-        <ResultSection title="Time Estimate">
-          <KeyValue
-            label="Before"
-            value={`${result.time_estimate.estimated_before_minutes} minutes`}
-          />
-          <KeyValue
-            label="With Workbench"
-            value={
-              result.time_estimate.estimated_workbench_minutes == null
-                ? null
-                : `${result.time_estimate.estimated_workbench_minutes} minutes`
-            }
-          />
-        </ResultSection>
-
-        <ResultSection title="Warnings">
-          <SimpleList
-            items={dedupeWarnings([
-              ...result.warnings,
-              ...(response.retrieval.warnings ?? []),
-            ])}
-            empty="No warnings."
-          />
-        </ResultSection>
+        </CompactPanel>
       </div>
-    </div>
+    </>
   );
 }
 
-function applyWorkbenchLocalStageProgress(
-  rows: WorkbenchStageRow[],
-  makeState: MakeState,
-  reviewState: ReviewState,
-): WorkbenchStageRow[] {
-  return rows.map((row) => {
-    if (row.id === "make") {
-      if (makeState.status === "loaded") {
-        return { ...row, state: "complete", summary: "Draft generated." };
-      }
-      if (makeState.status === "running") {
-        return { ...row, state: "active", summary: "Generating draft." };
-      }
-      if (makeState.status === "error") {
-        return { ...row, state: "error", summary: makeState.message };
-      }
-      return { ...row, state: "available" };
+function buildWorkbenchWizardPrimaryAction({
+  activeStep,
+  workflow,
+  contextAnswers,
+  contextResumeState,
+  makeState,
+  reviewState,
+  saveAction,
+  onStepChange,
+  onResume,
+  onMake,
+  onReview,
+  onSave,
+}: {
+  activeStep: Exclude<WorkbenchWizardStepId, "setup">;
+  workflow: WorkbenchWorkflowState;
+  contextAnswers: Record<string, string>;
+  contextResumeState: ContextResumeState;
+  makeState: MakeState;
+  reviewState: ReviewState;
+  saveAction?: WorkbenchPostRunAction;
+  onStepChange: (step: WorkbenchWizardStepId) => void;
+  onResume: (action: WorkbenchResumeAction) => void;
+  onMake: () => void;
+  onReview: () => void;
+  onSave?: () => void;
+}): WorkbenchWizardAction {
+  if (activeStep === "context") {
+    if (workflow.missing_required_context_count === 0) {
+      return {
+        label: "Continue to Generate",
+        onClick: () => onStepChange("generate"),
+      };
     }
 
-    if (row.id === "review") {
-      if (reviewState.status === "loaded") {
-        return { ...row, state: "complete", summary: "Review complete." };
-      }
-      if (reviewState.status === "running") {
-        return { ...row, state: "active", summary: "Reviewing draft." };
-      }
-      if (reviewState.status === "error") {
-        return { ...row, state: "error", summary: reviewState.message };
-      }
-      if (makeState.status === "loaded") {
-        return { ...row, state: "available", summary: "Ready to review draft." };
-      }
+    const missingCount = unansweredRequiredContextCount(workflow, contextAnswers);
+    return {
+      label:
+        contextResumeState.status === "running"
+          ? "Continuing"
+          : "Add context and continue",
+      onClick: () => onResume("answer_context"),
+      disabled: contextResumeState.status === "running" || missingCount > 0,
+    };
+  }
+
+  if (activeStep === "generate") {
+    if (makeState.status === "running") {
+      return { label: "Generating", disabled: true };
     }
-
-    if (row.id === "save" && reviewState.status === "loaded") {
-      return { ...row, state: "available", summary: "Ready to save or mark." };
+    if (makeState.status === "loaded") {
+      return {
+        label: "Continue to Review",
+        onClick: () => onStepChange("review"),
+      };
     }
+    return {
+      label: makeState.status === "error" ? "Try Generate again" : "Generate draft",
+      onClick: onMake,
+    };
+  }
 
-    return row;
-  });
-}
-
-function buildReviewedArtifactForSave(
-  artifact: WorkbenchArtifact | null,
-  reviewState: ReviewState,
-): WorkbenchPresendReviewedArtifact | null {
-  if (!artifact) return null;
+  if (makeState.status !== "loaded") {
+    return {
+      label: "Back to Generate",
+      onClick: () => onStepChange("generate"),
+    };
+  }
+  if (reviewState.status === "running") {
+    return { label: "Reviewing", disabled: true };
+  }
+  if (reviewState.status === "loaded") {
+    return {
+      label: saveAction?.status === "ready" ? saveAction.label : "Save reviewed draft",
+      onClick: onSave,
+      disabled: saveAction?.status !== "ready" || !onSave,
+    };
+  }
   return {
-    artifact_type: artifact.type,
-    title: artifact.title,
-    review_status:
-      reviewState.status === "loaded"
-        ? reviewState.result.review.overall_status
-        : null,
-    source_count: artifact.source_refs.length,
-    destination: "drive",
+    label: reviewState.status === "error" ? "Try Review again" : "Review draft",
+    onClick: onReview,
+    disabled: !onReview,
   };
 }
 
-function WorkflowStageRail({ rows }: { rows: WorkbenchStageRow[] }) {
+function buildWorkbenchWizardSecondaryAction({
+  activeStep,
+  workflow,
+  contextResumeState,
+  onResume,
+}: {
+  activeStep: Exclude<WorkbenchWizardStepId, "setup">;
+  workflow: WorkbenchWorkflowState;
+  contextResumeState: ContextResumeState;
+  onResume: (action: WorkbenchResumeAction) => void;
+}): WorkbenchWizardAction | null {
+  if (
+    activeStep !== "context" ||
+    workflow.missing_required_context_count === 0 ||
+    !workflow.can_continue_with_assumptions
+  ) {
+    return null;
+  }
+
+  return {
+    label:
+      contextResumeState.status === "running"
+        ? "Continuing"
+        : "Continue without this",
+    onClick: () => onResume("continue_with_assumptions"),
+    disabled: contextResumeState.status === "running",
+  };
+}
+
+function previousWorkbenchWizardStep(
+  step: Exclude<WorkbenchWizardStepId, "setup">,
+): WorkbenchWizardStepId {
+  if (step === "review") return "generate";
+  if (step === "generate") return "context";
+  return "setup";
+}
+
+function contextAnswerValue(
+  workflow: WorkbenchWorkflowState,
+  answers: Record<string, string>,
+  questionId: string,
+) {
+  const localAnswer = answers[questionId];
+  if (localAnswer != null) return localAnswer;
   return (
-    <aside
-      aria-label={`Workbench workflow stages: ${WORKBENCH_WORKFLOW_LABEL}`}
+    workflow.context_answers.find((answer) => answer.question_id === questionId)
+      ?.answer ?? ""
+  );
+}
+
+function unansweredRequiredContextCount(
+  workflow: WorkbenchWorkflowState,
+  answers: Record<string, string>,
+) {
+  return workflow.context_questions.filter(
+    (question) =>
+      question.required &&
+      !contextAnswerValue(workflow, answers, question.id).trim().length,
+  ).length;
+}
+
+function CompactPanel({
+  title,
+  children,
+  scroll,
+  style,
+}: {
+  title: string;
+  children: React.ReactNode;
+  scroll?: boolean;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <section
       style={{
-        position: "sticky",
-        top: 0,
         border: "1px solid var(--rule)",
         background: "var(--panel)",
-        padding: 12,
+        padding: "10px 11px",
+        minHeight: 0,
         display: "flex",
         flexDirection: "column",
-        gap: 9,
+        gap: 8,
+        overflow: "hidden",
+        ...style,
       }}
     >
-      {rows.map((row, index) => (
-        <div
-          key={row.id}
-          style={{
-            border: "1px solid var(--rule)",
-            background: row.state === "active" ? "var(--bg)" : "transparent",
-            padding: "9px 10px",
-            minHeight: 74,
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 8,
-            }}
-          >
-            <span
-              style={{
-                color: "var(--ink-faint)",
-                fontFamily: "var(--font-plex-mono)",
-                fontSize: 10,
-              }}
-            >
-              {String(index + 1).padStart(2, "0")}
-            </span>
-            <StatusPill status={stageStateLabel(row.state)} />
-          </div>
-          <div
-            style={{
-              marginTop: 8,
-              color: "var(--ink)",
-              fontFamily: "var(--font-plex-mono)",
-              fontSize: 12,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-            }}
-          >
-            {row.label}
-          </div>
-          <div
-            style={{
-              marginTop: 5,
-              color: "var(--ink-dim)",
-              fontSize: 12,
-              lineHeight: 1.35,
-            }}
-          >
-            {row.summary}
-          </div>
-        </div>
-      ))}
-    </aside>
+      <SectionEyebrow>{title}</SectionEyebrow>
+      <div
+        style={{
+          minHeight: 0,
+          overflow: scroll ? "auto" : "visible",
+        }}
+      >
+        {children}
+      </div>
+    </section>
   );
 }
 
-function MakeStagePanel({
-  state,
-  onGenerate,
+function CompactTaskSummary({
+  result,
+  workflow,
 }: {
-  state: MakeState;
-  onGenerate: () => void;
+  result: WorkbenchPreflightResult;
+  workflow: WorkbenchWorkflowState;
 }) {
-  const running = state.status === "running";
   return (
-    <ResultSection title="Make">
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 1fr) auto",
-            gap: 12,
-            alignItems: "center",
-          }}
-        >
-          <TextBlock text="Create a first working artefact from the decoded task and retrieved context." />
-          <SmallActionButton
-            type="button"
-            onClick={onGenerate}
-            disabled={running}
-          >
-            {running ? "Generating" : "Generate draft"}
-          </SmallActionButton>
+    <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+      <TextBlock text={result.decoded_task.summary || "Task decoded."} />
+      <WorkflowSummaryText workflow={workflow} />
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <StatusPill status={result.decoded_task.deliverable_type ?? "Output"} />
+        <StatusPill status={result.decoded_task.task_type} />
+      </div>
+      {result.drafted_clarifying_message ? (
+        <div style={{ color: "var(--ink-dim)", fontSize: 12, lineHeight: 1.35 }}>
+          {result.drafted_clarifying_message}
         </div>
-        {state.status === "loaded" ? (
-          <ArtifactPreview artifact={state.result.artifact} />
-        ) : null}
-        {state.status === "error" ? (
-          <InlineStatus tone="error" message={state.message} />
-        ) : null}
-      </div>
-    </ResultSection>
-  );
-}
-
-function ReviewStagePanel({
-  state,
-  canReview,
-  onReview,
-}: {
-  state: ReviewState;
-  canReview: boolean;
-  onReview: () => void;
-}) {
-  const running = state.status === "running";
-  return (
-    <ResultSection title="Review">
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 1fr) auto",
-            gap: 12,
-            alignItems: "center",
-          }}
-        >
-          <TextBlock text="Check assumptions, evidence gaps, tone, and manual verification before saving." />
-          <SmallActionButton
-            type="button"
-            onClick={onReview}
-            disabled={!canReview || running}
-          >
-            {running ? "Reviewing" : "Review draft"}
-          </SmallActionButton>
-        </div>
-        {state.status === "loaded" ? (
-          <ReviewSummary result={state.result} />
-        ) : null}
-        {state.status === "error" ? (
-          <InlineStatus tone="error" message={state.message} />
-        ) : null}
-      </div>
-    </ResultSection>
-  );
-}
-
-function ArtifactPreview({ artifact }: { artifact: WorkbenchArtifact }) {
-  return (
-    <div
-      style={{
-        border: "1px solid var(--rule)",
-        padding: "10px 11px",
-        background: "var(--panel)",
-      }}
-    >
-      <KeyValue label="Type" value={artifact.type} />
-      <KeyValue label="Title" value={artifact.title} />
-      <TextBlock text={artifact.body} />
-      <div style={{ marginTop: 10 }}>
-        <SimpleList items={artifact.assumptions} empty="No assumptions listed." />
-      </div>
-      <div style={{ marginTop: 10 }}>
-        <SimpleList
-          items={artifact.source_refs.map(
-            (source) => `${source.source_type}: ${source.source_label}`,
-          )}
-          empty="No source refs attached."
-        />
-      </div>
-    </div>
-  );
-}
-
-function ReviewSummary({ result }: { result: WorkbenchReviewResult }) {
-  const review = result.review;
-  return (
-    <div
-      style={{
-        border: "1px solid var(--rule)",
-        padding: "10px 11px",
-        background: "var(--panel)",
-      }}
-    >
-      <KeyValue label="Status" value={review.overall_status} />
-      <ReviewList label="Senior challenge" items={review.senior_challenge} />
-      <ReviewList label="Assumptions" items={review.assumptions} />
-      <ReviewList label="Evidence gaps" items={review.evidence_gaps} />
-      <ReviewList label="Cookbook check" items={review.cookbook_check} />
-      <ReviewList label="Tone check" items={review.tone_check} />
-      <ReviewList label="Manual verification" items={review.manual_verification} />
-      {result.warnings?.length ? (
-        <ReviewList label="Warnings" items={result.warnings} />
       ) : null}
     </div>
   );
 }
 
-function ReviewList({ label, items }: { label: string; items: string[] }) {
-  return (
-    <div style={{ marginTop: 10 }}>
-      <div
-        style={{
-          color: "var(--ink-faint)",
-          fontFamily: "var(--font-plex-mono)",
-          fontSize: 10,
-          letterSpacing: "0.1em",
-          textTransform: "uppercase",
-        }}
-      >
-        {label}
-      </div>
-      <SimpleList items={items} empty="Clear." />
-    </div>
-  );
-}
-
-function InlineStatus({
-  tone,
-  message,
-}: {
-  tone: "error" | "info";
-  message: string;
-}) {
-  return (
-    <div
-      role={tone === "error" ? "alert" : "status"}
-      style={{
-        color: tone === "error" ? "var(--danger, #9f1d1d)" : "var(--ink-dim)",
-        fontSize: 12,
-        lineHeight: 1.35,
-      }}
-    >
-      {message}
-    </div>
-  );
-}
-
-function stageStateLabel(state: WorkbenchStageRow["state"]): string {
-  if (state === "complete") return "Complete";
-  if (state === "available") return "Available";
-  if (state === "active") return "Active";
-  if (state === "error") return "Error";
-  return "Locked";
-}
-
-function MetricTile({ label, value }: { label: string; value: string }) {
-  return (
-    <div
-      style={{
-        border: "1px solid var(--rule)",
-        background: "var(--panel)",
-        padding: "10px 12px",
-        minHeight: 64,
-      }}
-    >
-      <div
-        style={{
-          color: "var(--ink-faint)",
-          fontFamily: "var(--font-plex-mono)",
-          fontSize: 10,
-          letterSpacing: "0.12em",
-          textTransform: "uppercase",
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          marginTop: 7,
-          color: "var(--ink)",
-          fontFamily: "var(--font-plex-mono)",
-          fontSize: 13,
-          lineHeight: 1.25,
-          textTransform: label === "Invocation" ? "uppercase" : "none",
-        }}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function ResultSection({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section
-      style={{
-        borderTop: "1px solid var(--rule)",
-        paddingTop: 14,
-        display: "grid",
-        gridTemplateColumns: "190px minmax(0, 1fr)",
-        gap: 18,
-      }}
-    >
-      <h2
-        style={{
-          margin: 0,
-          fontFamily: "var(--font-plex-mono)",
-          fontSize: 11,
-          letterSpacing: "0.12em",
-          textTransform: "uppercase",
-          color: "var(--ink-faint)",
-        }}
-      >
-        {title}
-      </h2>
-      <div style={{ minWidth: 0 }}>{children}</div>
-    </section>
-  );
-}
-
-function PostRunActionPanel({
+function CompactPostRunActions({
   actions,
   state,
   onAction,
@@ -2628,62 +2926,101 @@ function PostRunActionPanel({
   state: PostRunState;
   onAction: (action: WorkbenchPostRunAction) => void;
 }) {
-  if (actions.length === 0) return null;
+  if (actions.length === 0) return <TextBlock text="No actions available." />;
 
   return (
-    <ResultSection title="Post-run Actions">
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {actions.map((action) => {
-          const running =
-            state.status === "running" && state.actionId === action.id;
-          const disabled = action.status === "disabled" || running;
-          return (
-            <div
-              key={action.id}
-              style={{
-                border: "1px solid var(--rule)",
-                padding: "10px 11px",
-                display: "grid",
-                gridTemplateColumns: "minmax(0, 1fr) auto",
-                gap: 12,
-                alignItems: "center",
-              }}
-            >
-              <div style={{ minWidth: 0 }}>
-                <div
-                  style={{
-                    color: "var(--ink)",
-                    fontSize: 13,
-                    lineHeight: 1.25,
-                  }}
-                >
-                  {action.label}
-                </div>
-                <div
-                  style={{
-                    marginTop: 3,
-                    color: "var(--ink-dim)",
-                    fontSize: 12,
-                    lineHeight: 1.35,
-                  }}
-                >
-                  {action.detail}
-                </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+      {actions.map((action) => {
+        const running = state.status === "running" && state.actionId === action.id;
+        const disabled = action.status === "disabled" || running;
+        return (
+          <div
+            key={action.id}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "minmax(0, 1fr) auto",
+              gap: 8,
+              alignItems: "center",
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <div style={{ color: "var(--ink)", fontSize: 12, lineHeight: 1.25 }}>
+                {action.label}
               </div>
-              <SmallActionButton
-                type="button"
-                onClick={() => onAction(action)}
-                disabled={disabled}
+              <div
+                style={{
+                  marginTop: 2,
+                  color: "var(--ink-dim)",
+                  fontSize: 11,
+                  lineHeight: 1.25,
+                }}
               >
-                {postRunButtonLabel(action, running)}
-              </SmallActionButton>
+                {action.detail}
+              </div>
             </div>
-          );
-        })}
+            <SmallActionButton
+              type="button"
+              onClick={() => onAction(action)}
+              disabled={disabled}
+            >
+              {postRunButtonLabel(action, running)}
+            </SmallActionButton>
+          </div>
+        );
+      })}
+      <PostRunStatus state={state} />
+    </div>
+  );
+}
 
-        <PostRunStatus state={state} />
-      </div>
-    </ResultSection>
+function CompactProfilePanel({
+  status,
+  profile,
+}: {
+  status: WorkbenchProfileUpdateStatus;
+  profile: WorkbenchStartResponse["profile"] | null;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {status.state !== "idle" ? (
+        <div>
+          <StatusPill status={status.label} />
+          <div
+            style={{
+              marginTop: 5,
+              color: "var(--ink-dim)",
+              fontSize: 12,
+              lineHeight: 1.35,
+            }}
+          >
+            {status.detail}
+          </div>
+        </div>
+      ) : null}
+      {profile ? (
+        <div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <StatusPill status={`${profile.source_refs.length} profile sources`} />
+            {profile.warnings.length > 0 ? (
+              <StatusPill status={`${profile.warnings.length} warnings`} />
+            ) : null}
+          </div>
+          <div
+            style={{
+              marginTop: 7,
+              color: "var(--ink)",
+              fontSize: 12,
+              lineHeight: 1.4,
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            {profile.summary_text.trim() || "No profile context was available."}
+          </div>
+        </div>
+      ) : (
+        <TextBlock text="No profile context was available." />
+      )}
+    </div>
   );
 }
 
@@ -2713,8 +3050,17 @@ function readWorkbenchProfileUpdate(
   ).profile_update;
 }
 
+function readWorkbenchWorkflow(
+  response: WorkbenchStartResponse,
+): WorkbenchWorkflowState {
+  return response.workflow ?? buildWorkbenchWorkflowState(response.result);
+}
+
 function isDraftedMakeResult(
-  value: WorkbenchMakeResult | { error?: string; detail?: string; message?: string } | null,
+  value:
+    | WorkbenchMakeResult
+    | { error?: string; detail?: string; message?: string }
+    | null,
 ): value is Extract<WorkbenchMakeResult, { status: "drafted" }> {
   return Boolean(value && "status" in value && value.status === "drafted");
 }
@@ -2728,68 +3074,470 @@ function isReviewResult(
   return Boolean(value && "status" in value && value.status === "reviewed");
 }
 
-function ProfileUpdatePanel({
-  status,
-  controls,
-  onUndo,
-}: {
-  status: WorkbenchProfileUpdateStatus;
-  controls?: WorkbenchProfileLearningControl[];
-  onUndo?: () => void;
-}) {
-  if (status.state === "idle") return null;
-  const undoLabel = status.actionLabel ?? "Undo last profile update";
-  const visibleControls = controls ?? [];
+function answeredContextPayload(
+  workflow: WorkbenchWorkflowState,
+  answers: Record<string, string>,
+): Record<string, string> {
+  return Object.fromEntries(
+    workflow.context_questions
+      .map((question) => [question.id, answers[question.id]?.trim() ?? ""] as const)
+      .filter(([, answer]) => answer.length > 0),
+  );
+}
 
+export function deriveWorkbenchStageRows(
+  workflow: WorkbenchWorkflowState,
+): WorkbenchStageRow[] {
+  const missing = workflow.missing_required_context_count;
+  const hasMissingContext = missing > 0;
+
+  return [
+    {
+      id: "understand",
+      label: "Understand",
+      state: "complete",
+      summary: "Workbench has decoded the task and likely output.",
+    },
+    {
+      id: "gather",
+      label: "Gather",
+      state: hasMissingContext ? "active" : "complete",
+      summary: hasMissingContext
+        ? `${pluralize(missing, "detail")} needed before drafting.`
+        : "Context, sources, and profile have been checked.",
+    },
+    {
+      id: "make",
+      label: "Make",
+      state: hasMissingContext ? "locked" : "available",
+      summary: hasMissingContext
+        ? "Add the missing context first."
+        : "Ready to generate a first draft.",
+    },
+    {
+      id: "review",
+      label: "Review",
+      state: "locked",
+      summary: "Generate a draft before review.",
+    },
+    {
+      id: "save",
+      label: "Save",
+      state: "locked",
+      summary: "Review the draft before saving.",
+    },
+  ];
+}
+
+function WorkflowSummaryText({
+  workflow,
+}: {
+  workflow: WorkbenchWorkflowState;
+}) {
+  if (workflow.missing_required_context_count > 0) {
+    return (
+      <TextBlock
+        text={`${pluralize(
+          workflow.missing_required_context_count,
+          "piece",
+        )} of context needed before drafting.`}
+      />
+    );
+  }
+  if (workflow.using_assumptions) {
+    return <TextBlock text="Ready to draft, using labelled assumptions." />;
+  }
+  return <TextBlock text="Ready to draft. Context checks have completed." />;
+}
+
+function ArtifactPreview({
+  artifact,
+  compact,
+}: {
+  artifact: WorkbenchArtifact;
+  compact?: boolean;
+}) {
   return (
-    <ResultSection title="Profile Learning">
+    <div
+      style={{
+        border: "1px solid var(--rule)",
+        padding: "10px 11px",
+        background: compact ? "var(--bg)" : "var(--panel)",
+      }}
+    >
+      <KeyValue label="Type" value={artifact.type} />
+      <KeyValue label="Title" value={artifact.title} />
       <div
         style={{
-          border: "1px solid var(--rule)",
-          padding: "10px 11px",
-          display: "grid",
-          gridTemplateColumns: "minmax(0, 1fr) auto",
-          gap: 12,
-          alignItems: "center",
+          maxHeight: compact ? 220 : undefined,
+          overflow: compact ? "auto" : "visible",
         }}
       >
-        <div style={{ minWidth: 0 }}>
-          <StatusPill status={status.label} />
+        <TextBlock text={artifact.body} />
+      </div>
+      <div style={{ marginTop: 10 }}>
+        <SimpleList items={artifact.assumptions} empty="No assumptions listed." />
+      </div>
+      <div style={{ marginTop: 10 }}>
+        <SimpleList
+          items={artifact.source_refs.map(
+            (source) => `${source.source_type}: ${source.source_label}`,
+          )}
+          empty="No source references attached."
+        />
+      </div>
+    </div>
+  );
+}
+
+function ReviewSummary({
+  result,
+  compact,
+}: {
+  result: WorkbenchReviewResult;
+  compact?: boolean;
+}) {
+  const review = result.review;
+  return (
+    <div
+      style={{
+        border: "1px solid var(--rule)",
+        padding: "10px 11px",
+        background: compact ? "var(--bg)" : "var(--panel)",
+      }}
+    >
+      <KeyValue label="Status" value={review.overall_status} />
+      <ReviewList label="Senior challenge" items={review.senior_challenge} />
+      <ReviewList label="Assumptions" items={review.assumptions} />
+      <ReviewList label="Evidence gaps" items={review.evidence_gaps} />
+      <ReviewList label="Cookbook check" items={review.cookbook_check} />
+      <ReviewList label="Tone check" items={review.tone_check} />
+      <ReviewList label="Manual checks" items={review.manual_verification} />
+      {result.warnings?.length ? (
+        <ReviewList label="Warnings" items={result.warnings} />
+      ) : null}
+    </div>
+  );
+}
+
+function ReviewList({ label, items }: { label: string; items: string[] }) {
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div
+        style={{
+          color: "var(--ink-faint)",
+          fontFamily: "var(--font-plex-mono)",
+          fontSize: 10,
+          letterSpacing: "0.1em",
+          textTransform: "uppercase",
+        }}
+      >
+        {label}
+      </div>
+      <SimpleList items={items} empty="Clear." />
+    </div>
+  );
+}
+
+function buildReviewedArtifactForSave(
+  artifact: WorkbenchArtifact | null,
+  reviewState: ReviewState,
+): WorkbenchPresendReviewedArtifact | null {
+  if (!artifact) return null;
+  return {
+    artifact_type: artifact.type,
+    title: artifact.title,
+    review_status:
+      reviewState.status === "loaded"
+        ? reviewState.result.review.overall_status
+        : null,
+    source_count: artifact.source_refs.length,
+    destination: "drive",
+  };
+}
+
+function InlineStatus({
+  tone,
+  message,
+}: {
+  tone: "error" | "info";
+  message: string;
+}) {
+  return (
+    <div
+      role={tone === "error" ? "alert" : "status"}
+      style={{
+        color: tone === "error" ? "var(--danger, #9f1d1d)" : "var(--ink-dim)",
+        fontSize: 12,
+        lineHeight: 1.35,
+      }}
+    >
+      {sanitizeWorkbenchDetail(message)}
+    </div>
+  );
+}
+
+function ContextNeededPanel({
+  workflow,
+  runId,
+  answers,
+  resumeState,
+  onAnswerChange,
+  onResume,
+  showActions = true,
+}: {
+  workflow: WorkbenchWorkflowState;
+  runId: string | null;
+  answers: Record<string, string>;
+  resumeState: ContextResumeState;
+  onAnswerChange: (questionId: string, value: string) => void;
+  onResume: (action: WorkbenchResumeAction) => void;
+  showActions?: boolean;
+}) {
+  const [openedQuestionIds, setOpenedQuestionIds] = useState<string[]>([]);
+
+  if (workflow.context_questions.length === 0) {
+    return <TextBlock text="No extra context needed. Generate the draft when ready." />;
+  }
+
+  const runningAction =
+    resumeState.status === "running" ? resumeState.action : null;
+  const unansweredRequired = unansweredRequiredContextCount(workflow, answers);
+  const canAnswer = Boolean(runId) && unansweredRequired === 0;
+  const canContinue = Boolean(runId) && workflow.can_continue_with_assumptions;
+  const firstUnansweredQuestion = workflow.context_questions.find(
+    (question) =>
+      !contextAnswerValue(workflow, answers, question.id).trim().length,
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {workflow.context_questions.map((question) => {
+        const value = contextAnswerValue(workflow, answers, question.id);
+        const status = value.trim().length
+          ? "complete"
+          : firstUnansweredQuestion?.id === question.id ||
+              openedQuestionIds.includes(question.id)
+            ? "active"
+            : "todo";
+
+        return (
           <div
+            key={question.id}
             style={{
-              marginTop: 6,
-              color: "var(--ink-dim)",
-              fontSize: 12,
-              lineHeight: 1.35,
+              border: "1px solid var(--rule)",
+              background: "var(--panel)",
+              padding: 20,
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+              boxShadow:
+                status === "active" ? "inset 0 0 0 1px var(--ink)" : "none",
             }}
           >
-            {status.detail}
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {visibleControls.map((control) => (
-            <SmallActionButton
-              key={control.id}
-              type="button"
-              onClick={control.id === "undo" ? onUndo : undefined}
-              disabled={
-                !control.enabled ||
-                (control.id === "undo" && (!onUndo || status.actionDisabled))
+            <ContextQuestionCardContent
+              question={question}
+              value={value}
+              status={status}
+              onOpen={() =>
+                setOpenedQuestionIds((current) =>
+                  current.includes(question.id)
+                    ? current
+                    : [...current, question.id],
+                )
               }
-            >
-              {control.id === "undo" ? undoLabel : control.label}
-            </SmallActionButton>
+              onChange={(nextValue) => onAnswerChange(question.id, nextValue)}
+            />
+          </div>
+        );
+      })}
+
+      <div style={{ color: "var(--ink-dim)", fontSize: 12, lineHeight: 1.35 }}>
+        {unansweredRequired === 0
+          ? "All required context is filled in."
+          : `${pluralize(
+              unansweredRequired,
+              "answer",
+            )} still needed before Workbench can continue.`}
+      </div>
+
+      {showActions ? (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <SmallActionButton
+            type="button"
+            onClick={() => onResume("answer_context")}
+            disabled={!canAnswer || runningAction === "answer_context"}
+          >
+            {runningAction === "answer_context"
+              ? "Continuing"
+              : "Add context and continue"}
+          </SmallActionButton>
+          <SmallActionButton
+            type="button"
+            onClick={() => onResume("continue_with_assumptions")}
+            disabled={
+              !canContinue || runningAction === "continue_with_assumptions"
+            }
+          >
+            {runningAction === "continue_with_assumptions"
+              ? "Continuing"
+              : "Continue without this"}
+          </SmallActionButton>
+          <SmallActionButton
+            type="button"
+            onClick={() => onResume("stop_run")}
+            disabled={!runId || runningAction === "stop_run"}
+          >
+            {runningAction === "stop_run" ? "Pausing" : "Pause run"}
+          </SmallActionButton>
+        </div>
+      ) : null}
+
+      <ContextResumeStatus state={resumeState} runId={runId} />
+    </div>
+  );
+}
+
+function ContextQuestionCardContent({
+  question,
+  value,
+  status,
+  onOpen,
+  onChange,
+}: {
+  question: WorkbenchWorkflowState["context_questions"][number];
+  value: string;
+  status: "complete" | "active" | "todo";
+  onOpen: () => void;
+  onChange: (value: string) => void;
+}) {
+  const shouldShowInput = status !== "todo";
+
+  return (
+    <>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span
+          style={{
+            color: "var(--ink-faint)",
+            fontFamily: "var(--font-plex-mono)",
+            fontSize: 10,
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+          }}
+        >
+          {status}
+        </span>
+        {question.required ? <StatusPill status="Required" /> : null}
+      </div>
+
+      <div>
+        <h3
+          style={{
+            margin: "0 0 6px",
+            color: "var(--ink)",
+            fontSize: 17,
+            lineHeight: 1.25,
+            fontWeight: 600,
+            letterSpacing: 0,
+          }}
+        >
+          {question.question}
+        </h3>
+        <p
+          style={{
+            margin: 0,
+            color: "var(--ink-dim)",
+            fontSize: 13,
+            lineHeight: 1.4,
+          }}
+        >
+          {question.why}
+        </p>
+      </div>
+
+      {question.suggested_sources.length > 0 ? (
+        <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+          {question.suggested_sources.map((source) => (
+            <StatusPill key={`${question.id}-${source}`} status={source} />
           ))}
         </div>
+      ) : null}
+
+      {shouldShowInput ? (
+        <textarea
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          rows={status === "active" ? 4 : 2}
+          placeholder="Type the missing detail here."
+          style={setupInputStyle({
+            minHeight: status === "active" ? 104 : 58,
+            resize: "vertical",
+          })}
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={onOpen}
+          style={{
+            alignSelf: "flex-start",
+            border: "none",
+            background: "transparent",
+            color: "var(--ink-dim)",
+            padding: 0,
+            fontFamily: "var(--font-plex-mono)",
+            fontSize: 10,
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            cursor: "pointer",
+          }}
+        >
+          + Answer this
+        </button>
+      )}
+    </>
+  );
+}
+
+function ContextResumeStatus({
+  state,
+  runId,
+}: {
+  state: ContextResumeState;
+  runId: string | null;
+}) {
+  if (!runId) {
+    return (
+      <div style={{ color: "var(--ink-dim)", fontSize: 12, lineHeight: 1.35 }}>
+        This run was not saved, so Workbench cannot continue it.
       </div>
-    </ResultSection>
+    );
+  }
+  if (state.status === "idle" || state.status === "running") return null;
+
+  if (state.status === "error") {
+    return (
+      <div role="alert" style={{ color: "var(--danger, #9f1d1d)", fontSize: 12 }}>
+        {sanitizeWorkbenchDetail(state.message)}
+      </div>
+    );
+  }
+
+  const unresolvedCount = state.resume.unresolved_context.length;
+  return (
+    <div style={{ color: "var(--ink-dim)", fontSize: 12, lineHeight: 1.35 }}>
+      {state.resume.status === "stopped"
+        ? "Run paused."
+        : unresolvedCount === 0
+          ? "Context added. Workbench is continuing with the extra detail."
+          : `${pluralize(unresolvedCount, "answer")} still needed.`}
+    </div>
   );
 }
 
 function postRunButtonLabel(action: WorkbenchPostRunAction, running: boolean) {
-  if (running) return action.id === "presend" ? "Preparing" : "Sending";
+  if (running) return action.id === "presend" ? "Saving" : "Sending";
   if (action.status === "disabled") return "Disabled";
-  if (action.id === "presend") return "Run";
+  if (action.id === "presend") return "Save";
   return "Send";
 }
 
@@ -2837,7 +3585,7 @@ function SectionEyebrow({ children }: { children: React.ReactNode }) {
   );
 }
 
-function ConnectorReadinessPanel({
+export function ConnectorReadinessPanel({
   summary,
 }: {
   summary: WorkbenchConnectorSummary;
@@ -2901,7 +3649,7 @@ function ConnectorReadinessPanel({
   );
 }
 
-function WorkbenchSetupPanel({
+export function WorkbenchSetupPanel({
   form,
   config,
   onboardingForm,
@@ -2954,6 +3702,7 @@ function WorkbenchSetupPanel({
     setupReady: setupSummary.state === "ready",
     config,
   });
+  const profileSeedExists = hasWorkbenchProfileSeed(config);
 
   function updateField(field: keyof WorkbenchConfigForm, value: string) {
     onFormChange({ ...form, [field]: value });
@@ -3082,7 +3831,7 @@ function WorkbenchSetupPanel({
           label="Role / title"
           value={onboardingForm.role_title}
           onChange={(value) => updateOnboardingField("role_title", value)}
-          required
+          required={!profileSeedExists}
         />
         <label
           style={{
@@ -3104,7 +3853,7 @@ function WorkbenchSetupPanel({
               updateOnboardingField("current_focus_bullets", event.target.value)
             }
             rows={2}
-            required
+            required={!profileSeedExists}
             style={setupInputStyle({ minHeight: 52, resize: "vertical" })}
           />
         </label>
@@ -3389,7 +4138,7 @@ function RunHistoryPanel({
           gap: 10,
         }}
       >
-        <SectionEyebrow>Recent Task Runs</SectionEyebrow>
+        <SectionEyebrow>Recent work</SectionEyebrow>
         <SmallActionButton
           type="button"
           onClick={onRefresh}
@@ -3414,7 +4163,7 @@ function RunHistoryPanel({
 
       {state.status === "loaded" && state.runs.length === 0 ? (
         <div style={{ color: "var(--ink-dim)", fontSize: 12, lineHeight: 1.35 }}>
-          No task runs yet.
+          No recent work yet.
         </div>
       ) : null}
 
@@ -3885,82 +4634,54 @@ function TextBlock({ text }: { text: string }) {
   );
 }
 
-function MissingContextList({ items }: { items: WorkbenchMissingContext[] }) {
-  if (items.length === 0) return <TextBlock text="No missing context flagged." />;
-  return (
-    <ol style={{ margin: 0, paddingLeft: 18 }}>
-      {items.map((item, index) => (
-        <li key={`${item.question}-${index}`} style={{ marginBottom: 8 }}>
-          <span>{item.question}</span>
-          {item.why ? (
-            <div style={{ color: "var(--ink-dim)", fontSize: 13 }}>
-              {item.why}
-            </div>
-          ) : null}
-        </li>
-      ))}
-    </ol>
-  );
-}
-
-function RetrievedContextList({ items }: { items: WorkbenchRetrievedContext[] }) {
-  if (items.length === 0) {
-    return <TextBlock text="No retrieved context returned." />;
-  }
-  return (
-    <ul style={{ margin: 0, paddingLeft: 18 }}>
-      {items.map((item, index) => (
-        <li key={`${item.source_label}-${index}`} style={{ marginBottom: 10 }}>
-          <span>{item.claim}</span>
-          <div
-            style={{
-              marginTop: 3,
-              color: "var(--ink-dim)",
-              fontFamily: "var(--font-plex-mono)",
-              fontSize: 11,
-            }}
-          >
-            {item.source_type}:{" "}
-            {item.source_url ? (
-              <a href={item.source_url} target="_blank" rel="noreferrer">
-                {item.source_label}
-              </a>
-            ) : (
-              item.source_label
-            )}
-          </div>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function RetrievalStatusList({ rows }: { rows: WorkbenchRetrievalRow[] }) {
+function RetrievalStatusList({
+  rows,
+  compact,
+}: {
+  rows: WorkbenchRetrievalRow[];
+  compact?: boolean;
+}) {
   if (rows.length === 0) {
     return <TextBlock text="No retrieval status returned." />;
   }
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: compact ? 6 : 8 }}>
       {rows.map((row) => (
         <div
           key={row.source}
           style={{
             border: "1px solid var(--rule)",
-            padding: "9px 10px",
+            padding: compact ? "7px 8px" : "9px 10px",
             display: "grid",
-            gridTemplateColumns: "130px 120px 90px minmax(0, 1fr)",
-            gap: 10,
+            gridTemplateColumns: compact
+              ? "minmax(0, 1fr) auto"
+              : "130px 120px 90px minmax(0, 1fr)",
+            gap: compact ? 7 : 10,
             alignItems: "start",
-            fontSize: 13,
+            fontSize: compact ? 12 : 13,
           }}
         >
-          <span style={{ fontFamily: "var(--font-plex-mono)" }}>
-            {row.source}
-          </span>
+          <span style={{ fontFamily: "var(--font-plex-mono)" }}>{row.label}</span>
           <StatusPill status={row.status} />
-          <span style={{ color: "var(--ink-dim)" }}>{row.itemsCount} items</span>
-          <span style={{ color: "var(--ink-dim)" }}>
-            {[row.reason, ...row.warnings].filter(Boolean).join(" | ") || "Clear"}
+          <span
+            style={{
+              color: "var(--ink-dim)",
+              gridColumn: compact ? "1 / -1" : undefined,
+            }}
+          >
+            {row.itemsCount} items
+          </span>
+          <span
+            title={[row.reason, ...row.warnings].filter(Boolean).join(" | ")}
+            style={{
+              color: "var(--ink-dim)",
+              gridColumn: compact ? "1 / -1" : undefined,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: compact ? "normal" : "nowrap",
+            }}
+          >
+            {row.detail || "Clear"}
           </span>
         </div>
       ))}
@@ -3977,10 +4698,19 @@ function StatusPill({ status }: { status: string }) {
     normalized === "ready" ||
     normalized === "ready to run" ||
     normalized === "connected" ||
-    normalized === "profile updated";
+    normalized === "complete" ||
+    normalized === "available" ||
+    normalized === "profile updated" ||
+    normalized === "notion" ||
+    normalized === "cornerstone" ||
+    normalized === "calendar" ||
+    normalized === "user" ||
+    normalized.endsWith("profile sources");
   const isWarn =
     normalized === "unavailable" ||
     normalized === "loading" ||
+    normalized === "active" ||
+    normalized === "locked" ||
     normalized === "checking" ||
     normalized === "checking setup" ||
     normalized === "not connected" ||
@@ -4016,24 +4746,6 @@ function StatusPill({ status }: { status: string }) {
     >
       {status}
     </span>
-  );
-}
-
-function ApproachList({ items }: { items: WorkbenchApproachStep[] }) {
-  if (items.length === 0) return <TextBlock text="No run plan returned." />;
-  return (
-    <ol style={{ margin: 0, paddingLeft: 18 }}>
-      {items.map((item, index) => (
-        <li key={`${item.step}-${index}`} style={{ marginBottom: 8 }}>
-          <span>{item.step}</span>
-          {item.rationale ? (
-            <div style={{ color: "var(--ink-dim)", fontSize: 13 }}>
-              {item.rationale}
-            </div>
-          ) : null}
-        </li>
-      ))}
-    </ol>
   );
 }
 
@@ -4098,12 +4810,6 @@ function formatCompactDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-function formatLatency(latencyMs: number | null) {
-  if (latencyMs == null) return "Not recorded";
-  if (latencyMs < 1000) return `${Math.round(latencyMs)}ms`;
-  return `${(latencyMs / 1000).toFixed(1)}s`;
 }
 
 function RunPaneStateView({ summary }: { summary: WorkbenchRunPaneSummary }) {
