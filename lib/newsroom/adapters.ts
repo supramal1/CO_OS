@@ -380,42 +380,120 @@ function cornerstoneFactToCandidate(
 function summarizeCornerstoneFactCandidates(
   candidates: NewsroomSourceSnapshot["candidates"],
 ): NewsroomSourceSnapshot["candidates"] {
-  const summaries = candidates
-    .slice(0, 4)
-    .map((candidate) => summarizeCornerstoneChange(candidate.reason))
-    .filter(Boolean);
-  const reason =
-    summaries.length > 0
-      ? `Since yesterday: ${summaries.join(" ")}`
-      : "Source-backed Cornerstone changes were found since yesterday.";
+  const summary = buildCornerstoneOperatingSummary(candidates);
 
   return [
     {
       id: "cornerstone-facts-summary",
-      title: "What changed since yesterday",
-      reason: boundedText(reason, 520),
+      title: summary.title,
+      reason: summary.reason,
       source: "cornerstone",
       confidence: "high",
       section: "changedSinceYesterday",
-      signals: ["changed_since_yesterday"],
+      signals: summary.followUps.length > 0
+        ? ["changed_since_yesterday", "human_decision"]
+        : ["changed_since_yesterday"],
       sourceRefs: candidates.flatMap((candidate) => candidate.sourceRefs ?? []),
     },
   ];
 }
 
+type CornerstoneOperatingSummary = {
+  title: string;
+  reason: string;
+  followUps: Array<{ title: string; detail: string }>;
+};
+
+function buildCornerstoneOperatingSummary(
+  candidates: NewsroomSourceSnapshot["candidates"],
+): CornerstoneOperatingSummary {
+  const text = normalizeWhitespace(candidates.map((candidate) => candidate.reason).join(" "));
+  const lower = text.toLowerCase();
+  const hasWorkbench = /\bworkbench\b/.test(lower);
+  const hasNewsroom = /\bnewsroom\b/.test(lower);
+  const narrative: string[] = [];
+  const followUps: Array<{ title: string; detail: string }> = [];
+
+  if (hasWorkbench && /(context-needed|use context|resume|staged|make\/review)/i.test(text)) {
+    narrative.push(
+      "Workbench gained a clearer context-needed resume flow and staged make/review handling.",
+    );
+  } else if (hasWorkbench) {
+    narrative.push("Workbench had workflow updates that affect daily staff work.");
+  }
+
+  if (hasNewsroom && /(cornerstone|fact|graph memory|implementation logs?|brief)/i.test(text)) {
+    narrative.push(
+      "Newsroom now uses Cornerstone facts to explain what changed without exposing raw implementation logs.",
+    );
+  } else if (hasNewsroom) {
+    narrative.push("Newsroom had updates to the daily orientation brief.");
+  }
+
+  if (/(calendar|notion|connector|not connected|setup|workspaces?|child pages?)/i.test(text)) {
+    followUps.push({
+      title: "Connector setup",
+      detail:
+        "Calendar and Notion still need setup resolution before Newsroom can fully orient the day.",
+    });
+  }
+
+  if (/(branch|worktree|\/users\/|commit|fact keys?|implementation logs?)/i.test(text)) {
+    followUps.push({
+      title: "Brief quality",
+      detail:
+        "Keep translating implementation facts into product meaning, not branch names or paths.",
+    });
+  }
+
+  const title =
+    hasWorkbench && hasNewsroom
+      ? "Workbench and Newsroom moved closer to daily staff use"
+      : hasWorkbench
+        ? "Workbench moved closer to daily staff use"
+        : hasNewsroom
+          ? "Newsroom moved closer to daily staff use"
+          : "What changed since yesterday";
+  const narrativeText =
+    narrative.length > 0
+      ? narrative.join(" ")
+      : candidates
+          .slice(0, 2)
+          .map((candidate) => summarizeCornerstoneChange(candidate.reason))
+          .filter(Boolean)
+          .join(" ");
+  const followUpText =
+    followUps.length > 0
+      ? `\n\nWorth looking at\n${followUps
+          .map((item) => `- ${item.title}: ${item.detail}`)
+          .join("\n")}`
+      : "";
+
+  return {
+    title,
+    reason: `${boundedText(narrativeText, 360)}${followUpText}`,
+    followUps,
+  };
+}
+
 function summarizeCornerstoneChange(reason: string): string {
-  const cleaned = normalizeWhitespace(
-    firstSentence(reason)
-      .replace(/^On\s+\d{4}-\d{2}-\d{2},?\s*/i, "")
-      .replace(/\bCO OS branch\s+\S+\s+/i, "")
-      .replace(/\bthrough commit\s+[a-f0-9]{7,40}\b:?\s*/i, "")
-      .replace(/\bin commit\s+[a-f0-9]{7,40}\b:?\s*/i, "")
-      .replace(/\bcommit\s+[a-f0-9]{7,40}\b:?\s*/i, ""),
-  );
+  const cleaned = normalizeWhitespace(stripImplementationNoise(firstSentence(reason)));
   if (!cleaned) return "";
 
   const sentence = /[.!?]$/.test(cleaned) ? cleaned : `${cleaned}.`;
   return boundedText(sentence, 180);
+}
+
+function stripImplementationNoise(value: string): string {
+  return value
+    .replace(/^On\s+\d{4}-\d{2}-\d{2},?\s*/i, "")
+    .replace(/^2026-04-30\s+/i, "")
+    .replace(/\bCO OS worktree\s+\/\S+\s+/gi, "")
+    .replace(/\bCO OS branch\s+\S+\s+/gi, "")
+    .replace(/\bon branch\s+\S+\s+/gi, "")
+    .replace(/\bthrough commit\s+[a-f0-9]{7,40}\b:?\s*/gi, "")
+    .replace(/\bin commit\s+[a-f0-9]{7,40}\b:?\s*/gi, "")
+    .replace(/\bcommit\s+[a-f0-9]{7,40}\b:?\s*/gi, "");
 }
 
 function unavailableSnapshot(

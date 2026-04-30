@@ -13,6 +13,11 @@ const SOURCE_LABELS: Record<NewsroomSourceStatus["source"], string> = {
   workbench: "Workbench",
 };
 
+export type FormattedNewsroomReason = {
+  narrative: string;
+  followUps: Array<{ title: string; detail: string }>;
+};
+
 export function deriveNewsroomEmptyMessage(
   statuses: NewsroomSourceStatus[],
 ): string {
@@ -101,6 +106,25 @@ export function actionLinkAriaLabel(action: NewsroomAction): string {
   return `${action.label} in ${SOURCE_LABELS[action.target]}`;
 }
 
+export function formatNewsroomReason(reason: string): FormattedNewsroomReason {
+  const [narrativePart, followUpPart] = reason.split(/\n\s*\nWorth looking at\n/i);
+  const narrative = normalizeReasonText(narrativePart);
+  const followUps = (followUpPart ?? "")
+    .split(/\n+/)
+    .flatMap((line) => {
+      const match = line.trim().match(/^-\s*([^:]+):\s*(.+)$/);
+      if (!match) return [];
+      return [
+        {
+          title: normalizeReasonText(match[1]),
+          detail: normalizeReasonText(match[2]),
+        },
+      ];
+    });
+
+  return { narrative, followUps };
+}
+
 function allSourcesUnavailable(statuses: NewsroomSourceStatus[]): boolean {
   return (
     statuses.length > 0 &&
@@ -114,4 +138,8 @@ function isNotConnectedStatus(status: NewsroomSourceStatus): boolean {
   if (status.source !== "calendar" && status.source !== "notion") return false;
   if (status.status !== "unavailable" && status.status !== "error") return false;
   return true;
+}
+
+function normalizeReasonText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
 }

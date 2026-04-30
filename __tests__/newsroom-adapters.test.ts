@@ -553,16 +553,22 @@ describe("newsroom adapters", () => {
         Response.json({
           facts: [
             {
-              key: "co_workbench_built",
+              key: "co_workbench_context_resume_rerun_local",
               value:
-                "On 2026-04-30, Workbench workflow hardening shipped with staged make/review flows.",
+                "CO OS worktree /Users/malik.james-williams/co-os-second-brain-sprint updated Workbench context-needed flow so Use context posts to /api/workbench/runs/[id]/resume and, when all required context is present, continues into the staged make/review workflow.",
               updated_at: "2026-04-30T08:00:00.000Z",
             },
             {
-              key: "co_newsroom_mvp_built",
+              key: "co_newsroom_changed_section_quality",
               value:
-                "On 2026-04-30, CO OS Newsroom MVP was implemented with /newsroom and the brief API.",
+                "On 2026-04-30, CO OS Newsroom was updated so Changed Since Yesterday summarizes actual Cornerstone fact content rather than fact keys, Calendar/Notion unavailable or error source states are shown as not connected setup states, and duplicate suggested action links are deduped.",
               updated_at: "2026-04-30T08:30:00.000Z",
+            },
+            {
+              key: "co_workbench_personalisation_sprint_decision",
+              value:
+                "2026-04-30 Workbench personalisation sprint decision: staff should never choose between duplicate Notion workspaces; setup must reuse an existing accessible CO Workbench, repair missing child pages, and create only when none exists.",
+              updated_at: "2026-04-30T08:45:00.000Z",
             },
           ],
         }),
@@ -576,16 +582,17 @@ describe("newsroom adapters", () => {
       candidates: [
         {
           id: "cornerstone-facts-summary",
-          title: "What changed since yesterday",
+          title: "Workbench and Newsroom moved closer to daily staff use",
           reason:
-            "Since yesterday: Workbench workflow hardening shipped with staged make/review flows. CO OS Newsroom MVP was implemented with /newsroom and the brief API.",
+            "Workbench gained a clearer context-needed resume flow and staged make/review handling. Newsroom now uses Cornerstone facts to explain what changed without exposing raw implementation logs.\n\nWorth looking at\n- Connector setup: Calendar and Notion still need setup resolution before Newsroom can fully orient the day.\n- Brief quality: Keep translating implementation facts into product meaning, not branch names or paths.",
           source: "cornerstone",
           confidence: "high",
           section: "changedSinceYesterday",
-          signals: ["changed_since_yesterday"],
+          signals: ["changed_since_yesterday", "human_decision"],
           sourceRefs: [
-            "cornerstone:fact:co_workbench_built",
-            "cornerstone:fact:co_newsroom_mvp_built",
+            "cornerstone:fact:co_workbench_context_resume_rerun_local",
+            "cornerstone:fact:co_newsroom_changed_section_quality",
+            "cornerstone:fact:co_workbench_personalisation_sprint_decision",
           ],
         },
       ],

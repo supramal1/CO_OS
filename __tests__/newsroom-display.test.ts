@@ -5,6 +5,7 @@ import {
   newsroomSectionEmptyMessage,
   dismissItemAriaLabel,
   itemActionAriaLabel,
+  formatNewsroomReason,
   sourceStatusDetail,
   sourceStatusLabel,
   sourceLinkAriaLabel,
@@ -142,5 +143,31 @@ describe("Newsroom display helpers", () => {
         "Client X needs evidence",
       ),
     ).toBe("Open Review for Client X needs evidence");
+  });
+
+  it("parses hybrid reason text into narrative and follow-up rows", () => {
+    expect(
+      formatNewsroomReason(
+        [
+          "Narrative sentence.",
+          "",
+          "Worth looking at",
+          "- Connector setup: Calendar and Notion need setup resolution.",
+          "- Brief quality: Keep product meaning.",
+        ].join("\n"),
+      ),
+    ).toEqual({
+      narrative: "Narrative sentence.",
+      followUps: [
+        {
+          title: "Connector setup",
+          detail: "Calendar and Notion need setup resolution.",
+        },
+        {
+          title: "Brief quality",
+          detail: "Keep product meaning.",
+        },
+      ],
+    });
   });
 });

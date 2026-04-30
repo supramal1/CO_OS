@@ -12,6 +12,7 @@ import type {
 import {
   actionLinkAriaLabel,
   dismissItemAriaLabel,
+  formatNewsroomReason,
   itemActionAriaLabel,
   newsroomSectionEmptyMessage,
   sourceLabel,
@@ -302,6 +303,8 @@ function NewsroomItemRow({
   onDismiss: () => void;
   compact: boolean;
 }) {
+  const reason = formatNewsroomReason(item.reason);
+
   return (
     <article
       style={{
@@ -331,17 +334,7 @@ function NewsroomItemRow({
           >
             {item.title}
           </h2>
-          <p
-            style={{
-              margin: "5px 0 0",
-              fontFamily: "var(--font-plex-sans)",
-              fontSize: 13,
-              lineHeight: 1.45,
-              color: "var(--ink-dim)",
-            }}
-          >
-            {item.reason}
-          </p>
+          <ReasonBlock reason={reason} />
         </div>
         <button
           type="button"
@@ -378,6 +371,71 @@ function NewsroomItemRow({
         ) : null}
       </div>
     </article>
+  );
+}
+
+function ReasonBlock({ reason }: { reason: ReturnType<typeof formatNewsroomReason> }) {
+  return (
+    <div style={{ display: "grid", gap: reason.followUps.length > 0 ? 12 : 0 }}>
+      {reason.narrative ? (
+        <p
+          style={{
+            margin: "5px 0 0",
+            fontFamily: "var(--font-plex-sans)",
+            fontSize: 13,
+            lineHeight: 1.45,
+            color: "var(--ink-dim)",
+          }}
+        >
+          {reason.narrative}
+        </p>
+      ) : null}
+      {reason.followUps.length > 0 ? (
+        <div
+          style={{
+            borderTop: "1px solid var(--rule)",
+            paddingTop: 10,
+            display: "grid",
+            gap: 8,
+          }}
+        >
+          <MetaLabel>Worth looking at</MetaLabel>
+          {reason.followUps.map((item) => (
+            <div
+              key={`${item.title}:${item.detail}`}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "minmax(96px, 130px) minmax(0, 1fr)",
+                gap: 12,
+                alignItems: "start",
+              }}
+            >
+              <strong
+                style={{
+                  fontFamily: "var(--font-plex-sans)",
+                  fontSize: 13,
+                  lineHeight: 1.35,
+                  fontWeight: 500,
+                  color: "var(--ink)",
+                }}
+              >
+                {item.title}
+              </strong>
+              <span
+                style={{
+                  fontFamily: "var(--font-plex-sans)",
+                  fontSize: 13,
+                  lineHeight: 1.4,
+                  color: "var(--ink-dim)",
+                }}
+              >
+                {item.detail}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
