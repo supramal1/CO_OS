@@ -191,7 +191,7 @@ describe("Workbench onboarding personalisation", () => {
     expect(prompt).not.toContain("Personal context:");
   });
 
-  it("rejects model responses that do not match the strict onboarding draft JSON", async () => {
+  it("falls back when model responses do not match the strict onboarding draft JSON", async () => {
     const modelClient: WorkbenchOnboardingModelClient = {
       create: vi.fn(async () =>
         JSON.stringify({
@@ -206,11 +206,25 @@ describe("Workbench onboarding personalisation", () => {
       modelClient,
     });
 
-    expect(result).toEqual({
-      status: "error",
-      error: "onboarding_draft_invalid_json",
-      message:
-        "Workbench could not turn that into a profile preview. Please try again.",
+    expect(result).toMatchObject({
+      status: "drafted",
+      fallback: true,
+      warning: "onboarding_draft_invalid_json",
+      draft: {
+        personal_profile: {
+          bullets: expect.arrayContaining([
+            "Senior Strategist, Client Strategy.",
+          ]),
+        },
+        working_on: {
+          bullets: expect.arrayContaining(["Nike QBR narrative."]),
+        },
+        voice: {
+          bullets: expect.arrayContaining([
+            "Preferred style: Concise; Source-led.",
+          ]),
+        },
+      },
     });
   });
 

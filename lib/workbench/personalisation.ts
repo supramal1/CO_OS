@@ -68,7 +68,10 @@ export type WorkbenchOnboardingDraftResult =
       status: "drafted";
       draft: WorkbenchOnboardingDraft;
       fallback?: boolean;
-      warning?: "onboarding_model_unavailable" | "onboarding_draft_failed";
+      warning?:
+        | "onboarding_model_unavailable"
+        | "onboarding_draft_failed"
+        | "onboarding_draft_invalid_json";
       message?: string;
     }
   | {
@@ -250,12 +253,10 @@ export async function generateWorkbenchOnboardingDraft(input: {
 
   const draft = parseWorkbenchOnboardingDraft(raw);
   if (!draft) {
-    return {
-      status: "error",
-      error: "onboarding_draft_invalid_json",
-      message:
-        "Workbench could not turn that into a profile preview. Please try again.",
-    };
+    return fallbackOnboardingDraftResult(
+      parsed.payload,
+      "onboarding_draft_invalid_json",
+    );
   }
 
   return { status: "drafted", draft };
@@ -263,7 +264,10 @@ export async function generateWorkbenchOnboardingDraft(input: {
 
 function fallbackOnboardingDraftResult(
   payload: WorkbenchOnboardingPayload,
-  warning: "onboarding_model_unavailable" | "onboarding_draft_failed",
+  warning:
+    | "onboarding_model_unavailable"
+    | "onboarding_draft_failed"
+    | "onboarding_draft_invalid_json",
 ): Extract<WorkbenchOnboardingDraftResult, { status: "drafted" }> {
   return {
     status: "drafted",
