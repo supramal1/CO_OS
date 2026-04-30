@@ -25,9 +25,17 @@ type ProfileLoadState =
   | { status: "loaded"; profile: ProfileSnapshot }
   | { status: "error"; message: string };
 
-export function ProfileShell() {
+export function ProfileShell({
+  initialProfile = null,
+}: {
+  initialProfile?: ProfileSnapshot | null;
+}) {
   const { data: session, status: sessionStatus } = useSession();
-  const [state, setState] = useState<ProfileLoadState>({ status: "loading" });
+  const [state, setState] = useState<ProfileLoadState>(
+    initialProfile
+      ? { status: "loaded", profile: initialProfile }
+      : { status: "loading" },
+  );
   const profile = state.status === "loaded" ? state.profile : null;
   const name =
     profile?.identity.name ??
@@ -60,6 +68,7 @@ export function ProfileShell() {
     const controller = new AbortController();
 
     async function loadProfile() {
+      if (initialProfile) return;
       if (sessionStatus === "loading") return;
 
       if (sessionStatus === "unauthenticated") {
@@ -96,7 +105,7 @@ export function ProfileShell() {
 
     void loadProfile();
     return () => controller.abort();
-  }, [sessionStatus]);
+  }, [initialProfile, sessionStatus]);
 
   return (
     <div
