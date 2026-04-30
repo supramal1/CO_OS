@@ -22,6 +22,7 @@ describe("top-level CO OS modules", () => {
     });
     expect(byId.get("newsroom")?.adminOnly).toBeUndefined();
     expect(ids.indexOf("newsroom")).toBeLessThan(ids.indexOf("workbench"));
+    expect(ids).not.toContain("profile");
     expect(byId.get("admin")).toMatchObject({
       label: "Admin",
       path: "/admin",
