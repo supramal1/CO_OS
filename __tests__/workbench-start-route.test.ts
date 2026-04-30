@@ -127,9 +127,40 @@ describe("POST /api/workbench/start", () => {
     const body = (await res.json()) as {
       result: { decoded_task: { summary: string } };
       invocation: { user_id: string; skill_version: string };
+      workflow: unknown;
     };
 
     expect(body.result.decoded_task.summary).toBe("Respond to an EM ask");
+    expect(body.workflow).toMatchObject({
+      current_stage: "understand",
+      stages: [
+        {
+          id: "understand",
+          label: "Understand",
+          status: "complete",
+        },
+        {
+          id: "gather",
+          label: "Gather",
+          status: "complete",
+        },
+        {
+          id: "make",
+          label: "Make",
+          status: "available",
+        },
+        {
+          id: "review",
+          label: "Review",
+          status: "locked",
+        },
+        {
+          id: "save",
+          label: "Save",
+          status: "locked",
+        },
+      ],
+    });
     expect(body.invocation).toMatchObject({
       user_id: "principal_user_1",
       skill_version: "0.1.0",
