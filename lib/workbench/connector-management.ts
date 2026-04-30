@@ -43,7 +43,7 @@ export const WORKBENCH_CONNECTOR_MANAGEMENT_ACTIONS = [
 ] as const;
 
 const NOTION_REPAIR_URL = "/api/workbench/notion/start";
-const GOOGLE_REPAIR_URL = "/api/auth/signin/google?callbackUrl=%2Fworkbench";
+const GOOGLE_REPAIR_URL = "/workbench?google_oauth=start";
 const TOKEN_REVOCATION_UNSUPPORTED_REASON = "token_revocation_not_supported_v1";
 
 export type WorkbenchManagedConnectorSource =

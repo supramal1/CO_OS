@@ -17,7 +17,7 @@ import { WORKBENCH_NOTION_SETUP_CHILD_TITLES } from "@/lib/workbench/notion-setu
 import type { WorkbenchUserConfig } from "@/lib/workbench/retrieval/types";
 
 const principalId = "principal_123";
-const googleRepairUrl = "/api/auth/signin/google?callbackUrl=%2Fworkbench";
+const googleRepairUrl = "/workbench?google_oauth=start";
 
 const readyGoogleReadiness = {
   ready: true,

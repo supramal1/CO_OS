@@ -189,7 +189,7 @@ describe("Workbench connector management", () => {
       source: "google_workspace",
       status: "reauth_required",
       action: "repair_redirect",
-      next_url: "/api/auth/signin/google?callbackUrl=%2Fworkbench",
+      next_url: "/workbench?google_oauth=start",
       message: "Reconnect Google Workspace to repair Drive and Calendar.",
       reason: "grant_missing",
     });
