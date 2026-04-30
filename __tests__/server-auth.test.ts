@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   getToken: vi.fn(),
   headers: vi.fn(),
+  resolveEmailToPrincipal: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({
@@ -20,12 +21,18 @@ vi.mock("next/headers", () => ({
   headers: () => mocks.headers(),
 }));
 
+vi.mock("@/lib/cornerstone", () => ({
+  resolveEmailToPrincipal: (...args: unknown[]) =>
+    mocks.resolveEmailToPrincipal(...args),
+}));
+
 import { authWithApiKey } from "@/lib/server-auth";
 
 beforeEach(() => {
   mocks.auth.mockReset();
   mocks.getToken.mockReset();
   mocks.headers.mockReset();
+  mocks.resolveEmailToPrincipal.mockReset();
   process.env.AUTH_SECRET = "auth-secret";
   delete process.env.NEXTAUTH_SECRET;
   delete process.env.AUTH_URL;
@@ -97,5 +104,33 @@ describe("authWithApiKey", () => {
       secret: "co-os-local-development-secret",
       secureCookie: false,
     });
+  });
+
+  it("re-resolves the principal by email when the JWT has no apiKey yet", async () => {
+    const requestHeaders = new Headers({ cookie: "authjs.session-token=value" });
+    mocks.auth.mockResolvedValue({
+      principalId: "principal_staff",
+      isAdmin: false,
+      user: { email: "staff@example.com", name: "Staff User" },
+    });
+    mocks.headers.mockResolvedValue(requestHeaders);
+    mocks.getToken.mockResolvedValue({
+      principalId: "principal_staff",
+    });
+    mocks.resolveEmailToPrincipal.mockResolvedValue({
+      principal_id: "principal_staff",
+      principal_name: "Staff User",
+      api_key: "csk_resolved_from_email",
+      created: false,
+    });
+
+    await expect(authWithApiKey()).resolves.toMatchObject({
+      principalId: "principal_staff",
+      apiKey: "csk_resolved_from_email",
+    });
+    expect(mocks.resolveEmailToPrincipal).toHaveBeenCalledWith(
+      "staff@example.com",
+      "Staff User",
+    );
   });
 });

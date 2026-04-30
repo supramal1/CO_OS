@@ -3,6 +3,7 @@ import type { Session } from "next-auth";
 import { getToken } from "next-auth/jwt";
 import { auth } from "@/auth";
 import { resolveAuthSecret } from "@/auth.config";
+import { resolveEmailToPrincipal } from "@/lib/cornerstone";
 
 export type ServerAuthSession = Session & {
   apiKey: string | null;
@@ -12,7 +13,10 @@ export async function authWithApiKey(): Promise<ServerAuthSession | null> {
   const session = await auth();
   if (!session) return null;
 
-  const apiKey = getTestSessionApiKey(session) ?? (await getJwtApiKey());
+  const apiKey =
+    getTestSessionApiKey(session) ??
+    (await getJwtApiKey()) ??
+    (await resolveSessionApiKey(session));
   return { ...session, apiKey };
 }
 
@@ -33,6 +37,17 @@ function getTestSessionApiKey(session: Session): string | null {
   if (process.env.NODE_ENV !== "test") return null;
   const value = (session as { apiKey?: unknown }).apiKey;
   return typeof value === "string" ? value : null;
+}
+
+async function resolveSessionApiKey(session: Session): Promise<string | null> {
+  const email = session.user?.email;
+  if (!email) return null;
+
+  const resolved = await resolveEmailToPrincipal(
+    email,
+    session.user?.name ?? undefined,
+  );
+  return resolved?.api_key ?? null;
 }
 
 function authSecret(): string | null {
