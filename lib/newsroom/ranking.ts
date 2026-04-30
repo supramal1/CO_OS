@@ -47,6 +47,7 @@ const GENERIC_TITLE_TOKENS = new Set([
   "the",
   "to",
 ]);
+const STATUS_TITLE_TOKENS = new Set(["evidence", "missing"]);
 
 export function rankNewsroomItems<T extends NewsroomCandidate>(items: T[]): T[] {
   return [...items].sort(compareCandidates);
@@ -155,7 +156,15 @@ function mergeCandidates(candidates: NewsroomCandidate[]): NewsroomCandidate {
 }
 
 function toItems(items: NewsroomCandidate[]): NewsroomItem[] {
-  return items.map(({ section, signals, sourceRefs, ...item }) => item);
+  return items.map((item) => ({
+    id: item.id,
+    title: item.title,
+    reason: item.reason,
+    source: item.source,
+    confidence: item.confidence,
+    href: item.href,
+    action: item.action,
+  }));
 }
 
 function candidateDedupeKeys(item: NewsroomCandidate): string[] {
@@ -198,6 +207,13 @@ function hasSimilarTitle(a: NewsroomCandidate, b: NewsroomCandidate): boolean {
     return false;
   }
 
+  const sharedObjectTokens = objectTokens(aTokens).filter((token) =>
+    objectTokens(bTokens).includes(token),
+  );
+  if (sharedObjectTokens.length === 0) {
+    return false;
+  }
+
   const shared = aTokens.filter((token) => bTokens.includes(token));
   if (shared.length < MIN_SIMILAR_TITLE_TOKENS) {
     return false;
@@ -211,6 +227,10 @@ function titleTokens(title: string): string[] {
   return normalizeTitle(title)
     .split(" ")
     .filter((token) => token && !GENERIC_TITLE_TOKENS.has(token));
+}
+
+function objectTokens(tokens: string[]): string[] {
+  return tokens.filter((token) => token.length > 2 && !STATUS_TITLE_TOKENS.has(token));
 }
 
 function compareStrings(a: string, b: string): number {

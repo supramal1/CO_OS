@@ -105,9 +105,16 @@ describe("Newsroom ranking", () => {
         sourceRefs: ["workbench:run-10"],
         action: { label: "Open Workbench", target: "workbench", href: "/workbench" },
       }),
+      candidate({
+        id: "g",
+        title: "Client X invoice is missing evidence",
+        confidence: "high",
+        sourceRefs: ["workbench:run-11"],
+        action: { label: "Open Workbench", target: "workbench", href: "/workbench" },
+      }),
     ]);
 
-    expect(deduped).toHaveLength(3);
+    expect(deduped).toHaveLength(4);
     expect(deduped[0]).toMatchObject({
       id: "e",
       confidence: "high",
@@ -121,6 +128,10 @@ describe("Newsroom ranking", () => {
     expect(deduped[2]).toMatchObject({
       id: "f",
       title: "Client Y draft is missing evidence",
+    });
+    expect(deduped[3]).toMatchObject({
+      id: "g",
+      title: "Client X invoice is missing evidence",
     });
   });
 
