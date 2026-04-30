@@ -1,11 +1,16 @@
 import type { NextAuthConfig } from "next-auth";
 import Google from "next-auth/providers/google";
 
-const authConfig = {
-  secret:
+export function resolveAuthSecret(): string {
+  return (
     process.env.AUTH_SECRET ??
     process.env.NEXTAUTH_SECRET ??
-    "co-os-local-development-secret",
+    "co-os-local-development-secret"
+  );
+}
+
+const authConfig = {
+  secret: resolveAuthSecret(),
   providers: [
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID ?? "",

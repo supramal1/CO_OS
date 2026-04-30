@@ -72,4 +72,30 @@ describe("authWithApiKey", () => {
     });
     expect(mocks.getToken).not.toHaveBeenCalled();
   });
+
+  it("uses the same local fallback secret as Auth.js when env secrets are absent", async () => {
+    delete process.env.AUTH_SECRET;
+    delete process.env.NEXTAUTH_SECRET;
+    const requestHeaders = new Headers({ cookie: "authjs.session-token=value" });
+    mocks.auth.mockResolvedValue({
+      principalId: "principal_staff",
+      isAdmin: false,
+      user: { email: "staff@example.com" },
+    });
+    mocks.headers.mockResolvedValue(requestHeaders);
+    mocks.getToken.mockResolvedValue({
+      principalId: "principal_staff",
+      apiKey: "csk_from_fallback_secret",
+    });
+
+    await expect(authWithApiKey()).resolves.toMatchObject({
+      principalId: "principal_staff",
+      apiKey: "csk_from_fallback_secret",
+    });
+    expect(mocks.getToken).toHaveBeenCalledWith({
+      req: { headers: requestHeaders },
+      secret: "co-os-local-development-secret",
+      secureCookie: false,
+    });
+  });
 });

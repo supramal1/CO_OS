@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import type { Session } from "next-auth";
 import { getToken } from "next-auth/jwt";
 import { auth } from "@/auth";
+import { resolveAuthSecret } from "@/auth.config";
 
 export type ServerAuthSession = Session & {
   apiKey: string | null;
@@ -35,7 +36,7 @@ function getTestSessionApiKey(session: Session): string | null {
 }
 
 function authSecret(): string | null {
-  return process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET ?? null;
+  return resolveAuthSecret();
 }
 
 function usesSecureCookie(): boolean {
