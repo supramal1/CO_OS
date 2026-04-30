@@ -13,25 +13,17 @@ import type {
   NewsroomCandidate,
   NewsroomSource,
   NewsroomSourceSnapshot,
-  NewsroomSourceStatus,
 } from "./types";
 
 type NewsroomAdapter = (context: NewsroomAdapterContext) => Promise<NewsroomSourceSnapshot>;
+type SourceTaggedNewsroomAdapter = NewsroomAdapter & { source?: NewsroomSource };
 
-const DEFAULT_ADAPTERS: Array<{ source: NewsroomSource; load: NewsroomAdapter }> = [
+const DEFAULT_ADAPTERS: Array<{ source: NewsroomSource; load: SourceTaggedNewsroomAdapter }> = [
   { source: "calendar", load: loadCalendarNewsroomSnapshot },
   { source: "notion", load: loadNotionNewsroomSnapshot },
   { source: "workbench", load: loadWorkbenchNewsroomSnapshot },
   { source: "review", load: loadReviewNewsroomSnapshot },
   { source: "cornerstone", load: loadCornerstoneNewsroomSnapshot },
-];
-
-const INJECTED_FAILURE_SOURCES: NewsroomSource[] = [
-  "cornerstone",
-  "calendar",
-  "notion",
-  "workbench",
-  "review",
 ];
 
 export async function generateNewsroomBrief(
@@ -46,30 +38,15 @@ export async function generateNewsroomBrief(
     range,
   };
   const adapters = input.adapters
-    ? input.adapters.map((load, index) => ({
-        source: INJECTED_FAILURE_SOURCES[index] ?? "cornerstone",
+    ? input.adapters.map((load) => ({
+        source: (load as SourceTaggedNewsroomAdapter).source,
         load,
       }))
     : DEFAULT_ADAPTERS;
 
-  const candidates: NewsroomCandidate[] = [];
-  const sourceStatuses: NewsroomSourceStatus[] = [];
-
-  for (const adapter of adapters) {
-    try {
-      const snapshot = await adapter.load(context);
-      candidates.push(...snapshot.candidates);
-      sourceStatuses.push(snapshot.status);
-    } catch (error) {
-      sourceStatuses.push({
-        source: adapter.source,
-        status: "error",
-        reason: errorReason(error),
-        itemsCount: 0,
-      });
-    }
-  }
-
+  const snapshots = await Promise.all(adapters.map((adapter) => loadSnapshot(adapter, context)));
+  const candidates: NewsroomCandidate[] = snapshots.flatMap((snapshot) => snapshot.candidates);
+  const sourceStatuses = snapshots.map((snapshot) => snapshot.status);
   const sections = limitNewsroomSections(candidates);
 
   return {
@@ -85,6 +62,27 @@ export async function generateNewsroomBrief(
     suggestedNextActions: buildSuggestedActions(candidates),
     sourceStatuses,
   };
+}
+
+async function loadSnapshot(
+  adapter: { source?: NewsroomSource; load: NewsroomAdapter },
+  context: NewsroomAdapterContext,
+): Promise<NewsroomSourceSnapshot> {
+  const fallbackSource = adapter.source ?? "cornerstone";
+  try {
+    return await adapter.load(context);
+  } catch (error) {
+    return {
+      source: fallbackSource,
+      status: {
+        source: fallbackSource,
+        status: "error",
+        reason: errorReason(error),
+        itemsCount: 0,
+      },
+      candidates: [],
+    };
+  }
 }
 
 function getUtcDayRange(now: Date): NewsroomAdapterContext["range"] {

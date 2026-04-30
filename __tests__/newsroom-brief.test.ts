@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { generateNewsroomBrief } from "@/lib/newsroom/brief";
-import type { NewsroomSourceSnapshot } from "@/lib/newsroom/types";
+import type {
+  NewsroomAdapterContext,
+  NewsroomSource,
+  NewsroomSourceSnapshot,
+} from "@/lib/newsroom/types";
 
 const now = new Date("2026-04-30T09:00:00.000Z");
+type TestNewsroomAdapter = ((
+  context: NewsroomAdapterContext,
+) => Promise<NewsroomSourceSnapshot>) & { source?: NewsroomSource };
 
 function snapshot(overrides: Partial<NewsroomSourceSnapshot>): NewsroomSourceSnapshot {
   return {
@@ -15,6 +22,10 @@ function snapshot(overrides: Partial<NewsroomSourceSnapshot>): NewsroomSourceSna
     candidates: [],
     ...overrides,
   };
+}
+
+function adapter(source: NewsroomSource, load: TestNewsroomAdapter): TestNewsroomAdapter {
+  return Object.assign(load, { source });
 }
 
 describe("generateNewsroomBrief", () => {
@@ -65,9 +76,9 @@ describe("generateNewsroomBrief", () => {
       userId: "principal_123",
       now,
       adapters: [
-        async () => {
+        adapter("cornerstone", async () => {
           throw new Error("Cornerstone timeout");
-        },
+        }),
         async () =>
           snapshot({
             source: "review",
@@ -87,5 +98,54 @@ describe("generateNewsroomBrief", () => {
       },
       { source: "review", status: "empty", itemsCount: 0 },
     ]);
+  });
+
+  it("launches adapters concurrently", async () => {
+    let started = 0;
+    let releaseFirst: (snapshot: NewsroomSourceSnapshot) => void = () => {};
+    let releaseSecond: (snapshot: NewsroomSourceSnapshot) => void = () => {};
+
+    const briefPromise = generateNewsroomBrief({
+      userId: "principal_123",
+      now,
+      adapters: [
+        adapter(
+          "calendar",
+          async () =>
+            new Promise<NewsroomSourceSnapshot>((resolve) => {
+              started += 1;
+              releaseFirst = resolve;
+            }),
+        ),
+        adapter(
+          "review",
+          async () =>
+            new Promise<NewsroomSourceSnapshot>((resolve) => {
+              started += 1;
+              releaseSecond = resolve;
+            }),
+        ),
+      ],
+    });
+
+    await Promise.resolve();
+    const startedBeforeAnyAdapterResolved = started;
+
+    releaseFirst(
+      snapshot({
+        source: "calendar",
+        status: { source: "calendar", status: "empty", itemsCount: 0 },
+      }),
+    );
+    await Promise.resolve();
+    releaseSecond(
+      snapshot({
+        source: "review",
+        status: { source: "review", status: "empty", itemsCount: 0 },
+      }),
+    );
+    await briefPromise;
+
+    expect(startedBeforeAnyAdapterResolved).toBe(2);
   });
 });
