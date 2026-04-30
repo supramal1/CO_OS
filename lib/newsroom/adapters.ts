@@ -381,19 +381,19 @@ function summarizeCornerstoneFactCandidates(
   candidates: NewsroomSourceSnapshot["candidates"],
 ): NewsroomSourceSnapshot["candidates"] {
   const summaries = candidates
-    .slice(0, 5)
-    .map((candidate) => candidate.title)
+    .slice(0, 4)
+    .map((candidate) => summarizeCornerstoneChange(candidate.reason))
     .filter(Boolean);
   const reason =
     summaries.length > 0
-      ? `Since yesterday: ${summaries.join("; ")}.`
+      ? `Since yesterday: ${summaries.join(" ")}`
       : "Source-backed Cornerstone changes were found since yesterday.";
 
   return [
     {
       id: "cornerstone-facts-summary",
-      title: "CO OS changed since yesterday",
-      reason: boundedText(reason, WORKBENCH_REASON_MAX_LENGTH),
+      title: "What changed since yesterday",
+      reason: boundedText(reason, 520),
       source: "cornerstone",
       confidence: "high",
       section: "changedSinceYesterday",
@@ -401,6 +401,21 @@ function summarizeCornerstoneFactCandidates(
       sourceRefs: candidates.flatMap((candidate) => candidate.sourceRefs ?? []),
     },
   ];
+}
+
+function summarizeCornerstoneChange(reason: string): string {
+  const cleaned = normalizeWhitespace(
+    firstSentence(reason)
+      .replace(/^On\s+\d{4}-\d{2}-\d{2},?\s*/i, "")
+      .replace(/\bCO OS branch\s+\S+\s+/i, "")
+      .replace(/\bthrough commit\s+[a-f0-9]{7,40}\b:?\s*/i, "")
+      .replace(/\bin commit\s+[a-f0-9]{7,40}\b:?\s*/i, "")
+      .replace(/\bcommit\s+[a-f0-9]{7,40}\b:?\s*/i, ""),
+  );
+  if (!cleaned) return "";
+
+  const sentence = /[.!?]$/.test(cleaned) ? cleaned : `${cleaned}.`;
+  return boundedText(sentence, 180);
 }
 
 function unavailableSnapshot(

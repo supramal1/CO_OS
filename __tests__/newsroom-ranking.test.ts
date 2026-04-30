@@ -197,6 +197,25 @@ describe("Newsroom ranking", () => {
     expect(sections.today).toHaveLength(3);
     expect(sections.changedSinceYesterday).toHaveLength(4);
     expect(sections.needsAttention).toHaveLength(4);
-    expect(actions).toHaveLength(4);
+    expect(actions).toEqual([{ label: "Open Workbench", target: "workbench", href: "/workbench" }]);
+  });
+
+  it("dedupes suggested actions by target and href", () => {
+    const actions = buildSuggestedActions([
+      candidate({ id: "a", title: "First Workbench item" }),
+      candidate({ id: "b", title: "Second Workbench item", sourceRefs: ["workbench:run-2"] }),
+      candidate({
+        id: "c",
+        title: "Review item",
+        source: "review",
+        sourceRefs: ["review:flag-1"],
+        action: { label: "Open Review", target: "review", href: "/forge/production-review" },
+      }),
+    ]);
+
+    expect(actions).toEqual([
+      { label: "Open Review", target: "review", href: "/forge/production-review" },
+      { label: "Open Workbench", target: "workbench", href: "/workbench" },
+    ]);
   });
 });

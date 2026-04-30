@@ -576,9 +576,9 @@ describe("newsroom adapters", () => {
       candidates: [
         {
           id: "cornerstone-facts-summary",
-          title: "CO OS changed since yesterday",
+          title: "What changed since yesterday",
           reason:
-            "Since yesterday: Workbench built; Newsroom mvp built.",
+            "Since yesterday: Workbench workflow hardening shipped with staged make/review flows. CO OS Newsroom MVP was implemented with /newsroom and the brief API.",
           source: "cornerstone",
           confidence: "high",
           section: "changedSinceYesterday",

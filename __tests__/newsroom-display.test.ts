@@ -68,7 +68,7 @@ describe("Newsroom display helpers", () => {
       sourceStatusLabel({
         source: "notion",
         status: "error",
-        reason: "notion lookup failed",
+        reason: "Supabase request failed: HTTP 500",
         itemsCount: 0,
       }),
     ).toBe("Notion not connected");
@@ -87,7 +87,7 @@ describe("Newsroom display helpers", () => {
       sourceStatusDetail({
         source: "notion",
         status: "error",
-        reason: "notion lookup failed",
+        reason: "Supabase request failed: HTTP 500",
         itemsCount: 0,
       }),
     ).toBe("Connect Notion in Workbench");
@@ -116,7 +116,7 @@ describe("Newsroom display helpers", () => {
         itemsCount: 0,
       });
 
-      expect(detail).toBe("Check setup or try again");
+      expect(detail).toBe("Connect Notion in Workbench");
       expect(detail).not.toContain(reason);
       expect(detail).not.toMatch(/supabase|http|token|postgres/i);
     }

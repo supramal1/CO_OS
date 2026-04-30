@@ -117,8 +117,12 @@ export function limitNewsroomSections(items: NewsroomCandidate[]): {
 
 export function buildSuggestedActions(items: NewsroomCandidate[]): NewsroomAction[] {
   const actions: NewsroomAction[] = [];
+  const seen = new Set<string>();
   for (const item of rankNewsroomItems(dedupeNewsroomItems(items))) {
     if (!item.action) continue;
+    const key = `${item.action.target}:${item.action.href}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
     actions.push(item.action);
     if (actions.length === 4) break;
   }
