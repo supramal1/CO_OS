@@ -13,7 +13,7 @@ import type { WorkbenchPreflightResult, WorkbenchStartResponse } from "./types";
 
 const TABLE = "workbench_profile_updates";
 const UPDATE_COLUMNS =
-  "id,user_id,target_page,source_run_id,candidate_text,status,classification,notion_page_id,notion_block_id,undo_of_update_id,undo_reason,undo_metadata,undone_at,created_at,updated_at" as const;
+  "id,user_id,target_page,source_run_id,candidate_text,status,classification,source_signal,confidence,previous_value,new_value,user_decision,notion_page_id,notion_block_id,undo_of_update_id,undo_reason,undo_metadata,undone_at,created_at,updated_at" as const;
 
 export const WORKBENCH_PROFILE_UPDATE_STATUSES = [
   "pending",
@@ -28,6 +28,12 @@ export type WorkbenchProfileTargetPage = WorkbenchNotionKnowledgePage;
 
 export type WorkbenchProfileUpdateStatus =
   (typeof WORKBENCH_PROFILE_UPDATE_STATUSES)[number];
+
+export type WorkbenchProfileUpdateUserDecision =
+  | "accepted"
+  | "edited"
+  | "rejected"
+  | "undone";
 
 export type WorkbenchLearningDecision =
   | "write"
@@ -67,6 +73,11 @@ export type WorkbenchProfileUpdateRow = {
   candidate_text: string;
   status: WorkbenchProfileUpdateStatus;
   classification: Record<string, unknown>;
+  source_signal: string | null;
+  confidence: number | null;
+  previous_value: string | null;
+  new_value: string | null;
+  user_decision: WorkbenchProfileUpdateUserDecision | null;
   notion_page_id: string | null;
   notion_block_id: string | null;
   undo_of_update_id: string | null;
@@ -84,6 +95,11 @@ export type WorkbenchProfileUpdateInsertPayload = {
   candidate_text: string;
   status: WorkbenchProfileUpdateStatus;
   classification: Record<string, unknown>;
+  source_signal: string | null;
+  confidence: number | null;
+  previous_value: string | null;
+  new_value: string | null;
+  user_decision: WorkbenchProfileUpdateUserDecision | null;
   notion_page_id: string | null;
   notion_block_id: string | null;
   undo_of_update_id: string | null;
@@ -94,6 +110,7 @@ export type WorkbenchProfileUpdateInsertPayload = {
 
 export type WorkbenchProfileUpdateUndoPayload = {
   status: "undone";
+  user_decision: "undone";
   undo_reason: string | null;
   undo_metadata: Record<string, unknown> | null;
   undone_at: string;
@@ -118,6 +135,11 @@ export type PersistWorkbenchProfileUpdateInput = {
   candidateText: string;
   status: WorkbenchProfileUpdateStatus;
   classification?: Record<string, unknown> | null;
+  sourceSignal?: string | null;
+  confidence?: number | null;
+  previousValue?: string | null;
+  newValue?: string | null;
+  userDecision?: WorkbenchProfileUpdateUserDecision | null;
   notionPageId?: string | null;
   notionBlockId?: string | null;
   undoOfUpdateId?: string | null;
@@ -456,13 +478,25 @@ export async function persistWorkbenchProfileUpdate(
   }
 
   try {
+    const candidateText = normalizeWhitespace(input.candidateText);
+    const classification = input.classification ?? {};
+    const confidence =
+      normalizeConfidence(input.confidence) ??
+      normalizeConfidence(classification.confidence);
     const payload: WorkbenchProfileUpdateInsertPayload = {
       user_id: input.userId.trim(),
       target_page: input.targetPage,
       source_run_id: normalizeOptionalString(input.sourceRunId),
-      candidate_text: normalizeWhitespace(input.candidateText),
+      candidate_text: candidateText,
       status: input.status,
-      classification: input.classification ?? {},
+      classification,
+      source_signal:
+        normalizeOptionalString(input.sourceSignal) ??
+        classificationString(classification, "reason"),
+      confidence,
+      previous_value: normalizeOptionalString(input.previousValue),
+      new_value: normalizeOptionalString(input.newValue) ?? candidateText,
+      user_decision: input.userDecision ?? null,
       notion_page_id: normalizeOptionalString(input.notionPageId),
       notion_block_id: normalizeOptionalString(input.notionBlockId),
       undo_of_update_id: normalizeOptionalString(input.undoOfUpdateId),
@@ -509,6 +543,7 @@ export async function markWorkbenchProfileUpdateUndone(
         updateId: input.updateId.trim(),
         payload: {
           status: "undone",
+          user_decision: "undone",
           undo_reason: normalizeOptionalString(input.reason),
           undo_metadata: input.metadata ?? null,
           undone_at: undoneAt,
@@ -809,6 +844,12 @@ function validateProfileUpdatePayload(
   if (!payload.candidate_text) {
     throw new Error("Workbench profile update candidate_text is required.");
   }
+  if (
+    payload.confidence !== null &&
+    (payload.confidence < 0 || payload.confidence > 1)
+  ) {
+    throw new Error("Workbench profile update confidence is invalid.");
+  }
   if (!WORKBENCH_NOTION_KNOWLEDGE_PAGES.includes(payload.target_page)) {
     throw new Error("Workbench profile update target_page is invalid.");
   }
@@ -830,6 +871,19 @@ function normalizeOptionalString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
+}
+
+function classificationString(
+  classification: Record<string, unknown>,
+  key: string,
+): string | null {
+  return normalizeOptionalString(classification[key]);
+}
+
+function normalizeConfidence(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  if (value < 0 || value > 1) return null;
+  return value;
 }
 
 function normalizeEvidenceCount(value: unknown): number {
