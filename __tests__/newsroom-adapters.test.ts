@@ -4,11 +4,41 @@ import type { WorkbenchRunHistoryRow } from "@/lib/workbench/run-history";
 import type { WorkbenchRetrievedContext } from "@/lib/workbench/types";
 
 const mocks = vi.hoisted(() => ({
+  createGoogleCalendarClient: vi.fn(),
+  createWorkbenchGoogleTokenStore: vi.fn(),
+  getUserWorkbenchConfig: vi.fn(),
+  getWorkbenchGoogleAccessToken: vi.fn(),
   listWorkbenchRuns: vi.fn(),
+  retrieveCalendarContext: vi.fn(),
+  retrieveNotionContext: vi.fn(),
 }));
 
 vi.mock("@/lib/workbench/run-history", () => ({
   listWorkbenchRuns: mocks.listWorkbenchRuns,
+}));
+
+vi.mock("@/lib/workbench/google-calendar", () => ({
+  createGoogleCalendarClient: mocks.createGoogleCalendarClient,
+}));
+
+vi.mock("@/lib/workbench/google-token", () => ({
+  getWorkbenchGoogleAccessToken: mocks.getWorkbenchGoogleAccessToken,
+}));
+
+vi.mock("@/lib/workbench/google-token-store", () => ({
+  createWorkbenchGoogleTokenStore: mocks.createWorkbenchGoogleTokenStore,
+}));
+
+vi.mock("@/lib/workbench/retrieval/calendar", () => ({
+  retrieveCalendarContext: mocks.retrieveCalendarContext,
+}));
+
+vi.mock("@/lib/workbench/retrieval/config", () => ({
+  getUserWorkbenchConfig: mocks.getUserWorkbenchConfig,
+}));
+
+vi.mock("@/lib/workbench/retrieval/notion", () => ({
+  retrieveNotionContext: mocks.retrieveNotionContext,
 }));
 
 vi.mock("@/lib/cornerstone", () => ({
@@ -17,7 +47,9 @@ vi.mock("@/lib/cornerstone", () => ({
 
 import {
   calendarContextItemsToNewsroomSnapshot,
+  loadCalendarNewsroomSnapshot,
   loadCornerstoneNewsroomSnapshot,
+  loadNotionNewsroomSnapshot,
   loadReviewNewsroomSnapshot,
   loadWorkbenchNewsroomSnapshot,
   notionContextItemsToNewsroomSnapshot,
@@ -80,7 +112,13 @@ const baseRun: WorkbenchRunHistoryRow = {
 };
 
 beforeEach(() => {
+  mocks.createGoogleCalendarClient.mockReset();
+  mocks.createWorkbenchGoogleTokenStore.mockReset();
+  mocks.getUserWorkbenchConfig.mockReset();
+  mocks.getWorkbenchGoogleAccessToken.mockReset();
   mocks.listWorkbenchRuns.mockReset();
+  mocks.retrieveCalendarContext.mockReset();
+  mocks.retrieveNotionContext.mockReset();
   vi.unstubAllGlobals();
 });
 
@@ -119,6 +157,39 @@ describe("newsroom adapters", () => {
     });
   });
 
+  it("filters Calendar context to the Newsroom day when event starts are available", () => {
+    const items: WorkbenchRetrievedContext[] = [
+      {
+        claim: "Calendar event: Today standup, 2026-04-30T10:00:00.000Z",
+        source_type: "calendar",
+        source_label: "Today standup",
+        source_url: "https://calendar.google.com/calendar/event?eid=today",
+      },
+      {
+        claim: "Calendar event: Tomorrow planning, 2026-05-01T10:00:00.000Z",
+        source_type: "calendar",
+        source_label: "Tomorrow planning",
+        source_url: "https://calendar.google.com/calendar/event?eid=tomorrow",
+      },
+      {
+        claim: "Calendar event: Next week review, 2026-05-07T10:00:00.000Z",
+        source_type: "calendar",
+        source_label: "Next week review",
+        source_url: "https://calendar.google.com/calendar/event?eid=next-week",
+      },
+    ];
+
+    const snapshot = calendarContextItemsToNewsroomSnapshot(items, context.range);
+
+    expect(snapshot.status).toEqual({ source: "calendar", status: "ok", itemsCount: 1 });
+    expect(snapshot.candidates).toHaveLength(1);
+    expect(snapshot.candidates[0]).toMatchObject({
+      title: "Today standup",
+      section: "today",
+      signals: ["meeting_today", "action_available"],
+    });
+  });
+
   it("maps Working On Notion context into Today active-work candidates", () => {
     const items: WorkbenchRetrievedContext[] = [
       {
@@ -150,6 +221,87 @@ describe("newsroom adapters", () => {
           sourceRefs: ["notion:Client X workspace"],
         },
       ],
+    });
+  });
+
+  it("falls back to source label when Working On prefix leaves a blank Notion title", () => {
+    const items: WorkbenchRetrievedContext[] = [
+      {
+        claim: "Working On:",
+        source_type: "notion",
+        source_label: "Client X workspace",
+        source_url: null,
+      },
+    ];
+
+    const snapshot = notionContextItemsToNewsroomSnapshot(items);
+
+    expect(snapshot.candidates[0]?.title).toBe("Client X workspace");
+  });
+
+  it("returns Calendar unavailable when readonly scope is missing", async () => {
+    mocks.getUserWorkbenchConfig.mockResolvedValue({
+      user_id: "principal_123",
+      notion_parent_page_id: null,
+      drive_folder_id: null,
+      drive_folder_url: null,
+      google_oauth_grant_status: "granted",
+      google_oauth_scopes: ["https://www.googleapis.com/auth/drive.file"],
+      voice_register: null,
+      feedback_style: null,
+      friction_tasks: null,
+    });
+
+    await expect(loadCalendarNewsroomSnapshot(context)).resolves.toEqual({
+      source: "calendar",
+      status: {
+        source: "calendar",
+        status: "unavailable",
+        reason: "calendar_scope_missing",
+        itemsCount: 0,
+      },
+      candidates: [],
+    });
+    expect(mocks.getWorkbenchGoogleAccessToken).not.toHaveBeenCalled();
+  });
+
+  it("maps Notion retrieval errors to Newsroom error snapshots", async () => {
+    const config = {
+      user_id: "principal_123",
+      notion_parent_page_id: "page_123",
+      drive_folder_id: null,
+      drive_folder_url: null,
+      google_oauth_grant_status: null,
+      google_oauth_scopes: [],
+      voice_register: null,
+      feedback_style: null,
+      friction_tasks: null,
+    };
+    mocks.getUserWorkbenchConfig.mockResolvedValue(config);
+    mocks.retrieveNotionContext.mockResolvedValue({
+      items: [],
+      status: {
+        source: "notion",
+        status: "error",
+        reason: "notion_lookup_failed",
+        items_count: 0,
+      },
+    });
+
+    await expect(loadNotionNewsroomSnapshot(context)).resolves.toEqual({
+      source: "notion",
+      status: {
+        source: "notion",
+        status: "error",
+        reason: "notion_lookup_failed",
+        itemsCount: 0,
+      },
+      candidates: [],
+    });
+    expect(mocks.retrieveNotionContext).toHaveBeenCalledWith({
+      ask: "Newsroom daily orientation: Working On, active clients, active projects, profile context",
+      userId: "principal_123",
+      config,
     });
   });
 
@@ -214,6 +366,43 @@ describe("newsroom adapters", () => {
         sourceRefs: ["workbench:run_1"],
       },
     ]);
+  });
+
+  it("builds Workbench attention signals from only the present attention inputs", async () => {
+    mocks.listWorkbenchRuns.mockResolvedValue({
+      status: "ok",
+      runs: [
+        {
+          ...baseRun,
+          id: "missing_only",
+          result: {
+            ...baseRun.result,
+            missing_context: [{ question: "Who owns approval?", why: null }],
+            warnings: [],
+          },
+        },
+        {
+          ...baseRun,
+          id: "warnings_only",
+          result: {
+            ...baseRun.result,
+            missing_context: [],
+            warnings: ["Calendar returned partial context."],
+          },
+        },
+      ],
+    });
+
+    const snapshot = await loadWorkbenchNewsroomSnapshot(context);
+    const missingOnly = snapshot.candidates.find(
+      (candidate) => candidate.id === "workbench-run-missing_only-attention",
+    );
+    const warningsOnly = snapshot.candidates.find(
+      (candidate) => candidate.id === "workbench-run-warnings_only-attention",
+    );
+
+    expect(missingOnly?.signals).toEqual(["missing_context", "action_available"]);
+    expect(warningsOnly?.signals).toEqual(["missing_evidence", "action_available"]);
   });
 
   it("returns Workbench unavailable and error snapshots from run history status", async () => {
@@ -395,6 +584,24 @@ describe("newsroom adapters", () => {
         max_tokens: 600,
       }),
     });
+  });
+
+  it("caps and normalizes long Cornerstone reasons without punctuation", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          context: `  ${"Client Alpha active renewal context ".repeat(12)}
+            still needs commercial judgement  `,
+        }),
+      ),
+    );
+
+    const snapshot = await loadCornerstoneNewsroomSnapshot(context);
+
+    expect(snapshot.candidates[0]?.reason).toHaveLength(220);
+    expect(snapshot.candidates[0]?.reason).not.toMatch(/\s{2,}/);
+    expect(snapshot.candidates[0]?.reason).toMatch(/\.\.\.$/);
   });
 
   it("returns Cornerstone error when the context request is not ok", async () => {

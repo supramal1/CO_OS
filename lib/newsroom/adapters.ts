@@ -50,7 +50,7 @@ export async function loadCalendarNewsroomSnapshot(
     return errorSnapshot("calendar", result.status.reason ?? "calendar_error");
   }
 
-  return calendarContextItemsToNewsroomSnapshot(result.items);
+  return calendarContextItemsToNewsroomSnapshot(result.items, context.range);
 }
 
 export async function loadNotionNewsroomSnapshot(
@@ -74,9 +74,11 @@ export async function loadNotionNewsroomSnapshot(
 
 export function calendarContextItemsToNewsroomSnapshot(
   items: WorkbenchRetrievedContext[],
+  range?: NewsroomAdapterContext["range"],
 ): NewsroomSourceSnapshot {
   const candidates = items.flatMap((item, index): NewsroomSourceSnapshot["candidates"] => {
     if (item.source_type !== "calendar") return [];
+    if (!isCalendarItemInRange(item, range)) return [];
 
     const title = boundedText(
       stringValue(item.source_label) ?? stringValue(item.claim) ?? "Calendar event",
@@ -196,7 +198,7 @@ export async function loadWorkbenchNewsroomSnapshot(
           section: "needsAttention",
           href: "/workbench",
           action,
-          signals: ["missing_context", "missing_evidence", "action_available"],
+          signals: workbenchAttentionSignals(missingContext, warnings),
           sourceRefs,
         });
       }
@@ -216,8 +218,10 @@ export async function loadWorkbenchNewsroomSnapshot(
 }
 
 export async function loadReviewNewsroomSnapshot(
-  _context?: NewsroomAdapterContext,
+  context?: NewsroomAdapterContext,
 ): Promise<NewsroomSourceSnapshot> {
+  void context;
+
   return {
     source: "review",
     status: { source: "review", status: "empty", itemsCount: 0 },
@@ -268,7 +272,7 @@ export async function loadCornerstoneNewsroomSnapshot(
         {
           id: "cornerstone-active-context",
           title: "Active context is available",
-          reason: firstSentence(text),
+          reason: boundedText(firstSentence(text), WORKBENCH_REASON_MAX_LENGTH),
           source: "cornerstone",
           confidence: "medium",
           section: "today",
@@ -326,9 +330,55 @@ function snapshotFromCandidates(
   };
 }
 
+function isCalendarItemInRange(
+  item: WorkbenchRetrievedContext,
+  range: NewsroomAdapterContext["range"] | undefined,
+): boolean {
+  if (!range) return true;
+
+  const start = calendarItemStart(item);
+  if (start === null) return true;
+
+  return start >= range.from.getTime() && start < range.to.getTime();
+}
+
+function calendarItemStart(item: WorkbenchRetrievedContext): number | null {
+  const record = recordValue(item);
+  const metadataStart =
+    stringValue(record?.start) ??
+    stringValue(record?.start_at) ??
+    stringValue(record?.start_time) ??
+    stringValue(record?.event_start);
+  const start = metadataStart ?? calendarClaimStart(stringValue(item.claim));
+  if (!start) return null;
+
+  const timestamp = Date.parse(start);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function calendarClaimStart(claim: string | null): string | null {
+  if (!claim?.startsWith("Calendar event:")) return null;
+
+  const candidate = claim.slice(claim.lastIndexOf(",") + 1).trim();
+  if (!/^\d{4}-\d{2}-\d{2}(?:T|$)/.test(candidate)) return null;
+  return candidate;
+}
+
 function stripWorkingOnPrefix(value: string | null): string | null {
   if (!value) return null;
-  return normalizeWhitespace(value.replace(/^Working On:\s*/i, ""));
+  const stripped = normalizeWhitespace(value.replace(/^Working On:\s*/i, ""));
+  return stripped || null;
+}
+
+function workbenchAttentionSignals(
+  missingContext: Array<{ question: string; why: string | null }>,
+  warnings: string[],
+): NewsroomSourceSnapshot["candidates"][number]["signals"] {
+  const signals: NewsroomSourceSnapshot["candidates"][number]["signals"] = [];
+  if (missingContext.length > 0) signals.push("missing_context");
+  if (warnings.length > 0) signals.push("missing_evidence");
+  signals.push("action_available");
+  return signals;
 }
 
 function attentionReason(
