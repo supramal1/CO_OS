@@ -1,7 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildProfileSnapshot } from "@/lib/profile/profile-snapshot";
 
 describe("Profile snapshot", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("builds identity and connected-tool state from the signed-in session", async () => {
     const snapshot = await buildProfileSnapshot({
       apiKey: "csk_test",
@@ -155,6 +159,38 @@ describe("Profile snapshot", () => {
       status: "unavailable",
       label: "Honcho",
       detail: "Cornerstone API key unavailable.",
+    });
+  });
+
+  it("keeps learned Honcho preferences readable instead of duplicating a truncated sentence", async () => {
+    const learnedPreference =
+      "Malik prioritizes a direct, no-BS communication style, favoring one-pagers over slide decks, and focuses on AI as a tool for upskilling staff and enhancing judgment work. His technical approach emphasizes robust infrastructure, clear operational ownership, and practical delivery over decorative product surfaces.";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        text: async () => JSON.stringify({ context: learnedPreference }),
+      })),
+    );
+
+    const snapshot = await buildProfileSnapshot({
+      apiKey: "csk_test",
+      session: {
+        principalId: "principal_123",
+        isAdmin: false,
+        expires: "2026-05-30T00:00:00.000Z",
+        user: { email: "staff@example.com" },
+      },
+      deps: {
+        listConnectorStatuses: async () => [],
+      },
+    });
+
+    expect(snapshot.personalisation.cards).toHaveLength(1);
+    expect(snapshot.personalisation.cards[0]).toMatchObject({
+      title: "Communication and work preferences",
+      detail: learnedPreference,
+      source: "honcho",
     });
   });
 });

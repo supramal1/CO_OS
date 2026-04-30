@@ -238,8 +238,8 @@ async function loadCornerstonePersonalisationCards(input: {
       cards: [
         {
           id: "honcho-context-0",
-          title: firstSentence(text),
-          detail: boundedText(text, 220),
+          title: personalisationTitle(text),
+          detail: boundedText(text, 900),
           source: "honcho",
           confidence: "medium",
           actions: ["keep", "correct", "remove"],
@@ -300,9 +300,28 @@ function cleanPersonalisationText(text: string): string {
     .trim();
 }
 
-function firstSentence(text: string): string {
-  const match = text.trim().match(/^.+?[.!?](?:\s|$)/);
-  return boundedText((match?.[0] ?? text).trim(), 92);
+function personalisationTitle(text: string): string {
+  const normalized = text.toLowerCase();
+  if (
+    normalized.includes("communication") ||
+    normalized.includes("style") ||
+    normalized.includes("tone")
+  ) {
+    return "Communication and work preferences";
+  }
+  if (
+    normalized.includes("do not assume") ||
+    normalized.includes("assumption")
+  ) {
+    return "Do-not-assume guidance";
+  }
+  if (
+    normalized.includes("feedback") ||
+    normalized.includes("coaching")
+  ) {
+    return "Feedback and coaching patterns";
+  }
+  return "Learned work preferences";
 }
 
 function boundedText(text: string, maxLength: number): string {

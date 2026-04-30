@@ -588,6 +588,11 @@ function PersonalisationRow({ card }: { card: ProfilePersonalisationCard }) {
       <p
         style={{
           margin: 0,
+          maxHeight: 118,
+          overflowY: "auto",
+          padding: "8px 10px 8px 0",
+          borderTop: "1px solid var(--rule)",
+          borderBottom: "1px solid var(--rule)",
           color: "var(--ink-dim)",
           fontSize: 13,
           lineHeight: 1.45,
