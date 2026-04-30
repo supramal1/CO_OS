@@ -2,15 +2,14 @@ import type { NewsroomAdapterContext, NewsroomSource, NewsroomSourceSnapshot } f
 import { CORNERSTONE_URL } from "@/lib/cornerstone";
 import { listWorkbenchRuns } from "@/lib/workbench/run-history";
 
-export async function loadCalendarNewsroomSnapshot(
-  _context: NewsroomAdapterContext,
-): Promise<NewsroomSourceSnapshot> {
+const WORKBENCH_TITLE_MAX_LENGTH = 96;
+const WORKBENCH_REASON_MAX_LENGTH = 220;
+
+export async function loadCalendarNewsroomSnapshot(): Promise<NewsroomSourceSnapshot> {
   return unavailableSnapshot("calendar", "Calendar adapter is not connected yet.");
 }
 
-export async function loadNotionNewsroomSnapshot(
-  _context: NewsroomAdapterContext,
-): Promise<NewsroomSourceSnapshot> {
+export async function loadNotionNewsroomSnapshot(): Promise<NewsroomSourceSnapshot> {
   return unavailableSnapshot("notion", "Notion adapter is not connected yet.");
 }
 
@@ -26,9 +25,9 @@ export async function loadWorkbenchNewsroomSnapshot(
   }
 
   const candidates = result.runs
-    .filter((run) => new Date(run.created_at).getTime() >= context.range.since.getTime())
+    .filter((run) => isRunInNewsroomRange(run.created_at, context))
     .flatMap((run) => {
-      const title = run.result.decoded_task.summary || run.ask || "Workbench run";
+      const title = workbenchTitle(workbenchSummary(run.result), run.ask);
       const sourceRefs = [`workbench:${run.id}`];
       const action = { label: "Open Workbench", target: "workbench" as const, href: "/workbench" };
       const items: NewsroomSourceSnapshot["candidates"] = [
@@ -45,13 +44,13 @@ export async function loadWorkbenchNewsroomSnapshot(
           sourceRefs,
         },
       ];
-      const missingContext = run.result.missing_context ?? [];
-      const warnings = run.result.warnings ?? [];
+      const missingContext = workbenchMissingContext(run.result);
+      const warnings = workbenchWarnings(run.result);
 
       if (missingContext.length > 0 || warnings.length > 0) {
         items.push({
           id: `workbench-run-${run.id}-attention`,
-          title: `${title} needs attention`,
+          title: boundedText(`${title} needs attention`, WORKBENCH_TITLE_MAX_LENGTH),
           reason: attentionReason(missingContext, warnings),
           source: "workbench",
           confidence: "medium",
@@ -77,9 +76,7 @@ export async function loadWorkbenchNewsroomSnapshot(
   };
 }
 
-export async function loadReviewNewsroomSnapshot(
-  _context: NewsroomAdapterContext,
-): Promise<NewsroomSourceSnapshot> {
+export async function loadReviewNewsroomSnapshot(): Promise<NewsroomSourceSnapshot> {
   return {
     source: "review",
     status: { source: "review", status: "empty", itemsCount: 0 },
@@ -178,10 +175,76 @@ function attentionReason(
   warnings: string[],
 ): string {
   const reasons = [
-    ...missingContext.map((missing) => missing.question).filter(Boolean),
-    ...warnings.filter(Boolean),
+    missingContext.find((missing) => Boolean(normalizeWhitespace(missing.question)))?.question,
+    warnings.find((warning) => Boolean(normalizeWhitespace(warning))),
   ];
-  return reasons.join(" ") || "Workbench run needs attention.";
+  return boundedText(
+    reasons.filter((reason): reason is string => Boolean(reason)).join(" ") ||
+      "Workbench run needs attention.",
+    WORKBENCH_REASON_MAX_LENGTH,
+  );
+}
+
+function isRunInNewsroomRange(createdAt: string, context: NewsroomAdapterContext): boolean {
+  const timestamp = Date.parse(createdAt);
+  if (!Number.isFinite(timestamp)) return false;
+
+  return (
+    timestamp >= context.range.since.getTime() &&
+    timestamp < context.range.to.getTime() &&
+    timestamp <= context.now.getTime()
+  );
+}
+
+function workbenchTitle(summary: string | null, ask: unknown): string {
+  return boundedText(summary || stringValue(ask) || "Workbench run", WORKBENCH_TITLE_MAX_LENGTH);
+}
+
+function workbenchSummary(result: unknown): string | null {
+  const decodedTask = recordValue(recordValue(result)?.decoded_task);
+  return stringValue(decodedTask?.summary);
+}
+
+function workbenchMissingContext(
+  result: unknown,
+): Array<{ question: string; why: string | null }> {
+  const missingContext = recordValue(result)?.missing_context;
+  if (!Array.isArray(missingContext)) return [];
+
+  return missingContext.flatMap((item) => {
+    const question = stringValue(recordValue(item)?.question);
+    if (!question) return [];
+    return [{ question, why: stringValue(recordValue(item)?.why) }];
+  });
+}
+
+function workbenchWarnings(result: unknown): string[] {
+  const warnings = recordValue(result)?.warnings;
+  if (!Array.isArray(warnings)) return [];
+
+  return warnings.flatMap((warning) => {
+    const value = stringValue(warning);
+    return value ? [value] : [];
+  });
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" ? normalizeWhitespace(value) : null;
+}
+
+function boundedText(value: string, maxLength: number): string {
+  const normalized = normalizeWhitespace(value);
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength - 3).trimEnd()}...`;
+}
+
+function normalizeWhitespace(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
 }
 
 function extractCornerstoneText(raw: string): string {

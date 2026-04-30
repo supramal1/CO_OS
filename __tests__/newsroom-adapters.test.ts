@@ -182,6 +182,95 @@ describe("newsroom adapters", () => {
     });
   });
 
+  it("caps and normalizes long Workbench titles and attention reasons", async () => {
+    const longSummary = `  ${"Client Alpha ".repeat(12)}
+      follow-up     `;
+    const longQuestion = `  ${"Can you confirm the final approval owner ".repeat(8)}?  `;
+    const longWarning = ` ${"Calendar and Notion both returned partial context ".repeat(8)} `;
+    mocks.listWorkbenchRuns.mockResolvedValue({
+      status: "ok",
+      runs: [
+        {
+          ...baseRun,
+          result: {
+            ...baseRun.result,
+            decoded_task: {
+              ...baseRun.result.decoded_task,
+              summary: longSummary,
+            },
+            missing_context: [{ question: longQuestion, why: null }],
+            warnings: [longWarning, "Second warning should not be appended unbounded."],
+          },
+        },
+      ],
+    });
+
+    const snapshot = await loadWorkbenchNewsroomSnapshot(context);
+    const changed = snapshot.candidates.find(
+      (candidate) => candidate.section === "changedSinceYesterday",
+    );
+    const attention = snapshot.candidates.find(
+      (candidate) => candidate.section === "needsAttention",
+    );
+
+    expect(changed?.title).toHaveLength(96);
+    expect(changed?.title).not.toMatch(/\s{2,}/);
+    expect(changed?.title).toMatch(/\.\.\.$/);
+    expect(attention?.title.length).toBeLessThanOrEqual(96);
+    expect(attention?.title).not.toMatch(/\s{2,}/);
+    expect(attention?.reason.length).toBeLessThanOrEqual(220);
+    expect(attention?.reason).not.toMatch(/\s{2,}/);
+    expect(attention?.reason).toMatch(/\.\.\.$/);
+  });
+
+  it("excludes Workbench runs with invalid or future timestamps", async () => {
+    mocks.listWorkbenchRuns.mockResolvedValue({
+      status: "ok",
+      runs: [
+        { ...baseRun, id: "invalid", created_at: "not-a-date" },
+        { ...baseRun, id: "future", created_at: "2026-04-30T09:00:01.000Z" },
+        { ...baseRun, id: "at-to-boundary", created_at: "2026-05-01T00:00:00.000Z" },
+        { ...baseRun, id: "current", created_at: "2026-04-30T09:00:00.000Z" },
+      ],
+    });
+
+    const snapshot = await loadWorkbenchNewsroomSnapshot(context);
+
+    expect(snapshot.status).toEqual({ source: "workbench", status: "ok", itemsCount: 1 });
+    expect(snapshot.candidates).toHaveLength(1);
+    expect(snapshot.candidates[0]?.sourceRefs).toEqual(["workbench:current"]);
+  });
+
+  it("uses ask fallback and does not throw when Workbench result JSON is malformed", async () => {
+    mocks.listWorkbenchRuns.mockResolvedValue({
+      status: "ok",
+      runs: [
+        {
+          ...baseRun,
+          ask: "  Help   with   malformed   run   ",
+          result: {
+            decoded_task: null,
+            missing_context: "not-an-array",
+            warnings: { message: "not-an-array" },
+          },
+        },
+      ],
+    });
+
+    await expect(loadWorkbenchNewsroomSnapshot(context)).resolves.toMatchObject({
+      source: "workbench",
+      status: { source: "workbench", status: "ok", itemsCount: 1 },
+      candidates: [
+        {
+          id: "workbench-run-run_1",
+          title: "Help with malformed run",
+          reason: "Workbench run started since yesterday.",
+          section: "changedSinceYesterday",
+        },
+      ],
+    });
+  });
+
   it("returns Cornerstone unavailable without an API key", async () => {
     await expect(
       loadCornerstoneNewsroomSnapshot({ ...context, apiKey: null }),
