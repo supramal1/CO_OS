@@ -282,7 +282,7 @@ describe("Workbench staff onboarding acceptance", () => {
 
     expect(summary.rows.find((row) => row.id === "google")).toMatchObject({
       status: "unavailable",
-      detail: "scope_missing",
+      detail: "Reconnect Google Workspace",
       action: "google_reconsent",
     });
   });

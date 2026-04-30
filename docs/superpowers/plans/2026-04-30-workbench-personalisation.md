@@ -33,40 +33,40 @@
 
 ## Task 2: Notion Page Writing Boundary
 
-- [ ] Write failing tests for appending concise sections to `Personal Profile`, `Working On`, and `Voice`.
-- [ ] Add Notion block append support to the client boundary.
-- [ ] Add safe page content writer helpers that only append compact Workbench-managed sections.
-- [ ] Verify targeted Notion client and personalisation tests pass.
+- [x] Write failing tests for appending concise sections to `Personal Profile`, `Working On`, and `Voice`.
+- [x] Add Notion block append support to the client boundary.
+- [x] Add safe page content writer helpers that only append compact Workbench-managed sections.
+- [x] Verify targeted Notion client and personalisation tests pass.
 
 ## Task 3: Five-Minute Onboarding Model and API
 
-- [ ] Write failing tests for onboarding input validation and AI draft parsing.
-- [ ] Implement short onboarding payload schema.
-- [ ] Implement AI draft generation with a strict JSON response shape.
-- [ ] Implement save action that stores config and writes approved content to Notion pages.
-- [ ] Verify route tests pass without live Anthropic/Notion calls.
+- [x] Write failing tests for onboarding input validation and AI draft parsing.
+- [x] Implement short onboarding payload schema.
+- [x] Implement AI draft generation with a strict JSON response shape.
+- [x] Implement save action that stores config and writes approved content to Notion pages.
+- [x] Verify route tests pass without live Anthropic/Notion calls.
 
 ## Task 4: Auto-Learning Pipeline
 
-- [ ] Write failing tests for learning candidate classification: write, needs_more_evidence, skip.
-- [ ] Add `workbench_profile_updates` migration and persistence helper.
-- [ ] Hook successful runs into non-blocking learning after run history persistence.
-- [ ] Write only conservative updates to Notion pages and record provenance.
-- [ ] Verify start-flow tests still pass when learning succeeds, skips, or fails.
+- [x] Write failing tests for learning candidate classification: write, needs_more_evidence, skip.
+- [x] Add `workbench_profile_updates` migration and persistence helper.
+- [x] Hook successful runs into non-blocking learning after run history persistence.
+- [x] Write only conservative updates to Notion pages and record provenance.
+- [x] Verify start-flow tests still pass when learning succeeds, skips, or fails.
 
 ## Task 5: Workbench UI and Staff-Friendly States
 
-- [ ] Write failing UI derivation tests for onboarding states and profile update status.
-- [ ] Add compact onboarding UI to the setup panel.
-- [ ] Replace technical connector copy where staff-facing.
-- [ ] Add recent profile update and undo affordance.
-- [ ] Verify `workbench-ui.test.ts` and focused route tests pass.
+- [x] Write failing UI derivation tests for onboarding states and profile update status.
+- [x] Add compact onboarding UI to the setup panel.
+- [x] Replace technical connector copy where staff-facing.
+- [x] Add recent profile update and undo affordance.
+- [x] Verify `workbench-ui.test.ts` and focused route tests pass.
 
 ## Task 6: Integrated Verification
 
-- [ ] Run `npx tsc --noEmit`.
-- [ ] Run targeted Workbench tests.
-- [ ] Run `npm test`.
-- [ ] Run `npm run lint`.
-- [ ] Run `npm run build`.
-- [ ] Run a duplicate scan against local mocks and document residual production cleanup needs.
+- [x] Run `npx tsc --noEmit`.
+- [x] Run targeted Workbench tests.
+- [x] Run `npm test`.
+- [x] Run `npm run lint`.
+- [x] Run `npm run build`.
+- [x] Run a duplicate scan against local mocks and document residual production cleanup needs.

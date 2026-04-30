@@ -11,8 +11,18 @@ import type {
 } from "@/lib/workbench/types";
 import type { WorkbenchPresendResponse } from "@/lib/workbench/presend-types";
 import type { WorkbenchOutputActionOutcome } from "@/lib/workbench/output-actions";
+import type { WorkbenchOnboardingDraft } from "@/lib/workbench/personalisation";
 import type { WorkbenchUserConfig } from "@/lib/workbench/retrieval/types";
 import type { WorkbenchRunHistoryRow } from "@/lib/workbench/run-history";
+import {
+  deriveWorkbenchPersonalisationSummary,
+  deriveWorkbenchProfileUpdateStatus,
+  sanitizeWorkbenchDetail,
+  toStaffWorkbenchDetail,
+  toStaffWorkbenchStatusLabel,
+  type WorkbenchProfileUpdateInput,
+  type WorkbenchProfileUpdateStatus,
+} from "@/lib/workbench/ui-state";
 
 type RunState =
   | { status: "idle" }
@@ -55,6 +65,15 @@ export type WorkbenchConfigForm = {
   voice_register: string;
   feedback_style: string;
   friction_tasks: string;
+};
+
+export type WorkbenchOnboardingForm = {
+  role: string;
+  team: string;
+  tenure: string;
+  current_work_bullets: string;
+  output_preference: string;
+  personal_context_bullets: string;
 };
 
 type WorkbenchConfigPayload = {
@@ -219,6 +238,14 @@ type SetupState =
   | { status: "checking" }
   | { status: "error"; message: string };
 
+type WorkbenchOnboardingState =
+  | { status: "idle" }
+  | { status: "drafting" }
+  | { status: "drafted"; draft: WorkbenchOnboardingDraft }
+  | { status: "saving"; draft: WorkbenchOnboardingDraft }
+  | { status: "saved"; message: string }
+  | { status: "error"; message: string };
+
 type PostRunState =
   | { status: "idle" }
   | { status: "running"; actionId: WorkbenchPostRunAction["id"] }
@@ -272,10 +299,10 @@ const WORKBENCH_CALLBACK_URL = "/workbench?google_oauth=returned";
 const WORKBENCH_PRESEND_ROUTE_AVAILABLE = true;
 
 const CONNECTOR_LABELS: Array<Pick<WorkbenchConnectorRow, "id" | "label">> = [
-  { id: "notion", label: "Notion config" },
-  { id: "drive", label: "Drive folder" },
-  { id: "google", label: "Google auth/token" },
-  { id: "calendar", label: "Calendar readiness" },
+  { id: "notion", label: "Notion" },
+  { id: "drive", label: "Drive" },
+  { id: "google", label: "Google Workspace" },
+  { id: "calendar", label: "Calendar" },
 ];
 
 const EMPTY_CONFIG_FORM: WorkbenchConfigForm = {
@@ -285,6 +312,15 @@ const EMPTY_CONFIG_FORM: WorkbenchConfigForm = {
   voice_register: "",
   feedback_style: "",
   friction_tasks: "",
+};
+
+const EMPTY_ONBOARDING_FORM: WorkbenchOnboardingForm = {
+  role: "",
+  team: "",
+  tenure: "",
+  current_work_bullets: "",
+  output_preference: "",
+  personal_context_bullets: "",
 };
 
 const GOOGLE_CONNECT_STATUSES = new Set([
@@ -330,6 +366,28 @@ export function buildWorkbenchConfigPayload(
     voice_register: optionalFormString(form.voice_register),
     feedback_style: optionalFormString(form.feedback_style),
     friction_tasks: frictionTasks.length > 0 ? frictionTasks : null,
+  };
+}
+
+export function buildWorkbenchOnboardingPayload(
+  form: WorkbenchOnboardingForm,
+  configForm: Pick<
+    WorkbenchConfigForm,
+    "voice_register" | "feedback_style" | "friction_tasks"
+  >,
+) {
+  return {
+    role: form.role.trim(),
+    team: form.team.trim(),
+    tenure: form.tenure.trim(),
+    current_work_bullets: splitWorkbenchLines(form.current_work_bullets),
+    friction_chips: splitWorkbenchLines(configForm.friction_tasks),
+    feedback_style: configForm.feedback_style.trim(),
+    output_preference:
+      form.output_preference.trim() || configForm.voice_register.trim(),
+    personal_context_bullets: splitWorkbenchLines(
+      form.personal_context_bullets,
+    ),
   };
 }
 
@@ -383,24 +441,24 @@ export function deriveWorkbenchSetupSummary(
   if (connectors.some((connector) => connector.state === "loading")) {
     return {
       state: "loading",
-      label: "Checking setup",
-      detail: "Checking Notion, Google Workspace, Drive, and Calendar.",
+      label: "Setting up workspace",
+      detail: "Checking workspace setup.",
     };
   }
 
   if (connectors.some((connector) => connector.state === "error")) {
     return {
       state: "error",
-      label: "Setup check failed",
-      detail: "Fix the API error before running Workbench.",
+      label: "Check failed",
+      detail: "Check setup before running Workbench.",
     };
   }
 
   if (connectors.every((connector) => connector.state === "ready")) {
     return {
       state: "ready",
-      label: "Ready to run",
-      detail: "Notion, Google auth, Calendar, and Drive are connected.",
+      label: "Connected",
+      detail: "Workbench workspace is connected.",
     };
   }
 
@@ -410,7 +468,7 @@ export function deriveWorkbenchSetupSummary(
   if (needsConnection.length > 0) {
     return {
       state: "needs_setup",
-      label: "Finish setup",
+      label: "Setting up workspace",
       detail: `Connect ${formatConnectorList(
         needsConnection.map((connector) => connector.label),
       )} before running with staff context.`,
@@ -423,19 +481,18 @@ export function deriveWorkbenchSetupSummary(
     ),
   );
   if (repairable.length > 0) {
+    const hasNotionRepair = repairable.some((connector) => connector.id === "notion");
     return {
       state: "repairing",
-      label: "Repair setup",
-      detail: `Repair ${formatConnectorList(
-        repairable.map((connector) => connector.label),
-      )} before running.`,
+      label: hasNotionRepair ? "Repairing pages" : "Needs reconnect",
+      detail: formatRepairSetupDetail(repairable),
     };
   }
 
   return {
     state: "unavailable",
-    label: "Setup unavailable",
-    detail: "Connector setup status is unavailable. Check connectors for details.",
+    label: "Needs attention",
+    detail: "Check connectors before running Workbench.",
   };
 }
 
@@ -448,8 +505,8 @@ export function deriveWorkbenchOAuthNotice(
   if (params.get("google_oauth") === "start") {
     return {
       tone: "info",
-      label: "Starting Google OAuth",
-      detail: "Opening Google Workspace consent now.",
+      label: "Connecting Google Workspace",
+      detail: "Opening Google Workspace consent.",
     };
   }
 
@@ -457,15 +514,18 @@ export function deriveWorkbenchOAuthNotice(
     return {
       tone: "error",
       label: "Notion setup needs repair",
-      detail: params.get("reason") || "notion_setup_failed",
+      detail: sanitizeWorkbenchDetail(
+        params.get("reason"),
+        "Repair Workbench pages",
+      ),
     };
   }
 
   if (params.get("google_oauth") === "returned") {
     return {
       tone: "info",
-      label: "Google OAuth returned",
-      detail: "Checking saved Google Workspace access now.",
+      label: "Google Workspace connected",
+      detail: "Checking saved access.",
     };
   }
 
@@ -473,8 +533,11 @@ export function deriveWorkbenchOAuthNotice(
   if (oauthError) {
     return {
       tone: "error",
-      label: "OAuth returned an error",
-      detail: params.get("error_description") || oauthError,
+      label: "Connection was not completed",
+      detail: sanitizeWorkbenchDetail(
+        params.get("error_description") || oauthError,
+        "Check setup",
+      ),
     };
   }
 
@@ -509,8 +572,8 @@ function deriveNotionSetupAffordance(
     return {
       ...base,
       state: "loading",
-      statusLabel: "Checking",
-      detail: "Checking connector",
+      statusLabel: toStaffWorkbenchStatusLabel("notion", "loading"),
+      detail: toStaffWorkbenchDetail("notion", "loading"),
       disabled: true,
     };
   }
@@ -519,8 +582,8 @@ function deriveNotionSetupAffordance(
     return {
       ...base,
       state: "error",
-      statusLabel: "Error",
-      detail: connectorState.message,
+      statusLabel: toStaffWorkbenchStatusLabel("notion", "error"),
+      detail: toStaffWorkbenchDetail("notion", "error", connectorState.message),
     };
   }
 
@@ -531,8 +594,8 @@ function deriveNotionSetupAffordance(
     return {
       ...base,
       state: "not_connected",
-      statusLabel: "Not connected",
-      detail: "Notion setup needed",
+      statusLabel: toStaffWorkbenchStatusLabel("notion", "not_connected"),
+      detail: toStaffWorkbenchDetail("notion", "not_connected"),
       buttonLabel: "Set up Notion",
     };
   }
@@ -544,8 +607,8 @@ function deriveNotionSetupAffordance(
       return {
         ...base,
         state: healthState,
-        statusLabel: setupStateLabel(healthState),
-        detail: health.reason ?? health.status,
+        statusLabel: toStaffWorkbenchStatusLabel("notion", healthState),
+        detail: toStaffWorkbenchDetail("notion", healthState, health.reason),
       };
     }
   }
@@ -553,8 +616,8 @@ function deriveNotionSetupAffordance(
   return {
     ...base,
     state: "ready",
-    statusLabel: "Ready",
-    detail: "Connected to Notion workspace",
+    statusLabel: toStaffWorkbenchStatusLabel("notion", "ready"),
+    detail: toStaffWorkbenchDetail("notion", "ready"),
     buttonLabel: "Connected",
     disabled: true,
   };
@@ -575,8 +638,8 @@ function deriveGoogleWorkspaceSetupAffordance(
     return {
       ...base,
       state: "loading",
-      statusLabel: "Checking",
-      detail: "Checking connector",
+      statusLabel: toStaffWorkbenchStatusLabel("googleWorkspace", "loading"),
+      detail: toStaffWorkbenchDetail("googleWorkspace", "loading"),
       buttonLabel: "Connect Google Workspace",
       disabled: true,
     };
@@ -586,8 +649,12 @@ function deriveGoogleWorkspaceSetupAffordance(
     return {
       ...base,
       state: "error",
-      statusLabel: "Error",
-      detail: connectorState.message,
+      statusLabel: toStaffWorkbenchStatusLabel("googleWorkspace", "error"),
+      detail: toStaffWorkbenchDetail(
+        "googleWorkspace",
+        "error",
+        connectorState.message,
+      ),
     };
   }
 
@@ -597,8 +664,8 @@ function deriveGoogleWorkspaceSetupAffordance(
     return {
       ...base,
       state: "unavailable",
-      statusLabel: "Unavailable",
-      detail: "google_readiness unavailable",
+      statusLabel: toStaffWorkbenchStatusLabel("googleWorkspace", "unavailable"),
+      detail: toStaffWorkbenchDetail("googleWorkspace", "unavailable"),
     };
   }
 
@@ -607,15 +674,23 @@ function deriveGoogleWorkspaceSetupAffordance(
       return {
         ...base,
         state: "resource_missing",
-        statusLabel: "Resource missing",
-        detail: "drive_folder_id missing",
+        statusLabel: toStaffWorkbenchStatusLabel(
+          "googleWorkspace",
+          "resource_missing",
+        ),
+        detail: toStaffWorkbenchDetail(
+          "googleWorkspace",
+          "resource_missing",
+          "drive_folder_id missing",
+        ),
+        buttonLabel: "Set up workspace",
       };
     }
     return {
       ...base,
       state: "ready",
-      statusLabel: "Ready",
-      detail: "Drive and Calendar connected",
+      statusLabel: toStaffWorkbenchStatusLabel("googleWorkspace", "ready"),
+      detail: toStaffWorkbenchDetail("googleWorkspace", "ready"),
       buttonLabel: "Connected",
       disabled: true,
     };
@@ -631,8 +706,11 @@ function deriveGoogleWorkspaceSetupAffordance(
     return {
       ...base,
       state: "not_connected",
-      statusLabel: "Not connected",
-      detail,
+      statusLabel: toStaffWorkbenchStatusLabel(
+        "googleWorkspace",
+        "not_connected",
+      ),
+      detail: toStaffWorkbenchDetail("googleWorkspace", "not_connected", detail),
       buttonLabel: "Connect Google Workspace",
     };
   }
@@ -648,8 +726,12 @@ function deriveGoogleWorkspaceSetupAffordance(
   return {
     ...base,
     state,
-    statusLabel: setupStateLabel(state),
-    detail,
+    statusLabel: toStaffWorkbenchStatusLabel("googleWorkspace", state),
+    detail: toStaffWorkbenchDetail("googleWorkspace", state, detail),
+    buttonLabel:
+      state === "resource_missing"
+        ? "Set up workspace"
+        : "Reconnect Google Workspace",
   };
 }
 
@@ -668,27 +750,6 @@ function deriveResourceHealthState(
   return "unavailable";
 }
 
-function setupStateLabel(state: WorkbenchSetupConnectorState) {
-  switch (state) {
-    case "not_connected":
-      return "Not connected";
-    case "ready":
-      return "Ready";
-    case "reauth_required":
-      return "Reauth required";
-    case "resource_missing":
-      return "Resource missing";
-    case "repair_available":
-      return "Repair available";
-    case "error":
-      return "Error";
-    case "loading":
-      return "Checking";
-    case "unavailable":
-      return "Unavailable";
-  }
-}
-
 export function deriveWorkbenchConnectorSummary(
   state: WorkbenchConnectorState,
 ): WorkbenchConnectorSummary {
@@ -698,7 +759,7 @@ export function deriveWorkbenchConnectorSummary(
       rows: CONNECTOR_LABELS.map((row) => ({
         ...row,
         status: "loading",
-        detail: "Checking",
+        detail: "Checking setup",
       })),
     };
   }
@@ -709,7 +770,7 @@ export function deriveWorkbenchConnectorSummary(
       rows: CONNECTOR_LABELS.map((row) => ({
         ...row,
         status: "error",
-        detail: state.message,
+        detail: sanitizeWorkbenchDetail(state.message, "Check setup"),
       })),
     };
   }
@@ -722,15 +783,20 @@ export function deriveWorkbenchConnectorSummary(
     googleReadiness?.status ??
     config?.google_oauth_grant_status?.trim() ??
     "google_readiness unavailable";
+  const googleSetupState = deriveGoogleSetupState(googleReadiness);
   const calendarReady =
     Boolean(googleReadiness?.ready) &&
     (googleReadiness?.granted_scopes ?? []).includes(CALENDAR_READONLY_SCOPE);
   const calendarDetail = calendarReady
-    ? "calendar.readonly available"
-    : firstDetail(
-        googleReadiness?.blockers,
-        googleReadiness?.missing_scopes,
-        googleDetail,
+    ? toStaffWorkbenchDetail("calendar", "ready")
+    : toStaffWorkbenchDetail(
+        "calendar",
+        googleSetupState,
+        firstDetail(
+          googleReadiness?.blockers,
+          googleReadiness?.missing_scopes,
+          googleDetail,
+        ),
       );
   const googleAction = shouldShowGoogleConnect(googleReadiness)
     ? "google_reconsent"
@@ -739,26 +805,32 @@ export function deriveWorkbenchConnectorSummary(
   const rows: WorkbenchConnectorRow[] = [
     {
       id: "notion",
-      label: "Notion config",
+      label: "Notion",
       status: notionParentPageId ? "ready" : "unavailable",
-      detail: notionParentPageId || "notion_parent_page_id missing",
+      detail: notionParentPageId
+        ? toStaffWorkbenchDetail("notion", "ready")
+        : toStaffWorkbenchDetail("notion", "not_connected"),
     },
     {
       id: "drive",
-      label: "Drive folder",
+      label: "Drive",
       status: driveFolderId ? "ready" : "unavailable",
-      detail: driveFolderId || "drive_folder_id missing",
+      detail: driveFolderId
+        ? toStaffWorkbenchDetail("drive", "ready")
+        : toStaffWorkbenchDetail("drive", "not_connected"),
     },
     {
       id: "google",
-      label: "Google auth/token",
+      label: "Google Workspace",
       status: googleReadiness?.ready ? "ready" : "unavailable",
-      detail: googleDetail,
+      detail: googleReadiness?.ready
+        ? toStaffWorkbenchDetail("googleWorkspace", "ready")
+        : toStaffWorkbenchDetail("googleWorkspace", googleSetupState, googleDetail),
       action: googleAction,
     },
     {
       id: "calendar",
-      label: "Calendar readiness",
+      label: "Calendar",
       status: calendarReady ? "ready" : "unavailable",
       detail: calendarDetail,
       action: calendarReady ? undefined : googleAction,
@@ -986,6 +1058,11 @@ export function WorkbenchShell() {
   const [configForm, setConfigForm] = useState<WorkbenchConfigForm>(
     EMPTY_CONFIG_FORM,
   );
+  const [onboardingForm, setOnboardingForm] = useState<WorkbenchOnboardingForm>(
+    EMPTY_ONBOARDING_FORM,
+  );
+  const [onboardingState, setOnboardingState] =
+    useState<WorkbenchOnboardingState>({ status: "idle" });
   const [setupState, setSetupState] = useState<SetupState>({ status: "idle" });
   const [healthRows, setHealthRows] = useState<WorkbenchHealthRow[]>([]);
   const [healthGeneratedAt, setHealthGeneratedAt] = useState<string | null>(null);
@@ -1218,6 +1295,95 @@ export function WorkbenchShell() {
     }
   }
 
+  async function handleOnboardingDraft(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setOnboardingState({ status: "drafting" });
+    try {
+      const res = await fetch("/api/workbench/onboarding", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          action: "draft",
+          payload: buildWorkbenchOnboardingPayload(onboardingForm, configForm),
+        }),
+      });
+      const body = (await res.json().catch(() => null)) as
+        | { status?: string; draft?: WorkbenchOnboardingDraft; message?: string }
+        | { error?: string; fields?: string[]; message?: string }
+        | null;
+
+      if (!res.ok || !body || !("draft" in body) || !body.draft) {
+        const detail =
+          body && "message" in body && body.message
+            ? body.message
+            : body && "fields" in body && body.fields?.length
+              ? `Add ${body.fields.join(", ")}.`
+              : body && "error" in body && body.error
+                ? body.error
+                : `HTTP ${res.status}`;
+        throw new Error(detail);
+      }
+
+      setOnboardingState({ status: "drafted", draft: body.draft });
+    } catch (err) {
+      setOnboardingState({
+        status: "error",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  async function handleOnboardingSave() {
+    if (onboardingState.status !== "drafted") return;
+    const draft = onboardingState.draft;
+    setOnboardingState({ status: "saving", draft });
+    try {
+      const res = await fetch("/api/workbench/onboarding", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          action: "save",
+          payload: buildWorkbenchOnboardingPayload(onboardingForm, configForm),
+          draft,
+        }),
+      });
+      const body = (await res.json().catch(() => null)) as
+        | { status?: string; message?: string }
+        | { error?: string; message?: string }
+        | null;
+
+      if (!res.ok) {
+        const detail =
+          body && "message" in body && body.message
+            ? body.message
+            : body && "error" in body && body.error
+              ? body.error
+              : `HTTP ${res.status}`;
+        throw new Error(detail);
+      }
+
+      await loadConfig({ silent: true });
+      setOnboardingState({
+        status: "saved",
+        message:
+          body && "message" in body && body.message
+            ? body.message
+            : "Your Workbench profile is set up.",
+      });
+    } catch (err) {
+      setOnboardingState({
+        status: "error",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   async function handleCheck() {
     setSetupState({ status: "checking" });
     try {
@@ -1358,8 +1524,14 @@ export function WorkbenchShell() {
 
         <WorkbenchSetupPanel
           form={configForm}
+          config={connectorState.status === "loaded" ? connectorState.config : null}
+          onboardingForm={onboardingForm}
+          onboardingState={onboardingState}
           onFormChange={setConfigForm}
+          onOnboardingFormChange={setOnboardingForm}
           onSave={handleConfigSave}
+          onOnboardingDraft={handleOnboardingDraft}
+          onOnboardingSave={handleOnboardingSave}
           onSetupNotion={handleNotionSetup}
           onCheck={handleCheck}
           onConnectorManagementAction={handleConnectorManagementAction}
@@ -1472,6 +1644,38 @@ function firstDetail(
   const missingScope = missingScopes?.find(Boolean);
   if (missingScope) return missingScope;
   return fallback;
+}
+
+function deriveGoogleSetupState(
+  readiness: WorkbenchGoogleReadiness | null | undefined,
+): WorkbenchSetupConnectorState {
+  if (!readiness) return "unavailable";
+  if (readiness.ready) return "ready";
+  if (readiness.status === "grant_missing") return "not_connected";
+  if (GOOGLE_REAUTH_STATUSES.has(readiness.status)) return "reauth_required";
+  if (GOOGLE_RESOURCE_MISSING_STATUSES.has(readiness.status)) {
+    return "resource_missing";
+  }
+  if (GOOGLE_REPAIR_STATUSES.has(readiness.status)) return "repair_available";
+  return "unavailable";
+}
+
+function formatRepairSetupDetail(connectors: WorkbenchSetupAffordance[]) {
+  const needsPageRepair = connectors.some(
+    (connector) => connector.id === "notion",
+  );
+  const needsReconnect = connectors.some(
+    (connector) => connector.id === "googleWorkspace",
+  );
+
+  if (needsPageRepair && needsReconnect) {
+    return "Repair Notion and reconnect Google Workspace before running.";
+  }
+  if (needsPageRepair) return "Repair Notion pages before running.";
+  if (needsReconnect) return "Reconnect Google Workspace before running.";
+  return `Repair ${formatConnectorList(
+    connectors.map((connector) => connector.label),
+  )} before running.`;
 }
 
 function connectorManagementSourceForSetupAffordance(
@@ -1598,6 +1802,10 @@ function ResultView({ response }: { response: WorkbenchStartResponse }) {
     status: "idle",
   });
   const uiSummary = useMemo(() => deriveWorkbenchUiSummary(response), [response]);
+  const profileUpdateStatus = useMemo(
+    () => deriveWorkbenchProfileUpdateStatus(readWorkbenchProfileUpdate(response)),
+    [response],
+  );
   const postRunActions = useMemo(
     () => deriveWorkbenchPostRunActions(response),
     [response],
@@ -1722,6 +1930,8 @@ function ResultView({ response }: { response: WorkbenchStartResponse }) {
         state={postRunState}
         onAction={handlePostRunAction}
       />
+
+      <ProfileUpdatePanel status={profileUpdateStatus} />
 
       <ResultSection title="Retrieval Sources">
         <RetrievalStatusList rows={uiSummary.retrievalRows} />
@@ -1938,6 +2148,65 @@ function summarizeFeedbackResponse(response: WorkbenchOutputActionOutcome): {
   return { message: `Feedback accepted: ${response.reason}` };
 }
 
+function readWorkbenchProfileUpdate(
+  response: WorkbenchStartResponse,
+): WorkbenchProfileUpdateInput {
+  return (
+    response as WorkbenchStartResponse & {
+      profile_update?: WorkbenchProfileUpdateInput;
+    }
+  ).profile_update;
+}
+
+function ProfileUpdatePanel({
+  status,
+  onUndo,
+}: {
+  status: WorkbenchProfileUpdateStatus;
+  onUndo?: () => void;
+}) {
+  if (status.state === "idle") return null;
+  const undoLabel = status.actionLabel ?? "Undo last profile update";
+
+  return (
+    <ResultSection title="Profile Learning">
+      <div
+        style={{
+          border: "1px solid var(--rule)",
+          padding: "10px 11px",
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1fr) auto",
+          gap: 12,
+          alignItems: "center",
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <StatusPill status={status.label} />
+          <div
+            style={{
+              marginTop: 6,
+              color: "var(--ink-dim)",
+              fontSize: 12,
+              lineHeight: 1.35,
+            }}
+          >
+            {status.detail}
+          </div>
+        </div>
+        {status.actionLabel ? (
+          <SmallActionButton
+            type="button"
+            onClick={onUndo}
+            disabled={!onUndo || status.actionDisabled}
+          >
+            {undoLabel}
+          </SmallActionButton>
+        ) : null}
+      </div>
+    </ResultSection>
+  );
+}
+
 function postRunButtonLabel(action: WorkbenchPostRunAction, running: boolean) {
   if (running) return action.id === "presend" ? "Preparing" : "Sending";
   if (action.status === "disabled") return "Disabled";
@@ -2055,8 +2324,14 @@ function ConnectorReadinessPanel({
 
 function WorkbenchSetupPanel({
   form,
+  config,
+  onboardingForm,
+  onboardingState,
   onFormChange,
+  onOnboardingFormChange,
   onSave,
+  onOnboardingDraft,
+  onOnboardingSave,
   onSetupNotion,
   onCheck,
   onConnectorManagementAction,
@@ -2070,8 +2345,14 @@ function WorkbenchSetupPanel({
   healthGeneratedAt,
 }: {
   form: WorkbenchConfigForm;
+  config: WorkbenchStaffConfig | null;
+  onboardingForm: WorkbenchOnboardingForm;
+  onboardingState: WorkbenchOnboardingState;
   onFormChange: (form: WorkbenchConfigForm) => void;
+  onOnboardingFormChange: (form: WorkbenchOnboardingForm) => void;
   onSave: (event: FormEvent<HTMLFormElement>) => void;
+  onOnboardingDraft: (event: FormEvent<HTMLFormElement>) => void;
+  onOnboardingSave: () => void;
   onSetupNotion: () => void;
   onCheck: () => void;
   onConnectorManagementAction: (
@@ -2088,9 +2369,22 @@ function WorkbenchSetupPanel({
 }) {
   const isSaving = setupState.status === "saving";
   const isChecking = setupState.status === "checking";
+  const isOnboardingBusy =
+    onboardingState.status === "drafting" || onboardingState.status === "saving";
+  const personalisationSummary = deriveWorkbenchPersonalisationSummary({
+    setupReady: setupSummary.state === "ready",
+    config,
+  });
 
   function updateField(field: keyof WorkbenchConfigForm, value: string) {
     onFormChange({ ...form, [field]: value });
+  }
+
+  function updateOnboardingField(
+    field: keyof WorkbenchOnboardingForm,
+    value: string,
+  ) {
+    onOnboardingFormChange({ ...onboardingForm, [field]: value });
   }
 
   return (
@@ -2145,6 +2439,197 @@ function WorkbenchSetupPanel({
       </div>
 
       <ConnectorManagementStatus state={connectorManagementState} />
+
+      <form
+        onSubmit={onOnboardingDraft}
+        style={{
+          border: "1px solid var(--rule)",
+          padding: "9px",
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 8,
+        }}
+      >
+        <div
+          style={{
+            gridColumn: "1 / -1",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 8,
+          }}
+        >
+          <div>
+            <div
+              style={{
+                color: "var(--ink)",
+                fontSize: 12,
+                lineHeight: 1.2,
+              }}
+            >
+              {personalisationSummary.title}
+            </div>
+            <div
+              style={{
+                marginTop: 3,
+                color: "var(--ink-dim)",
+                fontSize: 11,
+                lineHeight: 1.25,
+              }}
+            >
+              {personalisationSummary.detail}
+            </div>
+          </div>
+          <StatusPill status={personalisationSummary.statusLabel} />
+        </div>
+        <SetupInput
+          label="Role"
+          value={onboardingForm.role}
+          onChange={(value) => updateOnboardingField("role", value)}
+          required
+        />
+        <SetupInput
+          label="Team"
+          value={onboardingForm.team}
+          onChange={(value) => updateOnboardingField("team", value)}
+          required
+        />
+        <SetupInput
+          label="Tenure"
+          value={onboardingForm.tenure}
+          onChange={(value) => updateOnboardingField("tenure", value)}
+          required
+        />
+        <SetupInput
+          label="Output"
+          value={onboardingForm.output_preference}
+          onChange={(value) => updateOnboardingField("output_preference", value)}
+        />
+        <SetupInput
+          label="Feedback"
+          value={form.feedback_style}
+          onChange={(value) => updateField("feedback_style", value)}
+          required
+        />
+        <SetupInput
+          label="Voice fallback"
+          value={form.voice_register}
+          onChange={(value) => updateField("voice_register", value)}
+        />
+        <label
+          style={{
+            gridColumn: "1 / -1",
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+            color: "var(--ink-faint)",
+            fontFamily: "var(--font-plex-mono)",
+            fontSize: 9,
+            letterSpacing: "0.1em",
+            textTransform: "uppercase",
+          }}
+        >
+          Current work
+          <textarea
+            value={onboardingForm.current_work_bullets}
+            onChange={(event) =>
+              updateOnboardingField("current_work_bullets", event.target.value)
+            }
+            rows={2}
+            required
+            style={setupInputStyle({ minHeight: 52, resize: "vertical" })}
+          />
+        </label>
+        <label
+          style={{
+            gridColumn: "1 / -1",
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+            color: "var(--ink-faint)",
+            fontFamily: "var(--font-plex-mono)",
+            fontSize: 9,
+            letterSpacing: "0.1em",
+            textTransform: "uppercase",
+          }}
+        >
+          Friction tasks
+          <textarea
+            value={form.friction_tasks}
+            onChange={(event) =>
+              updateField("friction_tasks", event.target.value)
+            }
+            rows={2}
+            required
+            style={setupInputStyle({ minHeight: 52, resize: "vertical" })}
+          />
+        </label>
+        <label
+          style={{
+            gridColumn: "1 / -1",
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+            color: "var(--ink-faint)",
+            fontFamily: "var(--font-plex-mono)",
+            fontSize: 9,
+            letterSpacing: "0.1em",
+            textTransform: "uppercase",
+          }}
+        >
+          Personal context
+          <textarea
+            value={onboardingForm.personal_context_bullets}
+            onChange={(event) =>
+              updateOnboardingField(
+                "personal_context_bullets",
+                event.target.value,
+              )
+            }
+            rows={2}
+            style={setupInputStyle({ minHeight: 52, resize: "vertical" })}
+          />
+        </label>
+        <OnboardingPreview state={onboardingState} />
+        <div
+          style={{
+            gridColumn: "1 / -1",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <SmallActionButton type="submit" disabled={isSaving || isOnboardingBusy}>
+            {onboardingState.status === "drafting"
+              ? "Drafting"
+              : "Preview profile"}
+          </SmallActionButton>
+          <SmallActionButton
+            type="button"
+            onClick={onOnboardingSave}
+            disabled={onboardingState.status !== "drafted"}
+          >
+            {onboardingState.status === "saving" ? "Saving" : "Save to Notion"}
+          </SmallActionButton>
+          <span
+            role={onboardingState.status === "error" ? "alert" : undefined}
+            style={{
+              color:
+                onboardingState.status === "error"
+                  ? "var(--danger, #9f1d1d)"
+                  : "var(--ink-faint)",
+              fontSize: 11,
+              lineHeight: 1.3,
+            }}
+          >
+            {onboardingState.status === "saved"
+              ? onboardingState.message
+              : onboardingState.status === "error"
+                ? sanitizeWorkbenchDetail(onboardingState.message)
+                : ""}
+          </span>
+        </div>
+      </form>
 
       <details
         {...(setupAffordances.manualConfig.initiallyOpen ? { open: true } : {})}
@@ -2256,7 +2741,7 @@ function WorkbenchSetupPanel({
               {setupState.status === "saved"
                 ? "Saved"
                 : setupState.status === "error"
-                  ? setupState.message
+                  ? sanitizeWorkbenchDetail(setupState.message)
                   : ""}
             </span>
           </div>
@@ -2302,7 +2787,7 @@ function WorkbenchSetupPanel({
                   whiteSpace: "nowrap",
                 }}
               >
-                {row.reason ?? "Clear"}
+                {sanitizeWorkbenchDetail(row.reason, "Clear")}
               </span>
             </div>
           ))}
@@ -2446,6 +2931,50 @@ function RunHistoryPanel({
   );
 }
 
+function OnboardingPreview({ state }: { state: WorkbenchOnboardingState }) {
+  if (state.status !== "drafted" && state.status !== "saving") return null;
+  const draft = state.draft;
+  const rows: Array<{ label: string; bullets: string[] }> = [
+    { label: "Personal Profile", bullets: draft.personal_profile.bullets },
+    { label: "Working On", bullets: draft.working_on.bullets },
+    { label: "Voice", bullets: draft.voice.bullets },
+  ];
+
+  return (
+    <div
+      style={{
+        gridColumn: "1 / -1",
+        borderTop: "1px solid var(--rule)",
+        paddingTop: 8,
+        display: "flex",
+        flexDirection: "column",
+        gap: 7,
+      }}
+    >
+      {rows.map((row) => (
+        <div key={row.label} style={{ fontSize: 11, lineHeight: 1.35 }}>
+          <div
+            style={{
+              color: "var(--ink)",
+              fontFamily: "var(--font-plex-mono)",
+              fontSize: 9,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+            }}
+          >
+            {row.label}
+          </div>
+          <ul style={{ margin: "4px 0 0", paddingLeft: 16 }}>
+            {row.bullets.map((bullet, index) => (
+              <li key={`${row.label}-${index}`}>{bullet}</li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function SetupSummaryBanner({ summary }: { summary: WorkbenchSetupSummary }) {
   return (
     <div
@@ -2574,7 +3103,9 @@ function SetupActionRow({
             }
             disabled={primaryDisabled}
           >
-            {primaryActionRunning ? "Repairing" : affordance.buttonLabel}
+            {primaryActionRunning
+              ? setupActionRunningLabel(affordance)
+              : affordance.buttonLabel}
           </SmallActionButton>
           {secondaryActions.map((action) => {
             const running =
@@ -2597,6 +3128,10 @@ function SetupActionRow({
   );
 }
 
+function setupActionRunningLabel(affordance: WorkbenchSetupAffordance) {
+  return affordance.id === "notion" ? "Repairing pages" : "Setting up workspace";
+}
+
 function ConnectorManagementStatus({
   state,
 }: {
@@ -2616,7 +3151,7 @@ function ConnectorManagementStatus({
         lineHeight: 1.35,
       }}
     >
-      {state.message}
+      {sanitizeWorkbenchDetail(state.message, "Connector updated.")}
     </div>
   );
 }
@@ -2818,7 +3353,9 @@ function StatusPill({ status }: { status: string }) {
     normalized === "ok" ||
     normalized === "succeeded" ||
     normalized === "ready" ||
-    normalized === "ready to run";
+    normalized === "ready to run" ||
+    normalized === "connected" ||
+    normalized === "profile updated";
   const isWarn =
     normalized === "unavailable" ||
     normalized === "loading" ||
@@ -2829,7 +3366,14 @@ function StatusPill({ status }: { status: string }) {
     normalized === "repair setup" ||
     normalized === "reauth required" ||
     normalized === "resource missing" ||
-    normalized === "repair available";
+    normalized === "repair available" ||
+    normalized === "set up" ||
+    normalized === "setting up workspace" ||
+    normalized === "needs reconnect" ||
+    normalized === "repairing pages" ||
+    normalized === "needs profile" ||
+    normalized === "needs attention" ||
+    normalized === "no profile update";
   return (
     <span
       style={{
@@ -2889,6 +3433,13 @@ function dedupeWarnings(items: string[]) {
 function optionalFormString(value: string) {
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
+}
+
+function splitWorkbenchLines(value: string) {
+  return value
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function setupInputStyle(extra?: React.CSSProperties): React.CSSProperties {

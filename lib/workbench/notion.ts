@@ -1,6 +1,7 @@
 import type { WorkbenchRetrievedContext } from "./types";
 import {
   normalizeWorkbenchNotionBlocks,
+  type WorkbenchNotionAppendBlock,
   type WorkbenchNotionBlock,
 } from "./notion-client";
 
@@ -30,6 +31,10 @@ export type WorkbenchNotionClient = {
   listChildPages(parentPageId: string): Promise<WorkbenchNotionPageSummary[]>;
   getPageContent?(pageId: string): Promise<string>;
   getPageBlocks?(pageId: string): Promise<WorkbenchNotionBlock[]>;
+  appendBlockChildren?(
+    pageId: string,
+    blocks: WorkbenchNotionAppendBlock[],
+  ): Promise<WorkbenchNotionBlock[]>;
 };
 
 export type WorkbenchNotionContextItem = WorkbenchRetrievedContext & {

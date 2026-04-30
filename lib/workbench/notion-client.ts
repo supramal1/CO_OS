@@ -19,6 +19,25 @@ export type WorkbenchNotionBlock = {
   [key: string]: unknown;
 };
 
+export type WorkbenchNotionAppendRichText = {
+  type: "text";
+  text: { content: string };
+};
+
+export type WorkbenchNotionAppendBlock =
+  | {
+      type: "heading_3";
+      heading_3: { rich_text: WorkbenchNotionAppendRichText[] };
+    }
+  | {
+      type: "paragraph";
+      paragraph: { rich_text: WorkbenchNotionAppendRichText[] };
+    }
+  | {
+      type: "bulleted_list_item";
+      bulleted_list_item: { rich_text: WorkbenchNotionAppendRichText[] };
+    };
+
 export type WorkbenchNotionSdkPage = {
   object?: string;
   id?: string;
@@ -34,6 +53,12 @@ export type WorkbenchNotionSdkCreatePageArgs = {
       title: Array<{ text: { content: string } }>;
     };
   };
+};
+
+export type WorkbenchNotionSdkAppendBlockChildrenArgs = {
+  block_id: string;
+  children: WorkbenchNotionAppendBlock[];
+  after?: string;
 };
 
 export type WorkbenchNotionSdkClient = {
@@ -54,6 +79,13 @@ export type WorkbenchNotionSdkClient = {
         page_size?: number;
         start_cursor?: string;
       }): Promise<{
+        results: WorkbenchNotionBlock[];
+        has_more?: boolean;
+        next_cursor?: string | null;
+      }>;
+      append?(
+        args: WorkbenchNotionSdkAppendBlockChildrenArgs,
+      ): Promise<{
         results: WorkbenchNotionBlock[];
         has_more?: boolean;
         next_cursor?: string | null;
@@ -195,6 +227,21 @@ class SdkWorkbenchNotionClient implements WorkbenchNotionClient {
     return blocks;
   }
 
+  async appendBlockChildren(
+    pageId: string,
+    blocks: WorkbenchNotionAppendBlock[],
+  ): Promise<WorkbenchNotionBlock[]> {
+    if (!this.sdkClient.blocks.children.append) {
+      throw new Error("notion_block_appender_missing");
+    }
+
+    const response = await this.sdkClient.blocks.children.append({
+      block_id: pageId,
+      children: blocks,
+    });
+    return response.results;
+  }
+
   async searchPagesByTitle(title: string): Promise<WorkbenchNotionPageSummary[]> {
     const normalizedTitle = normalizeTextValue(title);
     if (!normalizedTitle) return [];
@@ -277,6 +324,7 @@ class RestWorkbenchNotionSdkClient implements WorkbenchNotionSdkClient {
     this.blocks = {
       children: {
         list: (args) => this.listBlockChildren(args),
+        append: (args) => this.appendBlockChildren(args),
       },
     };
     this.pages = {
@@ -313,6 +361,23 @@ class RestWorkbenchNotionSdkClient implements WorkbenchNotionSdkClient {
       method: "POST",
       body: JSON.stringify(args),
     });
+  }
+
+  private async appendBlockChildren(
+    args: WorkbenchNotionSdkAppendBlockChildrenArgs,
+  ) {
+    return this.request(
+      `/v1/blocks/${encodeURIComponent(args.block_id)}/children`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(
+          withoutUndefined({
+            children: args.children,
+            after: args.after,
+          }),
+        ),
+      },
+    );
   }
 
   private async request(path: string, init: RequestInit) {

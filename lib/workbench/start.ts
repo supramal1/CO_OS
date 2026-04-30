@@ -2,6 +2,9 @@ import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { estimatedBeforeMinutesFor } from "./baselines";
 import { buildWorkbenchInvocationLog } from "./invocation-log";
+import { processWorkbenchRunLearning } from "./learning";
+import { createWorkbenchNotionClient } from "./notion-client";
+import { createWorkbenchNotionTokenStore } from "./notion-token-store";
 import { persistWorkbenchInvocation } from "./persistence";
 import { persistWorkbenchRun } from "./run-history";
 import {
@@ -10,6 +13,7 @@ import {
   parseWorkbenchPreflightResult,
 } from "./preflight";
 import { gatherWorkbenchRetrieval } from "./retrieval";
+import { getUserWorkbenchConfig } from "./retrieval/config";
 import { loadWorkbenchSkill } from "./skill-loader";
 import type { WorkbenchStartResponse } from "./types";
 
@@ -92,7 +96,19 @@ export async function runWorkbenchStart(
     retrieval,
     invocation,
   });
-  return { result, invocation, retrieval, run_history: runHistory };
+  const profileUpdate = await learnFromRun({
+    userId: input.userId,
+    ask: input.ask,
+    result,
+    runHistory,
+  });
+  return {
+    result,
+    invocation,
+    retrieval,
+    run_history: runHistory,
+    ...(profileUpdate ? { profile_update: profileUpdate } : {}),
+  };
 }
 
 async function persistRunHistory(input: WorkbenchStartResponse & {
@@ -134,6 +150,62 @@ async function persistRunHistory(input: WorkbenchStartResponse & {
       status: "error",
       reason: "workbench_run_history_failed",
       detail,
+    };
+  }
+}
+
+async function learnFromRun(input: {
+  userId: string;
+  ask: string;
+  result: WorkbenchStartResponse["result"];
+  runHistory: NonNullable<WorkbenchStartResponse["run_history"]>;
+}): Promise<WorkbenchStartResponse["profile_update"] | null> {
+  if (input.runHistory.status !== "stored") return null;
+
+  try {
+    const config = await getUserWorkbenchConfig(input.userId);
+    if (!config?.notion_parent_page_id?.trim()) {
+      return processWorkbenchRunLearning({
+        userId: input.userId,
+        ask: input.ask,
+        result: input.result,
+        sourceRunId: input.runHistory.id,
+        config,
+        writerClient: null,
+      });
+    }
+
+    const token = await createWorkbenchNotionTokenStore().get(input.userId);
+    const accessToken = token?.accessToken?.trim();
+    const notionBoundary = accessToken
+      ? createWorkbenchNotionClient({ token: accessToken })
+      : null;
+    const writerClient =
+      notionBoundary?.client?.appendBlockChildren &&
+      notionBoundary.client.listChildPages
+        ? {
+            listChildPages: notionBoundary.client.listChildPages.bind(
+              notionBoundary.client,
+            ),
+            appendBlockChildren:
+              notionBoundary.client.appendBlockChildren.bind(notionBoundary.client),
+          }
+        : null;
+
+    return processWorkbenchRunLearning({
+      userId: input.userId,
+      ask: input.ask,
+      result: input.result,
+      sourceRunId: input.runHistory.id,
+      config,
+      writerClient,
+    });
+  } catch (err) {
+    const message = errorMessage(err);
+    console.warn("[workbench] profile learning failed:", message);
+    return {
+      status: "error",
+      message,
     };
   }
 }

@@ -519,6 +519,76 @@ describe("Workbench Notion adapter", () => {
     ]);
   });
 
+  it("appends blocks through the Notion SDK-shaped client boundary", async () => {
+    const appendCalls: Array<{
+      block_id: string;
+      children: unknown[];
+    }> = [];
+    const sdkClient: WorkbenchNotionSdkClient = {
+      search: async () => ({ results: [] }),
+      blocks: {
+        children: {
+          list: async () => ({ results: [] }),
+          append: async (args) => {
+            appendCalls.push({
+              block_id: args.block_id,
+              children: args.children,
+            });
+            return {
+              results: args.children.map((block, index) => ({
+                id: `created-${index}`,
+                ...block,
+              })),
+            };
+          },
+        },
+      },
+    };
+
+    const boundary = createWorkbenchNotionClient({ sdkClient });
+    const writableClient = boundary.client as typeof boundary.client & {
+      appendBlockChildren(
+        pageId: string,
+        blocks: Array<{
+          type: "paragraph";
+          paragraph: { rich_text: Array<{ type: "text"; text: { content: string } }> };
+        }>,
+      ): Promise<unknown[]>;
+    };
+
+    await expect(
+      writableClient.appendBlockChildren("profile-page", [
+        {
+          type: "paragraph",
+          paragraph: {
+            rich_text: [{ type: "text", text: { content: "Managed update." } }],
+          },
+        },
+      ]),
+    ).resolves.toEqual([
+      {
+        id: "created-0",
+        type: "paragraph",
+        paragraph: {
+          rich_text: [{ type: "text", text: { content: "Managed update." } }],
+        },
+      },
+    ]);
+    expect(appendCalls).toEqual([
+      {
+        block_id: "profile-page",
+        children: [
+          {
+            type: "paragraph",
+            paragraph: {
+              rich_text: [{ type: "text", text: { content: "Managed update." } }],
+            },
+          },
+        ],
+      },
+    ]);
+  });
+
   it("returns a typed unavailable boundary when no live Notion SDK client is configured", () => {
     const boundary = createWorkbenchNotionClient({ sdkClient: null });
 
@@ -628,5 +698,79 @@ describe("Workbench Notion adapter", () => {
     expect(calls[1].url).toBe(
       "https://api.notion.com/v1/blocks/profile-page/children?page_size=100",
     );
+  });
+
+  it("appends blocks through the dependency-free Notion REST client", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetcher: typeof fetch = async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return Response.json({
+        results: [
+          {
+            id: "created-1",
+            type: "paragraph",
+            paragraph: {
+              rich_text: [{ plain_text: "Managed update." }],
+            },
+          },
+        ],
+      });
+    };
+
+    const boundary = createWorkbenchNotionClient({
+      token: "runtime-token",
+      fetch: fetcher,
+    });
+    const writableClient = boundary.client as typeof boundary.client & {
+      appendBlockChildren(
+        pageId: string,
+        blocks: Array<{
+          type: "paragraph";
+          paragraph: { rich_text: Array<{ type: "text"; text: { content: string } }> };
+        }>,
+      ): Promise<unknown[]>;
+    };
+
+    await expect(
+      writableClient.appendBlockChildren("profile-page", [
+        {
+          type: "paragraph",
+          paragraph: {
+            rich_text: [{ type: "text", text: { content: "Managed update." } }],
+          },
+        },
+      ]),
+    ).resolves.toEqual([
+      {
+        id: "created-1",
+        type: "paragraph",
+        paragraph: {
+          rich_text: [{ plain_text: "Managed update." }],
+        },
+      },
+    ]);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      url: "https://api.notion.com/v1/blocks/profile-page/children",
+      init: {
+        method: "PATCH",
+        headers: {
+          Authorization: "Bearer runtime-token",
+          "Content-Type": "application/json",
+          "Notion-Version": "2022-06-28",
+        },
+      },
+    });
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({
+      children: [
+        {
+          type: "paragraph",
+          paragraph: {
+            rich_text: [{ type: "text", text: { content: "Managed update." } }],
+          },
+        },
+      ],
+    });
   });
 });

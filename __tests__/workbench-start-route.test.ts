@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   anthropicCreate: vi.fn(),
   gatherWorkbenchRetrieval: vi.fn(),
   persistWorkbenchInvocation: vi.fn(),
+  persistWorkbenchRun: vi.fn(),
+  processWorkbenchRunLearning: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({
@@ -29,6 +31,15 @@ vi.mock("@/lib/cookbook-client", () => ({
 vi.mock("@/lib/workbench/persistence", () => ({
   persistWorkbenchInvocation: (...args: unknown[]) =>
     mocks.persistWorkbenchInvocation(...args),
+}));
+
+vi.mock("@/lib/workbench/run-history", () => ({
+  persistWorkbenchRun: (...args: unknown[]) => mocks.persistWorkbenchRun(...args),
+}));
+
+vi.mock("@/lib/workbench/learning", () => ({
+  processWorkbenchRunLearning: (...args: unknown[]) =>
+    mocks.processWorkbenchRunLearning(...args),
 }));
 
 vi.mock("@/lib/workbench/retrieval", () => ({
@@ -58,8 +69,14 @@ beforeEach(() => {
   mocks.anthropicCreate.mockReset();
   mocks.gatherWorkbenchRetrieval.mockReset();
   mocks.persistWorkbenchInvocation.mockReset();
+  mocks.persistWorkbenchRun.mockReset();
+  mocks.processWorkbenchRunLearning.mockReset();
   process.env.ANTHROPIC_API_KEY = "anthropic-test";
   process.env.ANTHROPIC_MODEL = "claude-sonnet-test";
+  mocks.persistWorkbenchRun.mockResolvedValue({
+    status: "unavailable",
+    error: "workbench_run_history_unavailable",
+  });
   mocks.gatherWorkbenchRetrieval.mockResolvedValue({
     sources: [],
     context: [],
@@ -127,6 +144,79 @@ describe("POST /api/workbench/start", () => {
       task_type: "ask_decode",
       skill_version: "0.1.0",
     });
+  });
+
+  it("runs profile learning after a successful stored run", async () => {
+    mocks.auth.mockResolvedValue({
+      apiKey: "csk_test",
+      principalId: "principal_user_1",
+    });
+    mocks.getSkill.mockResolvedValue({
+      name: "workbench-preflight",
+      version: "0.1.0",
+      content: "PRE-FLIGHT SYSTEM PROMPT",
+    });
+    mocks.persistWorkbenchRun.mockResolvedValue({
+      status: "stored",
+      run: {
+        id: "run-1",
+        created_at: "2026-04-30T10:00:00.000Z",
+      },
+    });
+    mocks.processWorkbenchRunLearning.mockResolvedValue({
+      status: "updated",
+      targetLabel: "Voice",
+      canUndo: true,
+      updateId: "update-1",
+    });
+    mocks.anthropicCreate.mockResolvedValue({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            decoded_task: {
+              summary: "Respond to an EM ask",
+              requester: "EM",
+              deliverable_type: "written_response",
+              task_type: "ask_decode",
+            },
+            missing_context: [],
+            drafted_clarifying_message: "",
+            retrieved_context: [],
+            suggested_approach: [],
+            time_estimate: {
+              estimated_before_minutes: 30,
+              estimated_workbench_minutes: 10,
+              task_type: "ask_decode",
+            },
+            warnings: [],
+          }),
+        },
+      ],
+    });
+
+    const res = await POST(req({ ask: "I prefer direct bullets." }));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      run_history: {
+        status: "stored",
+        id: "run-1",
+      },
+      profile_update: {
+        status: "updated",
+        targetLabel: "Voice",
+        canUndo: true,
+        updateId: "update-1",
+      },
+    });
+    expect(mocks.processWorkbenchRunLearning).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "principal_user_1",
+        ask: "I prefer direct bullets.",
+        sourceRunId: "run-1",
+      }),
+    );
   });
 
   it("includes retrieved context blocks in the pre-flight Anthropic call", async () => {

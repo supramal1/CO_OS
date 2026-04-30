@@ -68,6 +68,9 @@ export type WorkbenchUserConfigPatchInput = {
   drive_folder_url?: string | null;
   google_oauth_grant_status?: string | null;
   google_oauth_scopes?: string[] | null;
+  voice_register?: string | null;
+  feedback_style?: string | null;
+  friction_tasks?: string[] | null;
 };
 
 type WorkbenchUserConfigPatchPayload = WorkbenchUserConfigPatchInput & {
@@ -273,6 +276,23 @@ function normalizeWorkbenchConfigPatch(
           ),
         ]
       : [];
+  }
+  if ("voice_register" in input) {
+    patch.voice_register = nullableString(input.voice_register);
+  }
+  if ("feedback_style" in input) {
+    patch.feedback_style = nullableString(input.feedback_style);
+  }
+  if ("friction_tasks" in input) {
+    patch.friction_tasks = Array.isArray(input.friction_tasks)
+      ? [
+          ...new Set(
+            input.friction_tasks
+              .map((task) => task.trim())
+              .filter(Boolean),
+          ),
+        ]
+      : null;
   }
 
   return patch;

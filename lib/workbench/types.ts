@@ -91,4 +91,19 @@ export type WorkbenchStartResponse = {
         reason: "workbench_run_history_failed";
         detail: string;
       };
+  profile_update?:
+    | {
+        status: "idle" | "skipped";
+        reason: string;
+      }
+    | {
+        status: "updated";
+        targetLabel: string;
+        canUndo: boolean;
+        updateId?: string;
+      }
+    | {
+        status: "error";
+        message: string;
+      };
 };
