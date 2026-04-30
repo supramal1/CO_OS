@@ -434,6 +434,91 @@ describe("Workbench Notion adapter", () => {
     ]);
   });
 
+  it("searches exact-title Workbench pages through the Notion SDK boundary", async () => {
+    const searchCalls: Array<{ query?: string; start_cursor?: string }> = [];
+    const sdkClient: WorkbenchNotionSdkClient = {
+      search: async (args) => {
+        searchCalls.push({
+          query: args.query,
+          start_cursor: args.start_cursor,
+        });
+        if (!args.start_cursor) {
+          return {
+            results: [
+              {
+                object: "page",
+                id: "parent-1",
+                url: "https://notion.so/parent-1",
+                properties: {
+                  title: {
+                    type: "title",
+                    title: [{ plain_text: "CO Workbench" }],
+                  },
+                },
+              },
+              {
+                object: "page",
+                id: "near-match",
+                url: "https://notion.so/near-match",
+                properties: {
+                  title: {
+                    type: "title",
+                    title: [{ plain_text: "CO Workbench Archive" }],
+                  },
+                },
+              },
+            ],
+            has_more: true,
+            next_cursor: "page-2",
+          };
+        }
+
+        return {
+          results: [
+            {
+              object: "page",
+              id: "parent-2",
+              url: null,
+              properties: {
+                Name: {
+                  type: "title",
+                  title: [{ text: { content: "CO Workbench" } }],
+                },
+              },
+            },
+          ],
+        };
+      },
+      blocks: {
+        children: {
+          list: async () => ({ results: [] }),
+        },
+      },
+    };
+
+    const boundary = createWorkbenchNotionClient({ sdkClient });
+    const searchableClient = boundary.client as typeof boundary.client & {
+      searchPagesByTitle(title: string): Promise<
+        Array<{ id: string; title: string; url?: string | null }>
+      >;
+    };
+
+    await expect(searchableClient.searchPagesByTitle("CO Workbench")).resolves.toEqual(
+      [
+        {
+          id: "parent-1",
+          title: "CO Workbench",
+          url: "https://notion.so/parent-1",
+        },
+        { id: "parent-2", title: "CO Workbench", url: null },
+      ],
+    );
+    expect(searchCalls).toEqual([
+      { query: "CO Workbench", start_cursor: undefined },
+      { query: "CO Workbench", start_cursor: "page-2" },
+    ]);
+  });
+
   it("returns a typed unavailable boundary when no live Notion SDK client is configured", () => {
     const boundary = createWorkbenchNotionClient({ sdkClient: null });
 

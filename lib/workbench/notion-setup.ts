@@ -22,6 +22,9 @@ export type WorkbenchNotionCreatePageInput = {
 
 export type WorkbenchNotionSetupClient = {
   listChildPages(parentPageId: string): Promise<WorkbenchNotionPageSummary[]>;
+  searchPagesByTitle?(
+    title: string,
+  ): Promise<WorkbenchNotionPageSummary[]>;
   createPage(
     input: WorkbenchNotionCreatePageInput,
   ): Promise<WorkbenchNotionPageSummary>;
@@ -94,6 +97,32 @@ export async function ensureWorkbenchNotionSetup(
     }
   }
 
+  const existingParent = await findExistingWorkbenchParent(client);
+  if (existingParent.status === "failed") {
+    return failed({
+      reason: existingParent.reason,
+      parentId: null,
+      childIds: {},
+      counts: emptyCounts(),
+    });
+  }
+  if (existingParent.status === "found") {
+    const report = await ensureChildPages({
+      client,
+      parentId: existingParent.parent.id,
+      existingChildren: existingParent.children,
+    });
+    if (report.status !== "failed") {
+      await updateParentConfigIfNeeded({
+        userId: input.userId,
+        updateConfig: input.updateConfig,
+        storedParentId,
+        parentId: report.parent_id,
+      });
+    }
+    return report;
+  }
+
   return createWorkbenchPages({
     userId: input.userId,
     client,
@@ -110,6 +139,65 @@ async function listStoredParentChildren(
   } catch {
     return null;
   }
+}
+
+type ExistingWorkbenchParentResult =
+  | {
+      status: "found";
+      parent: WorkbenchNotionPageSummary;
+      children: WorkbenchNotionPageSummary[];
+    }
+  | { status: "not_found" }
+  | { status: "failed"; reason: string };
+
+async function findExistingWorkbenchParent(
+  client: WorkbenchNotionSetupClient,
+): Promise<ExistingWorkbenchParentResult> {
+  if (!client.searchPagesByTitle) return { status: "not_found" };
+
+  let candidates: WorkbenchNotionPageSummary[];
+  try {
+    candidates = await client.searchPagesByTitle(
+      WORKBENCH_NOTION_SETUP_PARENT_TITLE,
+    );
+  } catch (error) {
+    return {
+      status: "failed",
+      reason: `notion_workbench_parent_search_failed: ${errorMessage(error)}`,
+    };
+  }
+
+  let best:
+    | {
+        parent: WorkbenchNotionPageSummary;
+        children: WorkbenchNotionPageSummary[];
+        score: number;
+      }
+    | null = null;
+
+  for (const candidate of candidates) {
+    if (candidate.title !== WORKBENCH_NOTION_SETUP_PARENT_TITLE) continue;
+    const parentId = candidate.id.trim();
+    if (!parentId) continue;
+
+    const children = await listStoredParentChildren(client, parentId);
+    if (!children) continue;
+    const score = childPageByTitle(children).size;
+    if (!best || score > best.score) {
+      best = {
+        parent: { ...candidate, id: parentId },
+        children,
+        score,
+      };
+    }
+  }
+
+  if (!best) return { status: "not_found" };
+  return {
+    status: "found",
+    parent: best.parent,
+    children: best.children,
+  };
 }
 
 async function ensureChildPages(input: {
@@ -222,6 +310,20 @@ async function createWorkbenchPages(input: {
     child_ids: completeChildIds,
     counts,
   };
+}
+
+async function updateParentConfigIfNeeded(input: {
+  userId: string;
+  updateConfig?: WorkbenchNotionSetupInput["updateConfig"];
+  storedParentId: string | null;
+  parentId: string;
+}): Promise<void> {
+  if (!input.updateConfig) return;
+  if (input.storedParentId === input.parentId) return;
+  await input.updateConfig({
+    userId: input.userId,
+    notion_parent_page_id: input.parentId,
+  });
 }
 
 function resolveSetupClient(input: WorkbenchNotionSetupInput):

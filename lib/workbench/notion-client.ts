@@ -39,6 +39,7 @@ export type WorkbenchNotionSdkCreatePageArgs = {
 export type WorkbenchNotionSdkClient = {
   search(args: {
     filter: { property: "object"; value: "page" };
+    query?: string;
     page_size?: number;
     start_cursor?: string;
   }): Promise<{
@@ -194,6 +195,36 @@ class SdkWorkbenchNotionClient implements WorkbenchNotionClient {
     return blocks;
   }
 
+  async searchPagesByTitle(title: string): Promise<WorkbenchNotionPageSummary[]> {
+    const normalizedTitle = normalizeTextValue(title);
+    if (!normalizedTitle) return [];
+
+    const pages: WorkbenchNotionPageSummary[] = [];
+    let startCursor: string | undefined;
+
+    do {
+      const response = await this.sdkClient.search({
+        query: normalizedTitle,
+        filter: { property: "object", value: "page" },
+        page_size: 100,
+        start_cursor: startCursor,
+      });
+      pages.push(
+        ...response.results
+          .map((page) => ({
+            id: page.id?.trim() ?? "",
+            title: extractPageTitle(page),
+            url: page.url ?? null,
+          }))
+          .filter((page) => page.id && page.title === normalizedTitle),
+      );
+      startCursor = response.next_cursor ?? undefined;
+      if (!response.has_more) break;
+    } while (startCursor);
+
+    return pages;
+  }
+
   async createPage(input: {
     title: string;
     parentPageId?: string | null;
@@ -340,6 +371,17 @@ function normalizeTextValue(value: unknown): string {
 function extractChildPageTitle(block: WorkbenchNotionBlock): string {
   const value = block.child_page as Record<string, unknown> | undefined;
   return normalizeTextValue(value?.title);
+}
+
+function extractPageTitle(page: WorkbenchNotionSdkPage): string {
+  const properties = page.properties ?? {};
+  for (const property of Object.values(properties)) {
+    if (!property || typeof property !== "object") continue;
+    const value = property as { type?: unknown; title?: unknown };
+    if (value.type !== "title") continue;
+    return richTextToPlainText(value.title);
+  }
+  return "";
 }
 
 function unavailable(

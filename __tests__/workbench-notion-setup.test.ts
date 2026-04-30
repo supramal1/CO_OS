@@ -16,6 +16,7 @@ function createSetupClient(initialPages: Page[] = []) {
   const pages = new Map(initialPages.map((page) => [page.id, { ...page }]));
   const calls: Array<
     | { operation: "listChildPages"; parentPageId: string }
+    | { operation: "searchPagesByTitle"; title: string }
     | { operation: "createPage"; title: string; parentPageId: string | null }
   > = [];
 
@@ -27,6 +28,12 @@ function createSetupClient(initialPages: Page[] = []) {
       }
       return Array.from(pages.values())
         .filter((page) => page.parentPageId === parentPageId)
+        .map(({ id, title, url }) => ({ id, title, url }));
+    },
+    async searchPagesByTitle(title) {
+      calls.push({ operation: "searchPagesByTitle", title });
+      return Array.from(pages.values())
+        .filter((page) => page.title === title)
         .map(({ id, title, url }) => ({ id, title, url }));
     },
     async createPage(input) {
@@ -156,6 +163,7 @@ describe("ensureWorkbenchNotionSetup", () => {
     });
     expect(calls).toEqual([
       { operation: "listChildPages", parentPageId: "stale-parent" },
+      { operation: "searchPagesByTitle", title: "CO Workbench" },
       { operation: "createPage", title: "CO Workbench", parentPageId: null },
       {
         operation: "createPage",
@@ -189,11 +197,116 @@ describe("ensureWorkbenchNotionSetup", () => {
     });
   });
 
+  it("reuses an existing Workbench parent when config was disconnected", async () => {
+    const { client, calls } = createSetupClient(existingWorkbenchPages);
+    const updateConfig = vi.fn();
+
+    const report = await ensureWorkbenchNotionSetup({
+      userId: "principal_1",
+      config: { notion_parent_page_id: null },
+      client,
+      updateConfig,
+    });
+
+    expect(report).toEqual({
+      status: "validated",
+      parent_id: "parent-1",
+      child_ids: {
+        "Personal Profile": "personal-profile-page",
+        "Working On": "working-on-page",
+        Patterns: "patterns-page",
+        References: "references-page",
+        Voice: "voice-page",
+      },
+      counts: { created: 0, validated: 6, repaired: 0 },
+    });
+    expect(calls).toEqual([
+      { operation: "searchPagesByTitle", title: "CO Workbench" },
+      { operation: "listChildPages", parentPageId: "parent-1" },
+    ]);
+    expect(updateConfig).toHaveBeenCalledWith({
+      userId: "principal_1",
+      notion_parent_page_id: "parent-1",
+    });
+  });
+
+  it("chooses the existing Workbench parent with the most required children", async () => {
+    const pages: Page[] = [
+      { id: "sparse-parent", title: "CO Workbench", parentPageId: null, url: null },
+      {
+        id: "sparse-profile",
+        title: "Personal Profile",
+        parentPageId: "sparse-parent",
+        url: null,
+      },
+      { id: "full-parent", title: "CO Workbench", parentPageId: null, url: null },
+      ...WORKBENCH_NOTION_SETUP_CHILD_TITLES.map((title) => ({
+        id: `full-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+        title,
+        parentPageId: "full-parent",
+        url: null,
+      })),
+    ];
+    const { client, calls } = createSetupClient(pages);
+    const updateConfig = vi.fn();
+
+    const report = await ensureWorkbenchNotionSetup({
+      userId: "principal_1",
+      config: { notion_parent_page_id: "stale-parent" },
+      client,
+      updateConfig,
+    });
+
+    expect(report.status).toBe("validated");
+    expect(report.parent_id).toBe("full-parent");
+    expect(report.counts).toEqual({ created: 0, validated: 6, repaired: 0 });
+    expect(calls).toEqual([
+      { operation: "listChildPages", parentPageId: "stale-parent" },
+      { operation: "searchPagesByTitle", title: "CO Workbench" },
+      { operation: "listChildPages", parentPageId: "sparse-parent" },
+      { operation: "listChildPages", parentPageId: "full-parent" },
+    ]);
+    expect(updateConfig).toHaveBeenCalledWith({
+      userId: "principal_1",
+      notion_parent_page_id: "full-parent",
+    });
+  });
+
+  it("repairs missing children under an existing searched Workbench parent", async () => {
+    const partialPages = existingWorkbenchPages.filter(
+      (page) => !["Patterns", "References"].includes(page.title),
+    );
+    const { client, calls } = createSetupClient(partialPages);
+    const updateConfig = vi.fn();
+
+    const report = await ensureWorkbenchNotionSetup({
+      userId: "principal_1",
+      config: null,
+      client,
+      updateConfig,
+    });
+
+    expect(report.status).toBe("repaired");
+    expect(report.parent_id).toBe("parent-1");
+    expect(report.counts).toEqual({ created: 2, validated: 4, repaired: 2 });
+    expect(calls.filter((call) => call.operation === "createPage")).toEqual([
+      { operation: "createPage", title: "Patterns", parentPageId: "parent-1" },
+      { operation: "createPage", title: "References", parentPageId: "parent-1" },
+    ]);
+    expect(updateConfig).toHaveBeenCalledWith({
+      userId: "principal_1",
+      notion_parent_page_id: "parent-1",
+    });
+  });
+
   it("uses an explicit OAuth token boundary to create pages without a global token", async () => {
     const originalToken = process.env.NOTION_API_TOKEN;
     process.env.NOTION_API_TOKEN = "global-token-that-must-not-be-used";
     const requests: Array<{ url: string; init: RequestInit; title: string }> = [];
     const fetcher = vi.fn<typeof fetch>(async (url, init) => {
+      if (String(url).endsWith("/v1/search")) {
+        return Response.json({ results: [] });
+      }
       const body = JSON.parse(String(init?.body)) as {
         properties: { title: { title: Array<{ text: { content: string } }> } };
       };
@@ -234,7 +347,12 @@ describe("ensureWorkbenchNotionSetup", () => {
           },
         },
       });
-      expect(fetcher).toHaveBeenCalledTimes(6);
+      expect(fetcher).toHaveBeenCalledTimes(7);
+      expect(fetcher).toHaveBeenNthCalledWith(
+        1,
+        "https://api.notion.com/v1/search",
+        expect.objectContaining({ method: "POST" }),
+      );
     } finally {
       if (originalToken === undefined) {
         delete process.env.NOTION_API_TOKEN;
