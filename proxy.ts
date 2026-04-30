@@ -24,6 +24,7 @@ export const config = {
   matcher: [
     "/cookbook/:path*",
     "/forge/:path*",
+    "/profile/:path*",
     "/speak-to-charlie/:path*",
     "/agents/:path*",
     "/workforce/:path*",
