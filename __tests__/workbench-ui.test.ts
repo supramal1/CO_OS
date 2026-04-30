@@ -18,6 +18,7 @@ import {
   toWorkbenchHealthRows,
 } from "@/components/workbench/workbench-shell";
 import {
+  deriveWorkbenchProfileLearningControls,
   deriveWorkbenchStageRows,
   deriveWorkbenchPersonalisationSummary,
   deriveWorkbenchProfileUpdateStatus,
@@ -94,6 +95,26 @@ describe("Workbench UI summary", () => {
       actionLabel: "Undo last profile update",
       actionDisabled: false,
     });
+    expect(
+      deriveWorkbenchProfileLearningControls({
+        status: "updated",
+        targetLabel: "Voice",
+        canUndo: true,
+      }),
+    ).toEqual([
+      { id: "view", label: "View", enabled: true },
+      { id: "undo", label: "Undo", enabled: true },
+    ]);
+    expect(
+      deriveWorkbenchProfileLearningControls({
+        status: "skipped",
+        reason: "low_confidence",
+      }),
+    ).toEqual([
+      { id: "remember", label: "Remember", enabled: true },
+      { id: "not_now", label: "Not now", enabled: true },
+      { id: "edit", label: "Edit", enabled: true },
+    ]);
   });
 
   it("initializes and serializes the staff setup config form", () => {
@@ -1088,6 +1109,27 @@ describe("Workbench UI summary", () => {
         },
       },
     ]);
+
+    expect(
+      deriveWorkbenchPostRunActions(response, {
+        reviewedArtifact: {
+          artifact_type: "client_email",
+          title: "Client follow-up",
+          review_status: "approved_with_checks",
+          source_count: 1,
+          destination: "drive",
+        },
+      })[0],
+    ).toMatchObject({
+      id: "presend",
+      payload: {
+        reviewed_artifact: {
+          review_status: "approved_with_checks",
+          source_count: 1,
+          destination: "drive",
+        },
+      },
+    });
 
     expect(
       deriveWorkbenchPostRunActions(response, { presendRouteAvailable: false }),

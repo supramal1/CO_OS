@@ -48,6 +48,7 @@ export type WorkbenchProfileUpdateInput =
       targetLabel?: string | null;
       canUndo?: boolean | null;
       message?: string | null;
+      reason?: string | null;
     };
 
 export type WorkbenchProfileUpdateStatus = {
@@ -56,6 +57,12 @@ export type WorkbenchProfileUpdateStatus = {
   detail: string;
   actionLabel?: "Undo last profile update";
   actionDisabled?: boolean;
+};
+
+export type WorkbenchProfileLearningControl = {
+  id: "view" | "undo" | "remember" | "not_now" | "edit";
+  label: "View" | "Undo" | "Remember" | "Not now" | "Edit";
+  enabled: boolean;
 };
 
 export type WorkbenchStageRow = {
@@ -248,6 +255,29 @@ export function deriveWorkbenchProfileUpdateStatus(
     label: "Profile update paused",
     detail: sanitizeWorkbenchDetail(input.message, "Check profile update"),
   };
+}
+
+export function deriveWorkbenchProfileLearningControls(
+  input: WorkbenchProfileUpdateInput,
+): WorkbenchProfileLearningControl[] {
+  if (!input || input.status === "idle") return [];
+
+  if (input.status === "updated") {
+    return [
+      { id: "view", label: "View", enabled: true },
+      { id: "undo", label: "Undo", enabled: input.canUndo !== false },
+    ];
+  }
+
+  if (input.status === "skipped") {
+    return [
+      { id: "remember", label: "Remember", enabled: true },
+      { id: "not_now", label: "Not now", enabled: true },
+      { id: "edit", label: "Edit", enabled: true },
+    ];
+  }
+
+  return [];
 }
 
 function setupDetail(source: WorkbenchStaffConnectorSource): string {

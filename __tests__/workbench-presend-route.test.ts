@@ -132,6 +132,13 @@ describe("POST /api/workbench/presend", () => {
         preflight_result: preflightResult,
         draft_input: "Draft: Thanks for the time today.",
         artifact_spec_input: "Need a Notion-ready client follow-up note.",
+        reviewed_artifact: {
+          artifact_type: "client_email",
+          title: "Client follow-up",
+          review_status: "approved_with_checks",
+          source_count: 1,
+          destination: "notion",
+        },
       }),
     );
 
@@ -143,6 +150,13 @@ describe("POST /api/workbench/presend", () => {
         invocation_type: string;
         skill_version: string;
       };
+      save_back: {
+        artifact?: {
+          review_status: string;
+          source_count: number;
+          destination: string;
+        };
+      };
     };
 
     expect(body.result.artifact_intent.title).toBe("Client follow-up note");
@@ -150,6 +164,11 @@ describe("POST /api/workbench/presend", () => {
       user_id: "principal_user_1",
       invocation_type: "presend",
       skill_version: "0.1.0",
+    });
+    expect(body.save_back.artifact).toMatchObject({
+      review_status: "approved_with_checks",
+      source_count: 1,
+      destination: "notion",
     });
     expect(mocks.getSkill).toHaveBeenCalledWith("csk_test", "workbench-presend");
     expect(mocks.anthropicCreate.mock.calls[0][0].system).toContain(

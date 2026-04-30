@@ -9,7 +9,10 @@ import type {
   WorkbenchRetrievedContext,
   WorkbenchStartResponse,
 } from "@/lib/workbench/types";
-import type { WorkbenchPresendResponse } from "@/lib/workbench/presend-types";
+import type {
+  WorkbenchPresendResponse,
+  WorkbenchPresendReviewedArtifact,
+} from "@/lib/workbench/presend-types";
 import type { WorkbenchOutputActionOutcome } from "@/lib/workbench/output-actions";
 import type { WorkbenchOnboardingDraft } from "@/lib/workbench/personalisation";
 import type { WorkbenchArtifact, WorkbenchMakeResult } from "@/lib/workbench/make";
@@ -18,6 +21,7 @@ import type { WorkbenchUserConfig } from "@/lib/workbench/retrieval/types";
 import type { WorkbenchRunHistoryRow } from "@/lib/workbench/run-history";
 import {
   deriveWorkbenchPersonalisationSummary,
+  deriveWorkbenchProfileLearningControls,
   deriveWorkbenchProfileUpdateStatus,
   deriveWorkbenchStageRows,
   sanitizeWorkbenchDetail,
@@ -25,6 +29,7 @@ import {
   toStaffWorkbenchStatusLabel,
   type WorkbenchProfileUpdateInput,
   type WorkbenchProfileUpdateStatus,
+  type WorkbenchProfileLearningControl,
   type WorkbenchStageRow,
 } from "@/lib/workbench/ui-state";
 
@@ -210,6 +215,7 @@ type WorkbenchPostRunAction =
       payload: {
         preflight_result: WorkbenchPreflightResult;
         artifact_spec_input: string;
+        reviewed_artifact?: WorkbenchPresendReviewedArtifact;
       };
     }
   | {
@@ -979,7 +985,10 @@ export function deriveWorkbenchRunPaneSummary(
 
 export function deriveWorkbenchPostRunActions(
   response: WorkbenchStartResponse,
-  options?: { presendRouteAvailable?: boolean },
+  options?: {
+    presendRouteAvailable?: boolean;
+    reviewedArtifact?: WorkbenchPresendReviewedArtifact | null;
+  },
 ): WorkbenchPostRunAction[] {
   const presendRouteAvailable =
     options?.presendRouteAvailable ?? WORKBENCH_PRESEND_ROUTE_AVAILABLE;
@@ -1010,6 +1019,9 @@ export function deriveWorkbenchPostRunActions(
       payload: {
         preflight_result: response.result,
         artifact_spec_input: buildWorkbenchPostRunArtifactSpecInput(response),
+        ...(options?.reviewedArtifact
+          ? { reviewed_artifact: options.reviewedArtifact }
+          : {}),
       },
     },
     ...feedbackActions,
@@ -1902,8 +1914,8 @@ function ResultView({
     () => deriveWorkbenchProfileUpdateStatus(readWorkbenchProfileUpdate(response)),
     [response],
   );
-  const postRunActions = useMemo(
-    () => deriveWorkbenchPostRunActions(response),
+  const profileLearningControls = useMemo(
+    () => deriveWorkbenchProfileLearningControls(readWorkbenchProfileUpdate(response)),
     [response],
   );
   const meta = useMemo(
@@ -1917,6 +1929,14 @@ function ResultView({
   );
   const makeArtifact =
     makeState.status === "loaded" ? makeState.result.artifact : null;
+  const reviewedArtifact = useMemo(
+    () => buildReviewedArtifactForSave(makeArtifact, reviewState),
+    [makeArtifact, reviewState],
+  );
+  const postRunActions = useMemo(
+    () => deriveWorkbenchPostRunActions(response, { reviewedArtifact }),
+    [response, reviewedArtifact],
+  );
 
   useEffect(() => {
     setMakeState({ status: "idle" });
@@ -2138,7 +2158,10 @@ function ResultView({
           </div>
         </ResultSection>
 
-        <ProfileUpdatePanel status={profileUpdateStatus} />
+        <ProfileUpdatePanel
+          status={profileUpdateStatus}
+          controls={profileLearningControls}
+        />
 
         <ResultSection title="Retrieval Sources">
           <RetrievalStatusList rows={uiSummary.retrievalRows} />
@@ -2255,6 +2278,23 @@ function applyWorkbenchLocalStageProgress(
 
     return row;
   });
+}
+
+function buildReviewedArtifactForSave(
+  artifact: WorkbenchArtifact | null,
+  reviewState: ReviewState,
+): WorkbenchPresendReviewedArtifact | null {
+  if (!artifact) return null;
+  return {
+    artifact_type: artifact.type,
+    title: artifact.title,
+    review_status:
+      reviewState.status === "loaded"
+        ? reviewState.result.review.overall_status
+        : null,
+    source_count: artifact.source_refs.length,
+    destination: "drive",
+  };
 }
 
 function WorkflowStageRail({ rows }: { rows: WorkbenchStageRow[] }) {
@@ -2691,13 +2731,16 @@ function isReviewResult(
 
 function ProfileUpdatePanel({
   status,
+  controls,
   onUndo,
 }: {
   status: WorkbenchProfileUpdateStatus;
+  controls?: WorkbenchProfileLearningControl[];
   onUndo?: () => void;
 }) {
   if (status.state === "idle") return null;
   const undoLabel = status.actionLabel ?? "Undo last profile update";
+  const visibleControls = controls ?? [];
 
   return (
     <ResultSection title="Profile Learning">
@@ -2724,15 +2767,21 @@ function ProfileUpdatePanel({
             {status.detail}
           </div>
         </div>
-        {status.actionLabel ? (
-          <SmallActionButton
-            type="button"
-            onClick={onUndo}
-            disabled={!onUndo || status.actionDisabled}
-          >
-            {undoLabel}
-          </SmallActionButton>
-        ) : null}
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {visibleControls.map((control) => (
+            <SmallActionButton
+              key={control.id}
+              type="button"
+              onClick={control.id === "undo" ? onUndo : undefined}
+              disabled={
+                !control.enabled ||
+                (control.id === "undo" && (!onUndo || status.actionDisabled))
+              }
+            >
+              {control.id === "undo" ? undoLabel : control.label}
+            </SmallActionButton>
+          ))}
+        </div>
       </div>
     </ResultSection>
   );
