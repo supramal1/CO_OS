@@ -546,7 +546,7 @@ describe("newsroom adapters", () => {
     });
   });
 
-  it("maps clean Cornerstone context text into a changed context candidate", async () => {
+  it("summarizes recent Cornerstone facts into one changed context candidate", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -557,6 +557,12 @@ describe("newsroom adapters", () => {
               value:
                 "On 2026-04-30, Workbench workflow hardening shipped with staged make/review flows.",
               updated_at: "2026-04-30T08:00:00.000Z",
+            },
+            {
+              key: "co_newsroom_mvp_built",
+              value:
+                "On 2026-04-30, CO OS Newsroom MVP was implemented with /newsroom and the brief API.",
+              updated_at: "2026-04-30T08:30:00.000Z",
             },
           ],
         }),
@@ -569,15 +575,18 @@ describe("newsroom adapters", () => {
       status: { source: "cornerstone", status: "ok", itemsCount: 1 },
       candidates: [
         {
-          id: "cornerstone-fact-co-workbench-built",
-          title: "Workbench built",
+          id: "cornerstone-facts-summary",
+          title: "CO OS changed since yesterday",
           reason:
-            "On 2026-04-30, Workbench workflow hardening shipped with staged make/review flows.",
+            "Since yesterday: Workbench built; Newsroom mvp built.",
           source: "cornerstone",
           confidence: "high",
           section: "changedSinceYesterday",
           signals: ["changed_since_yesterday"],
-          sourceRefs: ["cornerstone:fact:co_workbench_built"],
+          sourceRefs: [
+            "cornerstone:fact:co_workbench_built",
+            "cornerstone:fact:co_newsroom_mvp_built",
+          ],
         },
       ],
     });

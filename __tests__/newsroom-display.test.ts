@@ -67,8 +67,8 @@ describe("Newsroom display helpers", () => {
     expect(
       sourceStatusLabel({
         source: "notion",
-        status: "unavailable",
-        reason: "notion_parent_page_id_missing",
+        status: "error",
+        reason: "notion lookup failed",
         itemsCount: 0,
       }),
     ).toBe("Notion not connected");
@@ -86,8 +86,8 @@ describe("Newsroom display helpers", () => {
     expect(
       sourceStatusDetail({
         source: "notion",
-        status: "unavailable",
-        reason: "notion_parent_page_id_missing",
+        status: "error",
+        reason: "notion lookup failed",
         itemsCount: 0,
       }),
     ).toBe("Connect Notion in Workbench");

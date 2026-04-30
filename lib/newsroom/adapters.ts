@@ -239,7 +239,10 @@ export async function loadCornerstoneNewsroomSnapshot(
   try {
     const factCandidates = await loadCornerstoneFactCandidates(context);
     if (factCandidates.length > 0) {
-      return snapshotFromCandidates("cornerstone", factCandidates);
+      return snapshotFromCandidates(
+        "cornerstone",
+        summarizeCornerstoneFactCandidates(factCandidates),
+      );
     }
 
     const res = await fetch(`${CORNERSTONE_URL.replace(/\/+$/, "")}/context`, {
@@ -370,6 +373,32 @@ function cornerstoneFactToCandidate(
       section: "changedSinceYesterday",
       signals: ["changed_since_yesterday"],
       sourceRefs: [`cornerstone:fact:${fact.key}`],
+    },
+  ];
+}
+
+function summarizeCornerstoneFactCandidates(
+  candidates: NewsroomSourceSnapshot["candidates"],
+): NewsroomSourceSnapshot["candidates"] {
+  const summaries = candidates
+    .slice(0, 5)
+    .map((candidate) => candidate.title)
+    .filter(Boolean);
+  const reason =
+    summaries.length > 0
+      ? `Since yesterday: ${summaries.join("; ")}.`
+      : "Source-backed Cornerstone changes were found since yesterday.";
+
+  return [
+    {
+      id: "cornerstone-facts-summary",
+      title: "CO OS changed since yesterday",
+      reason: boundedText(reason, WORKBENCH_REASON_MAX_LENGTH),
+      source: "cornerstone",
+      confidence: "high",
+      section: "changedSinceYesterday",
+      signals: ["changed_since_yesterday"],
+      sourceRefs: candidates.flatMap((candidate) => candidate.sourceRefs ?? []),
     },
   ];
 }

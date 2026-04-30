@@ -115,6 +115,7 @@ function isNotConnectedStatus(status: NewsroomSourceStatus): boolean {
   if (status.status !== "unavailable" && status.status !== "error") return false;
 
   const reason = status.reason?.toLowerCase() ?? "";
+  if (!reason) return true;
   if (status.source === "calendar") {
     return (
       reason.includes("calendar_scope_missing") ||
@@ -122,6 +123,8 @@ function isNotConnectedStatus(status: NewsroomSourceStatus): boolean {
       reason.includes("google_access_token_missing") ||
       reason.includes("google_refresh_token_missing") ||
       reason.includes("calendar_client_missing") ||
+      reason.includes("calendar") ||
+      reason.includes("google") ||
       reason.includes("token_missing") ||
       reason.includes("not connected")
     );
@@ -131,6 +134,7 @@ function isNotConnectedStatus(status: NewsroomSourceStatus): boolean {
     reason.includes("notion_parent_page_id_missing") ||
     reason.includes("notion_token_missing") ||
     reason.includes("notion_access_token_missing") ||
+    reason.includes("notion") ||
     reason.includes("notion adapter is not connected") ||
     reason.includes("not connected")
   );
