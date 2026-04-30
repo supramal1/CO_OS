@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   CONNECTED_TOOL_ROWS,
@@ -51,5 +52,14 @@ describe("My OS Profile model", () => {
       "Visible to team",
       "Admin only",
     ]);
+  });
+
+  it("keeps the Profile shell focused on Profile infrastructure, not Workbench setup", () => {
+    const source = readFileSync("components/profile/profile-shell.tsx", "utf8");
+
+    expect(source).not.toContain("Manual connector fields");
+    expect(source).not.toContain("ConnectorHub");
+    expect(source).not.toContain("deriveWorkbenchPersonalisationSummary");
+    expect(source.toLowerCase()).not.toContain("personalisation");
   });
 });

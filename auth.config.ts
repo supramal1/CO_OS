@@ -2,6 +2,10 @@ import type { NextAuthConfig } from "next-auth";
 import Google from "next-auth/providers/google";
 
 const authConfig = {
+  secret:
+    process.env.AUTH_SECRET ??
+    process.env.NEXTAUTH_SECRET ??
+    "co-os-local-development-secret",
   providers: [
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID ?? "",
