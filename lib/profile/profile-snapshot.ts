@@ -14,6 +14,10 @@ import {
   listWorkbenchConnectorManagementStatuses,
   type WorkbenchConnectorManagementResponse,
 } from "@/lib/workbench/connector-management";
+import {
+  getMondayConnectionStatus,
+  type MondayConnectionStatus,
+} from "@/lib/monday/status";
 
 export type BuildProfileSnapshotDependencies = {
   listConnectorStatuses?: (input: {
@@ -23,6 +27,7 @@ export type BuildProfileSnapshotDependencies = {
     userId: string;
     apiKey?: string | null;
   }) => Promise<ProfilePersonalisationSnapshot>;
+  getMondayStatus?: (input: { userId: string }) => MondayConnectionStatus;
 };
 
 export async function buildProfileSnapshot(input: {
@@ -69,9 +74,13 @@ async function buildConnectedTools(
 ): Promise<ConnectedToolRow[]> {
   const listConnectorStatuses =
     deps.listConnectorStatuses ?? listWorkbenchConnectorManagementStatuses;
+  const resolveMondayStatus = deps.getMondayStatus ?? getMondayConnectionStatus;
 
   try {
-    const statuses = await listConnectorStatuses({ userId });
+    const [statuses, mondayStatus] = await Promise.all([
+      listConnectorStatuses({ userId }),
+      Promise.resolve(resolveMondayStatus({ userId })),
+    ]);
     return CONNECTED_TOOL_ROWS.map((tool) => {
       if (tool.id === "notion") {
         return applyConnectorStatus(
@@ -84,6 +93,9 @@ async function buildConnectedTools(
           tool,
           statuses.find((status) => status.source === "google_workspace"),
         );
+      }
+      if (tool.id === "monday") {
+        return applyMondayStatus(tool, mondayStatus);
       }
       return tool;
     });
@@ -105,6 +117,20 @@ async function buildConnectedTools(
       return tool;
     });
   }
+}
+
+function applyMondayStatus(
+  tool: ConnectedToolRow,
+  status: MondayConnectionStatus,
+): ConnectedToolRow {
+  return {
+    ...tool,
+    status: status.connected ? "connected" : "needs_setup",
+    actionLabel: status.actionLabel,
+    href: status.nextUrl,
+    connectedAs: status.message,
+    meta: status.configured ? "Identity" : "Setup",
+  };
 }
 
 function applyConnectorStatus(
@@ -291,10 +317,19 @@ function textFromCornerstonePayload(payload: unknown): string {
 }
 
 function cleanPersonalisationText(text: string): string {
-  return text
+  const withoutRawMemory = text
+    .replace(/\s*\[(?:IDENTITY|FACTS|RELATIONS|GRAPH MEMORY|MEMORY)\][\s\S]*$/i, "")
+    .replace(/\s*===\s*GRAPH MEMORY\s*===[\s\S]*$/i, "");
+
+  return withoutRawMemory
     .split(/\n+/)
     .map((line) => line.trim())
-    .filter((line) => line && !/^===/.test(line))
+    .filter(
+      (line) =>
+        line &&
+        !/^===/.test(line) &&
+        !/^\[(?:IDENTITY|FACTS|RELATIONS|GRAPH MEMORY|MEMORY)\]/i.test(line),
+    )
     .join(" ")
     .replace(/\s+/g, " ")
     .trim();

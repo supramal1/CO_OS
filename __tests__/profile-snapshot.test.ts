@@ -34,6 +34,15 @@ describe("Profile snapshot", () => {
             reason: "token_missing",
           },
         ],
+        getMondayStatus: () => ({
+          source: "monday",
+          state: "disconnected",
+          connected: false,
+          configured: true,
+          message: "monday is ready to connect. Identity confirmation comes next.",
+          actionLabel: "Connect",
+          nextUrl: "/profile",
+        }),
         loadPersonalisationCards: async () => ({
           cards: [
             {
@@ -96,6 +105,12 @@ describe("Profile snapshot", () => {
       status: "needs_setup",
       actionLabel: "Reconnect",
       href: "/workbench?google_oauth=start",
+    });
+    expect(snapshot.connectedTools.find((tool) => tool.id === "monday")).toMatchObject({
+      status: "needs_setup",
+      actionLabel: "Connect",
+      connectedAs: "monday is ready to connect. Identity confirmation comes next.",
+      meta: "Identity",
     });
     expect(snapshot.personalisation.cards.map((card) => card.source)).toEqual([
       "honcho",
@@ -192,5 +207,37 @@ describe("Profile snapshot", () => {
       detail: learnedPreference,
       source: "honcho",
     });
+  });
+
+  it("strips raw Cornerstone graph sections from Profile personalisation", async () => {
+    const learnedPreference =
+      "While Malik values direct, no-BS communication and prioritizes technical clarity, he also emphasizes a human-centric AI philosophy focused on staff retention and upskilling.";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        text: async () =>
+          JSON.stringify({
+            context: `${learnedPreference}\n[IDENTITY] - self_entity_id: Malik James-Williams\n[FACTS] - [general] noisy raw fact`,
+          }),
+      })),
+    );
+
+    const snapshot = await buildProfileSnapshot({
+      apiKey: "csk_test",
+      session: {
+        principalId: "principal_123",
+        isAdmin: false,
+        expires: "2026-05-30T00:00:00.000Z",
+        user: { email: "staff@example.com" },
+      },
+      deps: {
+        listConnectorStatuses: async () => [],
+      },
+    });
+
+    expect(snapshot.personalisation.cards[0]?.detail).toBe(learnedPreference);
+    expect(snapshot.personalisation.cards[0]?.detail).not.toContain("[IDENTITY]");
+    expect(snapshot.personalisation.cards[0]?.detail).not.toContain("[FACTS]");
   });
 });
