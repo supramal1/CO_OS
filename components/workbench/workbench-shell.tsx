@@ -12,16 +12,20 @@ import type {
 import type { WorkbenchPresendResponse } from "@/lib/workbench/presend-types";
 import type { WorkbenchOutputActionOutcome } from "@/lib/workbench/output-actions";
 import type { WorkbenchOnboardingDraft } from "@/lib/workbench/personalisation";
+import type { WorkbenchArtifact, WorkbenchMakeResult } from "@/lib/workbench/make";
+import type { WorkbenchReviewResult } from "@/lib/workbench/review";
 import type { WorkbenchUserConfig } from "@/lib/workbench/retrieval/types";
 import type { WorkbenchRunHistoryRow } from "@/lib/workbench/run-history";
 import {
   deriveWorkbenchPersonalisationSummary,
   deriveWorkbenchProfileUpdateStatus,
+  deriveWorkbenchStageRows,
   sanitizeWorkbenchDetail,
   toStaffWorkbenchDetail,
   toStaffWorkbenchStatusLabel,
   type WorkbenchProfileUpdateInput,
   type WorkbenchProfileUpdateStatus,
+  type WorkbenchStageRow,
 } from "@/lib/workbench/ui-state";
 
 type RunState =
@@ -259,6 +263,18 @@ type PostRunState =
     }
   | { status: "error"; actionId: WorkbenchPostRunAction["id"]; message: string };
 
+type MakeState =
+  | { status: "idle" }
+  | { status: "running" }
+  | { status: "loaded"; result: Extract<WorkbenchMakeResult, { status: "drafted" }> }
+  | { status: "error"; message: string };
+
+type ReviewState =
+  | { status: "idle" }
+  | { status: "running" }
+  | { status: "loaded"; result: WorkbenchReviewResult }
+  | { status: "error"; message: string };
+
 type WorkbenchRunHistoryDisplayRow = {
   id: string;
   createdLabel: string;
@@ -299,6 +315,7 @@ const NOTION_SETUP_HREF = "/api/workbench/notion/start";
 const GOOGLE_SETUP_HREF = "/workbench?google_oauth=start";
 const WORKBENCH_CALLBACK_URL = "/workbench?google_oauth=returned";
 const WORKBENCH_PRESEND_ROUTE_AVAILABLE = true;
+const WORKBENCH_WORKFLOW_LABEL = "Understand Gather Make Review Save";
 
 const CONNECTOR_LABELS: Array<Pick<WorkbenchConnectorRow, "id" | "label">> = [
   { id: "notion", label: "Notion" },
@@ -1303,6 +1320,7 @@ export function WorkbenchShell() {
   }
 
   function handleOpenHistoryRun(run: WorkbenchRunHistoryRow) {
+    setAsk(run.ask);
     setState({
       status: "loaded",
       response: toWorkbenchStartResponseFromHistoryRun(run),
@@ -1684,7 +1702,7 @@ export function WorkbenchShell() {
         }}
       >
         {state.status === "loaded" ? (
-          <ResultView response={state.response} />
+          <ResultView response={state.response} ask={ask} />
         ) : (
           <RunPaneStateView summary={runPaneSummary} />
         )}
@@ -1854,13 +1872,32 @@ function summarizePresendResponse(response: WorkbenchPresendResponse): {
   return { message: `Save-back failed: ${saveBack.message}` };
 }
 
-function ResultView({ response }: { response: WorkbenchStartResponse }) {
+function ResultView({
+  response,
+  ask,
+}: {
+  response: WorkbenchStartResponse;
+  ask: string;
+}) {
   const result = response.result;
   const invocation = response.invocation;
   const [postRunState, setPostRunState] = useState<PostRunState>({
     status: "idle",
   });
+  const [makeState, setMakeState] = useState<MakeState>({ status: "idle" });
+  const [reviewState, setReviewState] = useState<ReviewState>({
+    status: "idle",
+  });
   const uiSummary = useMemo(() => deriveWorkbenchUiSummary(response), [response]);
+  const stageRows = useMemo(
+    () =>
+      applyWorkbenchLocalStageProgress(
+        deriveWorkbenchStageRows(response.workflow),
+        makeState,
+        reviewState,
+      ),
+    [makeState, response.workflow, reviewState],
+  );
   const profileUpdateStatus = useMemo(
     () => deriveWorkbenchProfileUpdateStatus(readWorkbenchProfileUpdate(response)),
     [response],
@@ -1878,6 +1915,14 @@ function ResultView({ response }: { response: WorkbenchStartResponse }) {
     ],
     [invocation, uiSummary.baselineLabel, uiSummary.sourceCount],
   );
+  const makeArtifact =
+    makeState.status === "loaded" ? makeState.result.artifact : null;
+
+  useEffect(() => {
+    setMakeState({ status: "idle" });
+    setReviewState({ status: "idle" });
+    setPostRunState({ status: "idle" });
+  }, [response]);
 
   async function handlePostRunAction(action: WorkbenchPostRunAction) {
     if (action.status !== "ready") return;
@@ -1926,130 +1971,542 @@ function ResultView({ response }: { response: WorkbenchStartResponse }) {
     }
   }
 
+  async function handleMake() {
+    setMakeState({ status: "running" });
+    setReviewState({ status: "idle" });
+    try {
+      const res = await fetch("/api/workbench/make", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          ask: ask.trim() || result.decoded_task.summary,
+          preflight_result: result,
+          retrieved_context:
+            response.retrieval.context.length > 0
+              ? response.retrieval.context
+              : result.retrieved_context,
+        }),
+      });
+      const body = (await res.json().catch(() => null)) as
+        | WorkbenchMakeResult
+        | { error?: string; detail?: string; message?: string }
+        | null;
+
+      if (!res.ok || !isDraftedMakeResult(body)) {
+        const detail =
+          body && "message" in body && body.message
+            ? body.message
+            : body && "detail" in body && body.detail
+              ? body.detail
+              : body && "error" in body && body.error
+                ? body.error
+                : `HTTP ${res.status}`;
+        throw new Error(detail);
+      }
+
+      setMakeState({ status: "loaded", result: body });
+    } catch (err) {
+      setMakeState({
+        status: "error",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  async function handleReview() {
+    if (!makeArtifact) return;
+    setReviewState({ status: "running" });
+    try {
+      const res = await fetch("/api/workbench/review", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          ask: ask.trim() || result.decoded_task.summary,
+          preflight_result: result,
+          artifact: makeArtifact,
+        }),
+      });
+      const body = (await res.json().catch(() => null)) as
+        | WorkbenchReviewResult
+        | { error?: string; detail?: string; message?: string }
+        | null;
+
+      if (!res.ok || !isReviewResult(body)) {
+        const detail =
+          body && "message" in body && body.message
+            ? body.message
+            : body && "detail" in body && body.detail
+              ? body.detail
+              : body && "error" in body && body.error
+                ? body.error
+                : `HTTP ${res.status}`;
+        throw new Error(detail);
+      }
+
+      setReviewState({ status: "loaded", result: body });
+    } catch (err) {
+      setReviewState({
+        status: "error",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(4, minmax(140px, 1fr))",
-          gap: 10,
-        }}
-      >
-        <MetricTile label="Invocation" value={uiSummary.invocationState} />
-        <MetricTile label="Retrieval" value={`${uiSummary.sourceCount} items`} />
-        <MetricTile label="Baseline" value={uiSummary.baselineLabel} />
-        <MetricTile label="Savings" value={uiSummary.hoursSavedLabel} />
-      </div>
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "220px minmax(0, 1fr)",
+        gap: 18,
+        alignItems: "start",
+      }}
+    >
+      <WorkflowStageRail rows={stageRows} />
 
       <div
         style={{
           display: "flex",
-          gap: 8,
-          flexWrap: "wrap",
-          alignItems: "center",
+          flexDirection: "column",
+          gap: 18,
         }}
       >
-        {meta.map((item) => (
-          <span
-            key={item}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(4, minmax(140px, 1fr))",
+            gap: 10,
+          }}
+        >
+          <MetricTile label="Invocation" value={uiSummary.invocationState} />
+          <MetricTile label="Retrieval" value={`${uiSummary.sourceCount} items`} />
+          <MetricTile label="Baseline" value={uiSummary.baselineLabel} />
+          <MetricTile label="Savings" value={uiSummary.hoursSavedLabel} />
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            flexWrap: "wrap",
+            alignItems: "center",
+          }}
+        >
+          {meta.map((item) => (
+            <span
+              key={item}
+              style={{
+                border: "1px solid var(--rule)",
+                padding: "5px 8px",
+                color: "var(--ink-dim)",
+                fontFamily: "var(--font-plex-mono)",
+                fontSize: 10,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+              }}
+            >
+              {item}
+            </span>
+          ))}
+        </div>
+
+        <ResultSection title="Run Status">
+          <div
             style={{
-              border: "1px solid var(--rule)",
-              padding: "5px 8px",
-              color: "var(--ink-dim)",
+              display: "grid",
+              gridTemplateColumns: "repeat(3, minmax(150px, 1fr))",
+              gap: 10,
+            }}
+          >
+            <KeyValue label="State" value={uiSummary.invocationState} />
+            <KeyValue
+              label="Latency"
+              value={formatLatency(invocation.latency_ms)}
+            />
+            <KeyValue label="Warnings" value={uiSummary.warningCount} />
+            <KeyValue
+              label="Skill"
+              value={invocation.skill_version ?? "unknown"}
+            />
+            <KeyValue label="Before" value={uiSummary.baselineLabel} />
+            <KeyValue label="After" value={uiSummary.workbenchLabel} />
+          </div>
+        </ResultSection>
+
+        <ProfileUpdatePanel status={profileUpdateStatus} />
+
+        <ResultSection title="Retrieval Sources">
+          <RetrievalStatusList rows={uiSummary.retrievalRows} />
+        </ResultSection>
+
+        <ResultSection title="Task Details">
+          <KeyValue label="Summary" value={result.decoded_task.summary} />
+          <KeyValue label="Requester" value={result.decoded_task.requester} />
+          <KeyValue
+            label="Deliverable"
+            value={result.decoded_task.deliverable_type}
+          />
+          <KeyValue label="Task type" value={result.decoded_task.task_type} />
+        </ResultSection>
+
+        <ResultSection title="Missing Context">
+          <MissingContextList items={result.missing_context} />
+        </ResultSection>
+
+        <ResultSection title="Clarification">
+          <TextBlock
+            text={result.drafted_clarifying_message || "None returned."}
+          />
+        </ResultSection>
+
+        <MakeStagePanel state={makeState} onGenerate={handleMake} />
+
+        <ReviewStagePanel
+          state={reviewState}
+          canReview={Boolean(makeArtifact)}
+          onReview={handleReview}
+        />
+
+        <PostRunActionPanel
+          actions={postRunActions}
+          state={postRunState}
+          onAction={handlePostRunAction}
+        />
+
+        <ResultSection title="Retrieved Context">
+          <RetrievedContextList items={result.retrieved_context} />
+        </ResultSection>
+
+        <ResultSection title="Run Plan">
+          <ApproachList items={result.suggested_approach} />
+        </ResultSection>
+
+        <ResultSection title="Time Estimate">
+          <KeyValue
+            label="Before"
+            value={`${result.time_estimate.estimated_before_minutes} minutes`}
+          />
+          <KeyValue
+            label="With Workbench"
+            value={
+              result.time_estimate.estimated_workbench_minutes == null
+                ? null
+                : `${result.time_estimate.estimated_workbench_minutes} minutes`
+            }
+          />
+        </ResultSection>
+
+        <ResultSection title="Warnings">
+          <SimpleList
+            items={dedupeWarnings([
+              ...result.warnings,
+              ...(response.retrieval.warnings ?? []),
+            ])}
+            empty="No warnings."
+          />
+        </ResultSection>
+      </div>
+    </div>
+  );
+}
+
+function applyWorkbenchLocalStageProgress(
+  rows: WorkbenchStageRow[],
+  makeState: MakeState,
+  reviewState: ReviewState,
+): WorkbenchStageRow[] {
+  return rows.map((row) => {
+    if (row.id === "make") {
+      if (makeState.status === "loaded") {
+        return { ...row, state: "complete", summary: "Draft generated." };
+      }
+      if (makeState.status === "running") {
+        return { ...row, state: "active", summary: "Generating draft." };
+      }
+      if (makeState.status === "error") {
+        return { ...row, state: "error", summary: makeState.message };
+      }
+      return { ...row, state: "available" };
+    }
+
+    if (row.id === "review") {
+      if (reviewState.status === "loaded") {
+        return { ...row, state: "complete", summary: "Review complete." };
+      }
+      if (reviewState.status === "running") {
+        return { ...row, state: "active", summary: "Reviewing draft." };
+      }
+      if (reviewState.status === "error") {
+        return { ...row, state: "error", summary: reviewState.message };
+      }
+      if (makeState.status === "loaded") {
+        return { ...row, state: "available", summary: "Ready to review draft." };
+      }
+    }
+
+    if (row.id === "save" && reviewState.status === "loaded") {
+      return { ...row, state: "available", summary: "Ready to save or mark." };
+    }
+
+    return row;
+  });
+}
+
+function WorkflowStageRail({ rows }: { rows: WorkbenchStageRow[] }) {
+  return (
+    <aside
+      aria-label="Workbench workflow stages"
+      aria-description={WORKBENCH_WORKFLOW_LABEL}
+      style={{
+        position: "sticky",
+        top: 0,
+        border: "1px solid var(--rule)",
+        background: "var(--panel)",
+        padding: 12,
+        display: "flex",
+        flexDirection: "column",
+        gap: 9,
+      }}
+    >
+      {rows.map((row, index) => (
+        <div
+          key={row.id}
+          style={{
+            border: "1px solid var(--rule)",
+            background: row.state === "active" ? "var(--bg)" : "transparent",
+            padding: "9px 10px",
+            minHeight: 74,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
+            }}
+          >
+            <span
+              style={{
+                color: "var(--ink-faint)",
+                fontFamily: "var(--font-plex-mono)",
+                fontSize: 10,
+              }}
+            >
+              {String(index + 1).padStart(2, "0")}
+            </span>
+            <StatusPill status={stageStateLabel(row.state)} />
+          </div>
+          <div
+            style={{
+              marginTop: 8,
+              color: "var(--ink)",
               fontFamily: "var(--font-plex-mono)",
-              fontSize: 10,
+              fontSize: 12,
               letterSpacing: "0.08em",
               textTransform: "uppercase",
             }}
           >
-            {item}
-          </span>
-        ))}
-      </div>
+            {row.label}
+          </div>
+          <div
+            style={{
+              marginTop: 5,
+              color: "var(--ink-dim)",
+              fontSize: 12,
+              lineHeight: 1.35,
+            }}
+          >
+            {row.summary}
+          </div>
+        </div>
+      ))}
+    </aside>
+  );
+}
 
-      <ResultSection title="Run Status">
+function MakeStagePanel({
+  state,
+  onGenerate,
+}: {
+  state: MakeState;
+  onGenerate: () => void;
+}) {
+  const running = state.status === "running";
+  return (
+    <ResultSection title="Make">
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(3, minmax(150px, 1fr))",
-            gap: 10,
+            gridTemplateColumns: "minmax(0, 1fr) auto",
+            gap: 12,
+            alignItems: "center",
           }}
         >
-          <KeyValue label="State" value={uiSummary.invocationState} />
-          <KeyValue label="Latency" value={formatLatency(invocation.latency_ms)} />
-          <KeyValue label="Warnings" value={uiSummary.warningCount} />
-          <KeyValue label="Skill" value={invocation.skill_version ?? "unknown"} />
-          <KeyValue label="Before" value={uiSummary.baselineLabel} />
-          <KeyValue label="After" value={uiSummary.workbenchLabel} />
+          <TextBlock text="Create a first working artefact from the decoded task and retrieved context." />
+          <SmallActionButton
+            type="button"
+            onClick={onGenerate}
+            disabled={running}
+          >
+            {running ? "Generating" : "Generate draft"}
+          </SmallActionButton>
         </div>
-      </ResultSection>
+        {state.status === "loaded" ? (
+          <ArtifactPreview artifact={state.result.artifact} />
+        ) : null}
+        {state.status === "error" ? (
+          <InlineStatus tone="error" message={state.message} />
+        ) : null}
+      </div>
+    </ResultSection>
+  );
+}
 
-      <PostRunActionPanel
-        actions={postRunActions}
-        state={postRunState}
-        onAction={handlePostRunAction}
-      />
+function ReviewStagePanel({
+  state,
+  canReview,
+  onReview,
+}: {
+  state: ReviewState;
+  canReview: boolean;
+  onReview: () => void;
+}) {
+  const running = state.status === "running";
+  return (
+    <ResultSection title="Review">
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1fr) auto",
+            gap: 12,
+            alignItems: "center",
+          }}
+        >
+          <TextBlock text="Check assumptions, evidence gaps, tone, and manual verification before saving." />
+          <SmallActionButton
+            type="button"
+            onClick={onReview}
+            disabled={!canReview || running}
+          >
+            {running ? "Reviewing" : "Review draft"}
+          </SmallActionButton>
+        </div>
+        {state.status === "loaded" ? (
+          <ReviewSummary result={state.result} />
+        ) : null}
+        {state.status === "error" ? (
+          <InlineStatus tone="error" message={state.message} />
+        ) : null}
+      </div>
+    </ResultSection>
+  );
+}
 
-      <ProfileUpdatePanel status={profileUpdateStatus} />
-
-      <ResultSection title="Retrieval Sources">
-        <RetrievalStatusList rows={uiSummary.retrievalRows} />
-      </ResultSection>
-
-      <ResultSection title="Task Details">
-        <KeyValue label="Summary" value={result.decoded_task.summary} />
-        <KeyValue label="Requester" value={result.decoded_task.requester} />
-        <KeyValue
-          label="Deliverable"
-          value={result.decoded_task.deliverable_type}
-        />
-        <KeyValue label="Task type" value={result.decoded_task.task_type} />
-      </ResultSection>
-
-      <ResultSection title="Missing Context">
-        <MissingContextList items={result.missing_context} />
-      </ResultSection>
-
-      <ResultSection title="Clarification">
-        <TextBlock
-          text={result.drafted_clarifying_message || "None returned."}
-        />
-      </ResultSection>
-
-      <ResultSection title="Retrieved Context">
-        <RetrievedContextList items={result.retrieved_context} />
-      </ResultSection>
-
-      <ResultSection title="Run Plan">
-        <ApproachList items={result.suggested_approach} />
-      </ResultSection>
-
-      <ResultSection title="Time Estimate">
-        <KeyValue
-          label="Before"
-          value={`${result.time_estimate.estimated_before_minutes} minutes`}
-        />
-        <KeyValue
-          label="With Workbench"
-          value={
-            result.time_estimate.estimated_workbench_minutes == null
-              ? null
-              : `${result.time_estimate.estimated_workbench_minutes} minutes`
-          }
-        />
-      </ResultSection>
-
-      <ResultSection title="Warnings">
+function ArtifactPreview({ artifact }: { artifact: WorkbenchArtifact }) {
+  return (
+    <div
+      style={{
+        border: "1px solid var(--rule)",
+        padding: "10px 11px",
+        background: "var(--panel)",
+      }}
+    >
+      <KeyValue label="Type" value={artifact.type} />
+      <KeyValue label="Title" value={artifact.title} />
+      <TextBlock text={artifact.body} />
+      <div style={{ marginTop: 10 }}>
+        <SimpleList items={artifact.assumptions} empty="No assumptions listed." />
+      </div>
+      <div style={{ marginTop: 10 }}>
         <SimpleList
-          items={dedupeWarnings([
-            ...result.warnings,
-            ...(response.retrieval.warnings ?? []),
-          ])}
-          empty="No warnings."
+          items={artifact.source_refs.map(
+            (source) => `${source.source_type}: ${source.source_label}`,
+          )}
+          empty="No source refs attached."
         />
-      </ResultSection>
+      </div>
     </div>
   );
+}
+
+function ReviewSummary({ result }: { result: WorkbenchReviewResult }) {
+  const review = result.review;
+  return (
+    <div
+      style={{
+        border: "1px solid var(--rule)",
+        padding: "10px 11px",
+        background: "var(--panel)",
+      }}
+    >
+      <KeyValue label="Status" value={review.overall_status} />
+      <ReviewList label="Senior challenge" items={review.senior_challenge} />
+      <ReviewList label="Assumptions" items={review.assumptions} />
+      <ReviewList label="Evidence gaps" items={review.evidence_gaps} />
+      <ReviewList label="Cookbook check" items={review.cookbook_check} />
+      <ReviewList label="Tone check" items={review.tone_check} />
+      <ReviewList label="Manual verification" items={review.manual_verification} />
+      {result.warnings?.length ? (
+        <ReviewList label="Warnings" items={result.warnings} />
+      ) : null}
+    </div>
+  );
+}
+
+function ReviewList({ label, items }: { label: string; items: string[] }) {
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div
+        style={{
+          color: "var(--ink-faint)",
+          fontFamily: "var(--font-plex-mono)",
+          fontSize: 10,
+          letterSpacing: "0.1em",
+          textTransform: "uppercase",
+        }}
+      >
+        {label}
+      </div>
+      <SimpleList items={items} empty="Clear." />
+    </div>
+  );
+}
+
+function InlineStatus({
+  tone,
+  message,
+}: {
+  tone: "error" | "info";
+  message: string;
+}) {
+  return (
+    <div
+      role={tone === "error" ? "alert" : "status"}
+      style={{
+        color: tone === "error" ? "var(--danger, #9f1d1d)" : "var(--ink-dim)",
+        fontSize: 12,
+        lineHeight: 1.35,
+      }}
+    >
+      {message}
+    </div>
+  );
+}
+
+function stageStateLabel(state: WorkbenchStageRow["state"]): string {
+  if (state === "complete") return "Complete";
+  if (state === "available") return "Available";
+  if (state === "active") return "Active";
+  if (state === "error") return "Error";
+  return "Locked";
 }
 
 function MetricTile({ label, value }: { label: string; value: string }) {
@@ -2215,6 +2672,21 @@ function readWorkbenchProfileUpdate(
       profile_update?: WorkbenchProfileUpdateInput;
     }
   ).profile_update;
+}
+
+function isDraftedMakeResult(
+  value: WorkbenchMakeResult | { error?: string; detail?: string; message?: string } | null,
+): value is Extract<WorkbenchMakeResult, { status: "drafted" }> {
+  return Boolean(value && "status" in value && value.status === "drafted");
+}
+
+function isReviewResult(
+  value:
+    | WorkbenchReviewResult
+    | { error?: string; detail?: string; message?: string }
+    | null,
+): value is WorkbenchReviewResult {
+  return Boolean(value && "status" in value && value.status === "reviewed");
 }
 
 function ProfileUpdatePanel({

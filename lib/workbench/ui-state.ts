@@ -1,3 +1,8 @@
+import type {
+  WorkbenchWorkflowStage,
+  WorkbenchWorkflowState,
+} from "./workflow";
+
 export type WorkbenchStaffConnectorSource =
   | "notion"
   | "drive"
@@ -52,6 +57,58 @@ export type WorkbenchProfileUpdateStatus = {
   actionLabel?: "Undo last profile update";
   actionDisabled?: boolean;
 };
+
+export type WorkbenchStageRow = {
+  id: WorkbenchWorkflowStage["id"];
+  label: string;
+  state: WorkbenchWorkflowStage["status"];
+  summary: string;
+};
+
+const DEFAULT_WORKBENCH_STAGE_ROWS: WorkbenchStageRow[] = [
+  {
+    id: "understand",
+    label: "Understand",
+    state: "available",
+    summary: "Decode the task.",
+  },
+  {
+    id: "gather",
+    label: "Gather",
+    state: "locked",
+    summary: "Retrieve relevant context.",
+  },
+  {
+    id: "make",
+    label: "Make",
+    state: "locked",
+    summary: "Generate a first working artefact.",
+  },
+  {
+    id: "review",
+    label: "Review",
+    state: "locked",
+    summary: "Check quality before saving.",
+  },
+  {
+    id: "save",
+    label: "Save",
+    state: "locked",
+    summary: "Save the result back to the work environment.",
+  },
+];
+
+export function deriveWorkbenchStageRows(
+  workflow: WorkbenchWorkflowState | null | undefined,
+): WorkbenchStageRow[] {
+  if (!workflow?.stages?.length) return DEFAULT_WORKBENCH_STAGE_ROWS;
+  return workflow.stages.map((stage) => ({
+    id: stage.id,
+    label: stage.label,
+    state: stage.status,
+    summary: stage.summary,
+  }));
+}
 
 export function toStaffWorkbenchStatusLabel(
   source: WorkbenchStaffConnectorSource,

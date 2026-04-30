@@ -18,6 +18,7 @@ import {
   toWorkbenchHealthRows,
 } from "@/components/workbench/workbench-shell";
 import {
+  deriveWorkbenchStageRows,
   deriveWorkbenchPersonalisationSummary,
   deriveWorkbenchProfileUpdateStatus,
   toStaffWorkbenchDetail,
@@ -847,6 +848,14 @@ describe("Workbench UI summary", () => {
     expect(source).toContain("Save to Notion");
     expect(source).toContain("Profile Learning");
     expect(source).toContain("Undo last profile update");
+    expect(source).toContain("Understand");
+    expect(source).toContain("Gather");
+    expect(source).toContain("Make");
+    expect(source).toContain("Review");
+    expect(source).toContain("Save");
+    expect(source).toContain("Generate draft");
+    expect(source).toContain("Review draft");
+    expect(source).not.toContain("Learn tab");
     expect(source).not.toContain("Voice fallback");
     expect(source).not.toContain("Personal context");
     expect(source).not.toContain("Tenure");
@@ -971,6 +980,52 @@ describe("Workbench UI summary", () => {
         reason: "Google OAuth grant missing.",
         warnings: ["Google OAuth grant missing."],
       },
+    ]);
+  });
+
+  it("derives visible workflow stage rows from the start response", () => {
+    expect(
+      deriveWorkbenchStageRows({
+        current_stage: "understand",
+        stages: [
+          {
+            id: "understand",
+            label: "Understand",
+            status: "complete",
+            summary: "Task decoded.",
+          },
+          {
+            id: "gather",
+            label: "Gather",
+            status: "complete",
+            summary: "1 context item gathered.",
+          },
+          {
+            id: "make",
+            label: "Make",
+            status: "available",
+            summary: "Ready to generate.",
+          },
+          {
+            id: "review",
+            label: "Review",
+            status: "locked",
+            summary: "Generate first.",
+          },
+          {
+            id: "save",
+            label: "Save",
+            status: "locked",
+            summary: "Review first.",
+          },
+        ],
+      }),
+    ).toEqual([
+      expect.objectContaining({ label: "Understand", state: "complete" }),
+      expect.objectContaining({ label: "Gather", state: "complete" }),
+      expect.objectContaining({ label: "Make", state: "available" }),
+      expect.objectContaining({ label: "Review", state: "locked" }),
+      expect.objectContaining({ label: "Save", state: "locked" }),
     ]);
   });
 
