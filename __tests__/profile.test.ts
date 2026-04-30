@@ -60,6 +60,7 @@ describe("My OS Profile model", () => {
     expect(source).not.toContain("Manual connector fields");
     expect(source).not.toContain("ConnectorHub");
     expect(source).not.toContain("deriveWorkbenchPersonalisationSummary");
-    expect(source.toLowerCase()).not.toContain("personalisation");
+    expect(source).toContain("PersonalisationCard");
+    expect(source).toContain("What CO OS has learned");
   });
 });

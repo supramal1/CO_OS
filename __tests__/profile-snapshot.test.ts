@@ -4,6 +4,7 @@ import { buildProfileSnapshot } from "@/lib/profile/profile-snapshot";
 describe("Profile snapshot", () => {
   it("builds identity and connected-tool state from the signed-in session", async () => {
     const snapshot = await buildProfileSnapshot({
+      apiKey: "csk_test",
       session: {
         principalId: "principal_123",
         isAdmin: false,
@@ -29,6 +30,31 @@ describe("Profile snapshot", () => {
             reason: "token_missing",
           },
         ],
+        loadPersonalisationCards: async () => ({
+          cards: [
+            {
+              id: "honcho-brief-style",
+              title: "Prefers source-backed briefs",
+              detail:
+                "Recent saved conversations suggest concise summaries with provenance are useful.",
+              source: "honcho",
+              confidence: "medium",
+              actions: ["keep", "correct", "remove"],
+            },
+            {
+              id: "notion-voice",
+              title: "Use direct voice",
+              detail: "Notion Voice & Style says to keep recommendations direct.",
+              source: "notion",
+              confidence: "high",
+              actions: ["keep", "correct", "remove"],
+            },
+          ],
+          sources: [
+            { source: "honcho", status: "ok", label: "Honcho" },
+            { source: "notion", status: "ok", label: "Notion" },
+          ],
+        }),
       },
     });
 
@@ -67,6 +93,14 @@ describe("Profile snapshot", () => {
       actionLabel: "Reconnect",
       href: "/workbench?google_oauth=start",
     });
+    expect(snapshot.personalisation.cards.map((card) => card.source)).toEqual([
+      "honcho",
+      "notion",
+    ]);
+    expect(snapshot.personalisation.cards[0]).toMatchObject({
+      title: "Prefers source-backed briefs",
+      actions: ["keep", "correct", "remove"],
+    });
   });
 
   it("keeps a human-readable disconnected state when connector lookup fails", async () => {
@@ -99,6 +133,28 @@ describe("Profile snapshot", () => {
       status: "needs_setup",
       actionLabel: "Try again",
       connectedAs: "Connection state unavailable.",
+    });
+  });
+
+  it("returns a clear Honcho unavailable state when no Cornerstone API key is available", async () => {
+    const snapshot = await buildProfileSnapshot({
+      session: {
+        principalId: "principal_123",
+        isAdmin: false,
+        expires: "2026-05-30T00:00:00.000Z",
+        user: { email: "staff@example.com" },
+      },
+      deps: {
+        listConnectorStatuses: async () => [],
+      },
+    });
+
+    expect(snapshot.personalisation.cards).toEqual([]);
+    expect(snapshot.personalisation.sources.find((source) => source.source === "honcho")).toEqual({
+      source: "honcho",
+      status: "unavailable",
+      label: "Honcho",
+      detail: "Cornerstone API key unavailable.",
     });
   });
 });

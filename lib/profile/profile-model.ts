@@ -43,6 +43,29 @@ export type ProfileFactRow = {
   actionLabel?: string;
 };
 
+export type ProfilePersonalisationSource = "honcho" | "notion" | "cornerstone";
+
+export type ProfilePersonalisationCard = {
+  id: string;
+  title: string;
+  detail: string;
+  source: ProfilePersonalisationSource;
+  confidence: "high" | "medium" | "low";
+  actions: Array<"keep" | "correct" | "remove">;
+};
+
+export type ProfilePersonalisationSourceStatus = {
+  source: ProfilePersonalisationSource;
+  status: "ok" | "empty" | "unavailable" | "error";
+  label: string;
+  detail?: string;
+};
+
+export type ProfilePersonalisationSnapshot = {
+  cards: ProfilePersonalisationCard[];
+  sources: ProfilePersonalisationSourceStatus[];
+};
+
 export type ProfileIdentity = {
   userId: string;
   email: string;
@@ -65,6 +88,7 @@ export type ProfileSnapshot = {
   stats: ProfileStat[];
   factRows: ProfileFactRow[];
   connectedTools: ConnectedToolRow[];
+  personalisation: ProfilePersonalisationSnapshot;
 };
 
 export const PROFILE_SECTIONS: ProfileSection[] = [

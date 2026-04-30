@@ -4,10 +4,12 @@ import {
   PROFILE_FACT_ROWS,
   PROFILE_STATS,
   type ConnectedToolRow,
+  type ProfilePersonalisationSnapshot,
   type ProfileIdentity,
   type ProfileSnapshot,
   type ProfileStat,
 } from "./profile-model";
+import { CORNERSTONE_URL } from "@/lib/cornerstone";
 import {
   listWorkbenchConnectorManagementStatuses,
   type WorkbenchConnectorManagementResponse,
@@ -17,20 +19,29 @@ export type BuildProfileSnapshotDependencies = {
   listConnectorStatuses?: (input: {
     userId: string;
   }) => Promise<WorkbenchConnectorManagementResponse[]>;
+  loadPersonalisationCards?: (input: {
+    userId: string;
+    apiKey?: string | null;
+  }) => Promise<ProfilePersonalisationSnapshot>;
 };
 
 export async function buildProfileSnapshot(input: {
   session: Session;
+  apiKey?: string | null;
   deps?: BuildProfileSnapshotDependencies;
 }): Promise<ProfileSnapshot> {
   const identity = buildProfileIdentity(input.session);
-  const connectedTools = await buildConnectedTools(identity.userId, input.deps);
+  const [connectedTools, personalisation] = await Promise.all([
+    buildConnectedTools(identity.userId, input.deps),
+    buildPersonalisation(identity.userId, input.apiKey, input.deps),
+  ]);
 
   return {
     identity,
     stats: buildProfileStats(connectedTools),
     factRows: PROFILE_FACT_ROWS,
     connectedTools,
+    personalisation,
   };
 }
 
@@ -142,4 +153,160 @@ function buildProfileStats(connectedTools: ConnectedToolRow[]): ProfileStat[] {
       ? { ...stat, value: `${connectedCount} / ${total}` }
       : stat,
   );
+}
+
+async function buildPersonalisation(
+  userId: string,
+  apiKey: string | null | undefined,
+  deps: BuildProfileSnapshotDependencies = {},
+): Promise<ProfilePersonalisationSnapshot> {
+  const loadPersonalisationCards =
+    deps.loadPersonalisationCards ?? loadCornerstonePersonalisationCards;
+  return loadPersonalisationCards({ userId, apiKey });
+}
+
+async function loadCornerstonePersonalisationCards(input: {
+  userId: string;
+  apiKey?: string | null;
+}): Promise<ProfilePersonalisationSnapshot> {
+  if (!input.apiKey) {
+    return {
+      cards: [],
+      sources: [
+        {
+          source: "honcho",
+          status: "unavailable",
+          label: "Honcho",
+          detail: "Cornerstone API key unavailable.",
+        },
+        {
+          source: "notion",
+          status: "empty",
+          label: "Notion",
+          detail: "Explicit profile context not loaded in this snapshot.",
+        },
+      ],
+    };
+  }
+
+  try {
+    const response = await fetch(`${CORNERSTONE_URL.replace(/\/+$/, "")}/context`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": input.apiKey,
+      },
+      body: JSON.stringify({
+        query:
+          "CO OS staff personalisation: brief style, working preferences, do-not-assume rules, useful context, and recurring feedback patterns.",
+        namespace: "default",
+        detail_level: "minimal",
+        max_tokens: 500,
+      }),
+    });
+
+    if (!response.ok) {
+      return {
+        cards: [],
+        sources: [
+          {
+            source: "honcho",
+            status: "error",
+            label: "Honcho",
+            detail: `Cornerstone returned ${response.status}.`,
+          },
+        ],
+      };
+    }
+
+    const text = cleanPersonalisationText(extractCornerstoneText(await response.text()));
+    if (!text) {
+      return {
+        cards: [],
+        sources: [
+          {
+            source: "honcho",
+            status: "empty",
+            label: "Honcho",
+            detail: "No learned preferences found yet.",
+          },
+        ],
+      };
+    }
+
+    return {
+      cards: [
+        {
+          id: "honcho-context-0",
+          title: firstSentence(text),
+          detail: boundedText(text, 220),
+          source: "honcho",
+          confidence: "medium",
+          actions: ["keep", "correct", "remove"],
+        },
+      ],
+      sources: [
+        {
+          source: "honcho",
+          status: "ok",
+          label: "Honcho",
+          detail: "Learned from saved conversations and memory writes.",
+        },
+      ],
+    };
+  } catch (error) {
+    return {
+      cards: [],
+      sources: [
+        {
+          source: "honcho",
+          status: "error",
+          label: "Honcho",
+          detail: error instanceof Error ? error.message : String(error),
+        },
+      ],
+    };
+  }
+}
+
+function extractCornerstoneText(raw: string): string {
+  if (!raw.trim()) return "";
+  try {
+    return textFromCornerstonePayload(JSON.parse(raw));
+  } catch {
+    return raw;
+  }
+}
+
+function textFromCornerstonePayload(payload: unknown): string {
+  if (typeof payload === "string") return payload;
+  if (!payload || typeof payload !== "object") return "";
+
+  const record = payload as Record<string, unknown>;
+  for (const key of ["context", "result", "answer", "content", "text"]) {
+    const text = textFromCornerstonePayload(record[key]);
+    if (text.trim()) return text;
+  }
+  return "";
+}
+
+function cleanPersonalisationText(text: string): string {
+  return text
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter((line) => line && !/^===/.test(line))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function firstSentence(text: string): string {
+  const match = text.trim().match(/^.+?[.!?](?:\s|$)/);
+  return boundedText((match?.[0] ?? text).trim(), 92);
+}
+
+function boundedText(text: string, maxLength: number): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength - 1).trimEnd()}…`;
 }

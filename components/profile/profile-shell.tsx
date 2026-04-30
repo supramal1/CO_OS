@@ -8,6 +8,8 @@ import {
   PROFILE_STATS,
   type ConnectedToolRow,
   type ProfileFactRow,
+  type ProfilePersonalisationCard,
+  type ProfilePersonalisationSnapshot,
   type ProfileSnapshot,
   type ProfileStat,
 } from "@/lib/profile/profile-model";
@@ -38,6 +40,17 @@ export function ProfileShell() {
   const stats = profile?.stats ?? PROFILE_STATS;
   const factRows = profile?.factRows ?? PROFILE_FACT_ROWS;
   const connectedTools = profile?.connectedTools ?? CONNECTED_TOOL_ROWS;
+  const personalisation = profile?.personalisation ?? {
+    cards: [],
+    sources: [
+      {
+        source: "honcho",
+        status: "unavailable",
+        label: "Honcho",
+        detail: "Live profile state has not loaded yet.",
+      },
+    ],
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -131,6 +144,8 @@ export function ProfileShell() {
             <ProfileSection title="My Work" meta="Relevance">
               <FactList rows={factRows.slice(0, 3)} />
             </ProfileSection>
+
+            <PersonalisationCard personalisation={personalisation} />
 
             <ProfileSection title="Privacy" meta="Visibility">
               <FactList rows={factRows.slice(3)} />
@@ -430,6 +445,121 @@ function FactList({ rows }: { rows: ProfileFactRow[] }) {
           }
         }
       `}</style>
+    </div>
+  );
+}
+
+function PersonalisationCard({
+  personalisation,
+}: {
+  personalisation: ProfilePersonalisationSnapshot;
+}) {
+  return (
+    <ProfileSection title="What CO OS has learned" meta="Personalisation">
+      <div style={{ display: "grid" }}>
+        {personalisation.cards.length > 0 ? (
+          personalisation.cards.map((card) => (
+            <PersonalisationRow key={card.id} card={card} />
+          ))
+        ) : (
+          <div
+            style={{
+              borderBottom: "1px solid var(--rule)",
+              padding: "13px 0",
+              color: "var(--ink-dim)",
+              fontSize: 13,
+              lineHeight: 1.45,
+            }}
+          >
+            No learned preferences are ready to show yet. Honcho will start to
+            surface patterns from saved conversations and memory writes once
+            enough signal exists.
+          </div>
+        )}
+      </div>
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          flexWrap: "wrap",
+          marginTop: 12,
+        }}
+      >
+        {personalisation.sources.map((source) => (
+          <span
+            key={source.source}
+            title={source.detail}
+            style={{
+              border: "1px solid var(--rule-2)",
+              padding: "3px 7px",
+              fontFamily: "var(--font-plex-mono)",
+              fontSize: 10,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              color:
+                source.status === "ok"
+                  ? "var(--c-cornerstone)"
+                  : "var(--ink-dim)",
+            }}
+          >
+            {source.label} / {source.status}
+          </span>
+        ))}
+      </div>
+    </ProfileSection>
+  );
+}
+
+function PersonalisationRow({ card }: { card: ProfilePersonalisationCard }) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gap: 8,
+        padding: "14px 0",
+        borderBottom: "1px solid var(--rule)",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 14,
+          alignItems: "baseline",
+        }}
+      >
+        <strong
+          style={{
+            fontFamily: "var(--font-plex-sans)",
+            fontSize: 14,
+            lineHeight: 1.35,
+            fontWeight: 500,
+            color: "var(--ink)",
+          }}
+        >
+          {card.title}
+        </strong>
+        <MetaLabel>
+          {card.source} / {card.confidence}
+        </MetaLabel>
+      </div>
+      <p
+        style={{
+          margin: 0,
+          color: "var(--ink-dim)",
+          fontSize: 13,
+          lineHeight: 1.45,
+        }}
+      >
+        {card.detail}
+      </p>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        {card.actions.map((action) => (
+          <RowAction key={`${card.id}-${action}`}>
+            {action === "keep" ? "Keep" : action === "correct" ? "Correct" : "Remove"}
+          </RowAction>
+        ))}
+      </div>
     </div>
   );
 }
