@@ -267,6 +267,7 @@ type WorkbenchConnectorManagementResponse = {
 const CALENDAR_READONLY_SCOPE =
   "https://www.googleapis.com/auth/calendar.readonly";
 const NOTION_SETUP_HREF = "/api/workbench/notion/start";
+const GOOGLE_SETUP_HREF = "/workbench?google_oauth=start";
 const WORKBENCH_CALLBACK_URL = "/workbench?google_oauth=returned";
 const WORKBENCH_PRESEND_ROUTE_AVAILABLE = true;
 
@@ -444,6 +445,14 @@ export function deriveWorkbenchOAuthNotice(
   const params = toSearchParams(search);
   if (!params) return null;
 
+  if (params.get("google_oauth") === "start") {
+    return {
+      tone: "info",
+      label: "Starting Google OAuth",
+      detail: "Opening Google Workspace consent now.",
+    };
+  }
+
   if (params.get("notion_setup") === "failed") {
     return {
       tone: "error",
@@ -470,6 +479,18 @@ export function deriveWorkbenchOAuthNotice(
   }
 
   return null;
+}
+
+function isGoogleOAuthStartUrl(value: string): boolean {
+  try {
+    const url = new URL(value, window.location.origin);
+    return (
+      url.pathname === "/workbench" &&
+      url.searchParams.get("google_oauth") === "start"
+    );
+  } catch {
+    return value === GOOGLE_SETUP_HREF;
+  }
 }
 
 function deriveNotionSetupAffordance(
@@ -1053,7 +1074,13 @@ export function WorkbenchShell() {
   }, [loadConfig]);
 
   useEffect(() => {
-    setOauthNotice(deriveWorkbenchOAuthNotice(window.location.search));
+    const search = window.location.search;
+    setOauthNotice(deriveWorkbenchOAuthNotice(search));
+
+    if (isGoogleOAuthStartUrl(`${window.location.pathname}${search}`)) {
+      window.history.replaceState(null, "", "/workbench");
+      void signIn("google", { callbackUrl: WORKBENCH_CALLBACK_URL });
+    }
   }, []);
 
   const loadRunHistory = useCallback(async (options?: { silent?: boolean }) => {
@@ -1265,6 +1292,10 @@ export function WorkbenchShell() {
       });
 
       if (body?.next_url) {
+        if (isGoogleOAuthStartUrl(body.next_url)) {
+          void signIn("google", { callbackUrl: WORKBENCH_CALLBACK_URL });
+          return;
+        }
         window.location.assign(body.next_url);
         return;
       }

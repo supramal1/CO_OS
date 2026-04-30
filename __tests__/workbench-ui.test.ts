@@ -528,6 +528,11 @@ describe("Workbench UI summary", () => {
   });
 
   it("derives post-OAuth notices from Workbench URL params", () => {
+    expect(deriveWorkbenchOAuthNotice("?google_oauth=start")).toEqual({
+      tone: "info",
+      label: "Starting Google OAuth",
+      detail: "Opening Google Workspace consent now.",
+    });
     expect(deriveWorkbenchOAuthNotice("?google_oauth=returned")).toEqual({
       tone: "info",
       label: "Google OAuth returned",
