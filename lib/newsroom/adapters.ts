@@ -1,5 +1,6 @@
 import type { NewsroomAdapterContext, NewsroomSource, NewsroomSourceSnapshot } from "./types";
 import { CORNERSTONE_URL } from "@/lib/cornerstone";
+import { loadRelevantMondayItems, type MondayItemSummary } from "@/lib/monday/items";
 import { createGoogleCalendarClient } from "@/lib/workbench/google-calendar";
 import { getWorkbenchGoogleAccessToken } from "@/lib/workbench/google-token";
 import { createWorkbenchGoogleTokenStore } from "@/lib/workbench/google-token-store";
@@ -242,6 +243,32 @@ export async function loadReviewNewsroomSnapshot(
     status: { source: "review", status: "empty", itemsCount: 0 },
     candidates: [],
   };
+}
+
+export async function loadMondayNewsroomSnapshot(
+  context: NewsroomAdapterContext,
+): Promise<NewsroomSourceSnapshot> {
+  const result = await loadRelevantMondayItems({
+    userId: context.userId,
+    now: context.now,
+  });
+
+  if (result.status === "unavailable") {
+    return unavailableSnapshot("monday", result.reason);
+  }
+  if (result.status === "error") {
+    return errorSnapshot("monday", result.reason);
+  }
+
+  return mondayItemsToNewsroomSnapshot(result.items, context);
+}
+
+export function mondayItemsToNewsroomSnapshot(
+  items: MondayItemSummary[],
+  context: NewsroomAdapterContext,
+): NewsroomSourceSnapshot {
+  const candidates = items.flatMap((item) => mondayItemToCandidates(item, context));
+  return snapshotFromCandidates("monday", candidates);
 }
 
 export async function loadCornerstoneNewsroomSnapshot(
@@ -497,6 +524,194 @@ function summarizeCornerstoneChange(reason: string): string {
 
   const sentence = /[.!?]$/.test(cleaned) ? cleaned : `${cleaned}.`;
   return boundedText(sentence, 180);
+}
+
+function mondayItemToCandidates(
+  item: MondayItemSummary,
+  context: NewsroomAdapterContext,
+): NewsroomSourceSnapshot["candidates"] {
+  const dueState = mondayDueState(item.dueDate, context);
+  const blocked = Boolean(item.isBlocked) || /\bblock(?:ed|er|ing)?\b/i.test(item.status ?? "");
+  const staleDays = mondayStaleDays(item.lastUpdatedAt, context.now);
+  const stale = staleDays !== null && staleDays >= 5 && !mondayItemLooksDone(item);
+  const changedSinceYesterday = mondayChangedSinceYesterday(item.lastUpdatedAt, context);
+  const assigned = item.assignedToUser === true;
+  const linkedActiveWork = item.linkedActiveWork === true;
+  const hasStrongSignal =
+    dueState !== null ||
+    blocked ||
+    (stale && (assigned || linkedActiveWork)) ||
+    (changedSinceYesterday && (assigned || linkedActiveWork));
+
+  if (!hasStrongSignal) return [];
+
+  const signals: NewsroomSourceSnapshot["candidates"][number]["signals"] = [];
+  if (dueState === "today") signals.push("monday_due_today");
+  if (dueState === "this_week") signals.push("monday_due_this_week");
+  if (blocked) signals.push("monday_blocked");
+  if (stale) signals.push("monday_stale");
+  if (assigned) signals.push("monday_assigned_to_user");
+  if (linkedActiveWork) signals.push("monday_linked_active_work");
+  if (changedSinceYesterday && !blocked && !stale && dueState === null) {
+    signals.push("changed_since_yesterday");
+  }
+  if (item.url) signals.push("action_available");
+  if (linkedActiveWork) signals.push("active_work");
+  if (blocked || stale || dueState === "today") signals.push("human_decision");
+
+  const section =
+    blocked || stale || dueState === "today"
+      ? "needsAttention"
+      : dueState === "this_week"
+        ? "today"
+        : "changedSinceYesterday";
+  const title = boundedText(
+    mondayItemTitle(item, { blocked, dueState, stale }),
+    WORKBENCH_TITLE_MAX_LENGTH,
+  );
+  const reason = boundedText(
+    mondayItemReason({
+      dueState,
+      blocked,
+      staleDays: stale ? staleDays : null,
+      assigned,
+      linkedActiveWork,
+      changedSinceYesterday,
+    }),
+    WORKBENCH_REASON_MAX_LENGTH,
+  );
+  const sourceRefs = [
+    `monday:item:${item.itemId}`,
+    `monday:board:${item.boardId}`,
+    item.groupId ? `monday:group:${item.groupId}` : null,
+  ].filter((ref): ref is string => Boolean(ref));
+
+  return [
+    {
+      id: `monday-item-${item.itemId}-${
+        section === "needsAttention" ? "attention" : section
+      }`,
+      title,
+      reason,
+      source: "monday",
+      confidence: blocked || dueState === "today" || (stale && assigned) ? "high" : "medium",
+      section,
+      ...(item.url
+        ? {
+            href: item.url,
+            action: { label: "Open monday", target: "monday" as const, href: item.url },
+          }
+        : {}),
+      signals,
+      sourceRefs,
+    },
+  ];
+}
+
+type MondayDueState = "today" | "this_week" | null;
+
+function mondayDueState(
+  dueDate: string | undefined,
+  context: NewsroomAdapterContext,
+): MondayDueState {
+  if (!dueDate) return null;
+
+  const due = parseDateOnly(dueDate);
+  if (!due) return null;
+
+  const today = Date.UTC(
+    context.now.getUTCFullYear(),
+    context.now.getUTCMonth(),
+    context.now.getUTCDate(),
+  );
+  const dueTime = due.getTime();
+  if (dueTime === today) return "today";
+
+  const weekEnd = today + 7 * 24 * 60 * 60 * 1000;
+  return dueTime > today && dueTime <= weekEnd ? "this_week" : null;
+}
+
+function mondayChangedSinceYesterday(
+  lastUpdatedAt: string | undefined,
+  context: NewsroomAdapterContext,
+): boolean {
+  if (!lastUpdatedAt) return false;
+  const timestamp = Date.parse(lastUpdatedAt);
+  return (
+    Number.isFinite(timestamp) &&
+    timestamp >= context.range.since.getTime() &&
+    timestamp <= context.now.getTime()
+  );
+}
+
+function mondayStaleDays(lastUpdatedAt: string | undefined, now: Date): number | null {
+  if (!lastUpdatedAt) return null;
+  const timestamp = Date.parse(lastUpdatedAt);
+  if (!Number.isFinite(timestamp) || timestamp > now.getTime()) return null;
+
+  return Math.floor((now.getTime() - timestamp) / (24 * 60 * 60 * 1000));
+}
+
+function mondayItemLooksDone(item: MondayItemSummary): boolean {
+  return /\b(done|complete|completed|closed|shipped)\b/i.test(item.status ?? "");
+}
+
+function mondayItemTitle(
+  item: MondayItemSummary,
+  state: { blocked: boolean; dueState: MondayDueState; stale: boolean },
+): string {
+  if (state.blocked && state.dueState === "today") return `${item.name} is blocked and due today`;
+  if (state.blocked) return `${item.name} is blocked`;
+  if (state.stale) return `${item.name} looks stale`;
+  if (state.dueState === "today") return `${item.name} is due today`;
+  if (state.dueState === "this_week") return `${item.name} is due this week`;
+  return `${item.name} changed since yesterday`;
+}
+
+function mondayItemReason(input: {
+  dueState: MondayDueState;
+  blocked: boolean;
+  staleDays: number | null;
+  assigned: boolean;
+  linkedActiveWork: boolean;
+  changedSinceYesterday: boolean;
+}): string {
+  if (input.staleDays !== null) {
+    const staleParts = [`has had no update for ${input.staleDays} days`];
+    if (input.assigned) staleParts.push("is assigned to you");
+    if (input.linkedActiveWork) staleParts.push("is linked to active work");
+    return `This monday item ${joinHumanList(staleParts)}.`;
+  }
+
+  const parts: string[] = [];
+  if (input.dueState === "today") parts.push("due today");
+  if (input.dueState === "this_week") parts.push("due this week");
+  if (input.blocked) parts.push("blocked");
+  if (input.assigned) parts.push("assigned to you");
+  if (input.linkedActiveWork) parts.push("linked to active work");
+  if (parts.length === 0 && input.changedSinceYesterday) parts.push("changed since yesterday");
+
+  if (parts.length === 0) return "This monday item may need attention.";
+  const phrase = joinHumanList(parts);
+  return `This monday item is ${phrase}.`;
+}
+
+function joinHumanList(parts: string[]): string {
+  if (parts.length <= 1) return parts[0] ?? "";
+  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
+  return `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`;
+}
+
+function parseDateOnly(value: string): Date | null {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
+
+  return new Date(Date.UTC(year, month - 1, day));
 }
 
 function stripImplementationNoise(value: string): string {

@@ -8,6 +8,7 @@ const SOURCE_LABELS: Record<NewsroomSourceStatus["source"], string> = {
   calendar: "Calendar",
   cornerstone: "Cornerstone",
   forge: "Forge",
+  monday: "monday",
   notion: "Notion",
   review: "Review",
   workbench: "Workbench",
@@ -66,6 +67,7 @@ export function sourceStatusDetail(
 
   const reason = status.reason?.toLowerCase() ?? "";
   if (isNotConnectedStatus(status)) {
+    if (status.source === "monday") return "Connect monday in Profile";
     return `Connect ${SOURCE_LABELS[status.source]} in Workbench`;
   }
 
@@ -135,7 +137,9 @@ function allSourcesUnavailable(statuses: NewsroomSourceStatus[]): boolean {
 }
 
 function isNotConnectedStatus(status: NewsroomSourceStatus): boolean {
-  if (status.source !== "calendar" && status.source !== "notion") return false;
+  if (status.source !== "calendar" && status.source !== "notion" && status.source !== "monday") {
+    return false;
+  }
   if (status.status !== "unavailable" && status.status !== "error") return false;
   return true;
 }

@@ -6,6 +6,7 @@ import {
   CONNECTED_TOOL_ROWS,
   PROFILE_FACT_ROWS,
   PROFILE_STATS,
+  getConnectedToolDisplay,
   type ConnectedToolRow,
   type ProfileFactRow,
   type ProfilePersonalisationCard,
@@ -13,12 +14,6 @@ import {
   type ProfileSnapshot,
   type ProfileStat,
 } from "@/lib/profile/profile-model";
-
-const STATUS_COPY: Record<ConnectedToolRow["status"], string> = {
-  coming_next: "Coming next",
-  connected: "Connected",
-  needs_setup: "Needs setup",
-};
 
 type ProfileLoadState =
   | { status: "loading" }
@@ -588,7 +583,7 @@ function PersonalisationRow({ card }: { card: ProfilePersonalisationCard }) {
       <p
         style={{
           margin: 0,
-          maxHeight: 118,
+          maxHeight: 220,
           overflowY: "auto",
           padding: "8px 10px 8px 0",
           borderTop: "1px solid var(--rule)",
@@ -622,6 +617,8 @@ function ToolList({ tools }: { tools: ConnectedToolRow[] }) {
 }
 
 function ToolRow({ tool }: { tool: ConnectedToolRow }) {
+  const display = getConnectedToolDisplay(tool);
+
   return (
     <div
       className="tool-row"
@@ -672,7 +669,7 @@ function ToolRow({ tool }: { tool: ConnectedToolRow }) {
         >
           {tool.role}
         </span>
-        {tool.connectedAs ? (
+        {display.detail ? (
           <span
             style={{
               fontFamily: "var(--font-plex-mono)",
@@ -681,7 +678,7 @@ function ToolRow({ tool }: { tool: ConnectedToolRow }) {
               color: "var(--ink-faint)",
             }}
           >
-            {tool.connectedAs}
+            {display.detail}
           </span>
         ) : null}
       </div>
@@ -695,11 +692,11 @@ function ToolRow({ tool }: { tool: ConnectedToolRow }) {
           textAlign: "right",
         }}
       >
-        {tool.meta}
+        {display.meta}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <StatusPill status={tool.status} />
-        <RowAction href={tool.href}>{tool.actionLabel}</RowAction>
+        <StatusPill status={display.statusKind} label={display.statusLabel} />
+        <RowAction href={display.href}>{display.actionLabel}</RowAction>
       </div>
       <style jsx>{`
         @media (max-width: 720px) {
@@ -719,7 +716,13 @@ function ToolRow({ tool }: { tool: ConnectedToolRow }) {
   );
 }
 
-function StatusPill({ status }: { status: ConnectedToolRow["status"] }) {
+function StatusPill({
+  status,
+  label,
+}: {
+  status: ConnectedToolRow["status"];
+  label: string;
+}) {
   return (
     <span
       style={{
@@ -733,7 +736,7 @@ function StatusPill({ status }: { status: ConnectedToolRow["status"] }) {
         whiteSpace: "nowrap",
       }}
     >
-      {STATUS_COPY[status]}
+      {label}
     </span>
   );
 }

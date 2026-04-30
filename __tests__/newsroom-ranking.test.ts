@@ -61,6 +61,44 @@ describe("Newsroom ranking", () => {
     expect(ranked.map((item) => item.id)).toEqual(["priority", "generic"]);
   });
 
+  it("promotes high-signal monday items over generic changes", () => {
+    const ranked = rankNewsroomItems([
+      candidate({
+        id: "generic-change",
+        title: "A task changed in monday",
+        source: "monday",
+        section: "changedSinceYesterday",
+        confidence: "high",
+        signals: ["changed_since_yesterday", "generic_update"],
+        action: undefined,
+        sourceRefs: ["monday:item:generic"],
+      }),
+      candidate({
+        id: "blocked-due",
+        title: "Project Atlas task is blocked and due today",
+        source: "monday",
+        section: "needsAttention",
+        confidence: "high",
+        signals: [
+          "monday_due_today",
+          "monday_blocked",
+          "monday_assigned_to_user",
+          "monday_linked_active_work",
+          "action_available",
+          "human_decision",
+        ],
+        action: {
+          label: "Open monday",
+          target: "monday",
+          href: "https://example.monday.com/items/1",
+        },
+        sourceRefs: ["monday:item:1"],
+      }),
+    ]);
+
+    expect(ranked.map((item) => item.id)).toEqual(["blocked-due", "generic-change"]);
+  });
+
   it("dedupes similar titles and shared source refs while preserving the stronger action", () => {
     const deduped = dedupeNewsroomItems([
       candidate({

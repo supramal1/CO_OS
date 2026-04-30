@@ -2,6 +2,7 @@ import {
   loadCalendarNewsroomSnapshot,
   loadCornerstoneNewsroomSnapshot,
   loadNotionNewsroomSnapshot,
+  loadMondayNewsroomSnapshot,
   loadReviewNewsroomSnapshot,
   loadWorkbenchNewsroomSnapshot,
 } from "./adapters";
@@ -19,6 +20,7 @@ const DEFAULT_ADAPTERS: NewsroomAdapter[] = [
   { source: "calendar", load: loadCalendarNewsroomSnapshot },
   { source: "notion", load: loadNotionNewsroomSnapshot },
   { source: "workbench", load: loadWorkbenchNewsroomSnapshot },
+  { source: "monday", load: loadMondayNewsroomSnapshot },
   { source: "review", load: loadReviewNewsroomSnapshot },
   { source: "cornerstone", load: loadCornerstoneNewsroomSnapshot },
 ];

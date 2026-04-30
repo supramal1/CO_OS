@@ -6,6 +6,7 @@ import {
   PROFILE_PATH,
   PROFILE_SECTIONS,
   PROFILE_STATS,
+  getConnectedToolDisplay,
 } from "@/lib/profile/profile-model";
 
 describe("My OS Profile model", () => {
@@ -35,7 +36,96 @@ describe("My OS Profile model", () => {
     expect(CONNECTED_TOOL_ROWS.find((tool) => tool.id === "monday")).toMatchObject({
       label: "monday.com",
       role: "Operational task ledger",
-      status: "coming_next",
+      status: "needs_setup",
+      actionLabel: "Check status",
+      href: "/api/monday/status",
+    });
+  });
+
+  it("keeps monday as infrastructure with clear Profile display states", () => {
+    expect(
+      getConnectedToolDisplay({
+        id: "monday",
+        label: "monday.com",
+        role: "Operational task ledger",
+        status: "needs_setup",
+        meta: "Setup",
+        actionLabel: "Set up",
+        connectedAs: "monday connector has not been configured yet.",
+      }),
+    ).toMatchObject({
+      statusLabel: "Not configured",
+      actionLabel: "Check status",
+      href: "/api/monday/status",
+      meta: "Setup",
+    });
+
+    expect(
+      getConnectedToolDisplay({
+        id: "monday",
+        label: "monday.com",
+        role: "Operational task ledger",
+        status: "needs_setup",
+        meta: "Identity",
+        actionLabel: "Connect",
+        href: "/profile",
+        connectedAs: "monday is ready to connect. Identity confirmation comes next.",
+      }),
+    ).toMatchObject({
+      statusLabel: "Ready to connect",
+      actionLabel: "Connect",
+      href: "/api/monday/start",
+      meta: "Identity",
+    });
+
+    expect(
+      getConnectedToolDisplay({
+        id: "monday",
+        label: "monday.com",
+        role: "Operational task ledger",
+        status: "needs_setup",
+        meta: "Identity",
+        actionLabel: "Confirm",
+        connectedAs: "Confirm Malik James-Williams before CO OS uses monday task context.",
+      }),
+    ).toMatchObject({
+      statusLabel: "Confirm identity",
+      actionLabel: "Confirm",
+      href: "/api/monday/status",
+    });
+
+    expect(
+      getConnectedToolDisplay({
+        id: "monday",
+        label: "monday.com",
+        role: "Operational task ledger",
+        status: "connected",
+        meta: "Identity",
+        actionLabel: "View",
+        connectedAs: "Connected as Malik James-Williams.",
+      }),
+    ).toMatchObject({
+      statusLabel: "Connected as Malik James-Williams",
+      statusKind: "connected",
+      actionLabel: "View",
+    });
+
+    expect(
+      getConnectedToolDisplay({
+        id: "monday",
+        label: "monday.com",
+        role: "Operational task ledger",
+        status: "needs_setup",
+        meta: "Identity",
+        actionLabel: "Reconnect",
+        href: "/profile",
+        connectedAs: "monday token expired.",
+      }),
+    ).toMatchObject({
+      statusLabel: "Repair needed",
+      actionLabel: "Reconnect",
+      href: "/api/monday/start",
+      meta: "Repair",
     });
   });
 

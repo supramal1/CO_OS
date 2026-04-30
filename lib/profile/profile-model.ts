@@ -28,6 +28,21 @@ export type ConnectedToolRow = {
   actionLabel: string;
   href?: string;
   connectedAs?: string;
+  displayState?:
+    | "not_configured"
+    | "ready_to_connect"
+    | "confirmation_needed"
+    | "connected"
+    | "repair_needed";
+};
+
+export type ConnectedToolDisplay = {
+  statusLabel: string;
+  statusKind: ConnectedToolRow["status"];
+  meta: string;
+  detail?: string;
+  actionLabel: string;
+  href?: string;
 };
 
 export type ProfileStat = {
@@ -148,9 +163,12 @@ export const CONNECTED_TOOL_ROWS: ConnectedToolRow[] = [
     id: "monday",
     label: "monday.com",
     role: "Operational task ledger",
-    status: "coming_next",
-    meta: "Infrastructure",
-    actionLabel: "Soon",
+    status: "needs_setup",
+    meta: "Setup",
+    actionLabel: "Check status",
+    href: "/api/monday/status",
+    connectedAs: "monday connector has not been configured for this workspace yet.",
+    displayState: "not_configured",
   },
   {
     id: "cornerstone",
@@ -161,6 +179,125 @@ export const CONNECTED_TOOL_ROWS: ConnectedToolRow[] = [
     actionLabel: "View",
   },
 ];
+
+export function getConnectedToolDisplay(
+  tool: ConnectedToolRow,
+): ConnectedToolDisplay {
+  if (tool.id !== "monday") {
+    return {
+      statusLabel:
+        tool.status === "connected"
+          ? "Connected"
+          : tool.status === "coming_next"
+            ? "Coming next"
+            : "Needs setup",
+      statusKind: tool.status,
+      meta: tool.meta,
+      detail: tool.connectedAs,
+      actionLabel: tool.actionLabel,
+      href: tool.href,
+    };
+  }
+
+  const state = inferMondayDisplayState(tool);
+
+  if (state === "not_configured") {
+    return {
+      statusLabel: "Not configured",
+      statusKind: "needs_setup",
+      meta: "Setup",
+      detail:
+        tool.connectedAs ??
+        "An admin needs to finish monday setup before staff can connect.",
+      actionLabel: "Check status",
+      href: "/api/monday/status",
+    };
+  }
+
+  if (state === "ready_to_connect") {
+    return {
+      statusLabel: "Ready to connect",
+      statusKind: "needs_setup",
+      meta: "Identity",
+      detail:
+        tool.connectedAs ??
+        "Connect once and CO OS will resolve your monday identity.",
+      actionLabel: "Connect",
+      href: "/api/monday/start",
+    };
+  }
+
+  if (state === "confirmation_needed") {
+    return {
+      statusLabel: "Confirm identity",
+      statusKind: "needs_setup",
+      meta: "Identity",
+      detail:
+        tool.connectedAs ??
+        "Confirm the monday account CO OS found before it uses task context.",
+      actionLabel: "Confirm",
+      href: mondayStatusHref(tool.href),
+    };
+  }
+
+  if (state === "repair_needed") {
+    return {
+      statusLabel: "Repair needed",
+      statusKind: "needs_setup",
+      meta: "Repair",
+      detail:
+        tool.connectedAs ??
+        "Reconnect monday so CO OS can continue reading task signals.",
+      actionLabel: tool.actionLabel === "Connect" ? "Reconnect" : tool.actionLabel,
+      href: mondayStartHref(tool.href),
+    };
+  }
+
+  return {
+    statusLabel: connectedMondayLabel(tool.connectedAs),
+    statusKind: "connected",
+    meta: "Connected",
+    detail: tool.connectedAs,
+    actionLabel: tool.actionLabel === "Connect" ? "View" : tool.actionLabel,
+    href: mondayStatusHref(tool.href),
+  };
+}
+
+function inferMondayDisplayState(
+  tool: ConnectedToolRow,
+): NonNullable<ConnectedToolRow["displayState"]> {
+  if (tool.displayState) return tool.displayState;
+
+  const text = `${tool.actionLabel} ${tool.meta} ${tool.connectedAs ?? ""}`.toLowerCase();
+  if (tool.status === "connected") return "connected";
+  if (tool.actionLabel.toLowerCase() === "connect") return "ready_to_connect";
+  if (text.includes("confirm")) return "confirmation_needed";
+  if (
+    text.includes("expired") ||
+    text.includes("revoked") ||
+    text.includes("repair") ||
+    text.includes("reauth") ||
+    text.includes("reconnect")
+  ) {
+    return "repair_needed";
+  }
+  return "not_configured";
+}
+
+function connectedMondayLabel(detail: string | undefined): string {
+  if (!detail) return "Connected";
+  const match = detail.match(/\bconnected as\s+(.+)$/i);
+  if (match?.[1]) return `Connected as ${match[1].trim().replace(/[.!?]$/, "")}`;
+  return "Connected";
+}
+
+function mondayStartHref(href: string | undefined): string {
+  return href && href !== "/profile" ? href : "/api/monday/start";
+}
+
+function mondayStatusHref(href: string | undefined): string {
+  return href && href !== "/profile" ? href : "/api/monday/status";
+}
 
 export const PROFILE_STATS: ProfileStat[] = [
   {

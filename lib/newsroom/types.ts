@@ -4,7 +4,8 @@ export type NewsroomSource =
   | "calendar"
   | "workbench"
   | "review"
-  | "forge";
+  | "forge"
+  | "monday";
 
 export type NewsroomConfidence = "high" | "medium" | "low";
 export type NewsroomSection = "today" | "changedSinceYesterday" | "needsAttention";
@@ -35,7 +36,7 @@ export type NewsroomItem = {
 
 export type NewsroomAction = {
   label: string;
-  target: "workbench" | "review" | "notion" | "forge" | "calendar";
+  target: "workbench" | "review" | "notion" | "forge" | "calendar" | "monday";
   href: string;
 };
 
@@ -57,7 +58,13 @@ export type NewsroomSignal =
   | "action_available"
   | "active_work"
   | "generic_update"
-  | "low_confidence";
+  | "low_confidence"
+  | "monday_due_today"
+  | "monday_due_this_week"
+  | "monday_blocked"
+  | "monday_stale"
+  | "monday_assigned_to_user"
+  | "monday_linked_active_work";
 
 export type NewsroomCandidate = NewsroomItem & {
   section: NewsroomSection;

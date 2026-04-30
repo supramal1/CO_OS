@@ -23,6 +23,12 @@ const SIGNAL_SCORES: Record<NewsroomCandidate["signals"][number], number> = {
   active_work: 14,
   generic_update: -18,
   low_confidence: -14,
+  monday_due_today: 38,
+  monday_due_this_week: 22,
+  monday_blocked: 36,
+  monday_stale: 24,
+  monday_assigned_to_user: 16,
+  monday_linked_active_work: 18,
 };
 
 const CONFIDENCE_SCORES: Record<NewsroomConfidence, number> = {

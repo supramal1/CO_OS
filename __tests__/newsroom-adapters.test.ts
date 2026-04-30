@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   createWorkbenchGoogleTokenStore: vi.fn(),
   getUserWorkbenchConfig: vi.fn(),
   getWorkbenchGoogleAccessToken: vi.fn(),
+  loadRelevantMondayItems: vi.fn(),
   listWorkbenchRuns: vi.fn(),
   retrieveCalendarContext: vi.fn(),
   retrieveNotionContext: vi.fn(),
@@ -41,6 +42,10 @@ vi.mock("@/lib/workbench/retrieval/notion", () => ({
   retrieveNotionContext: mocks.retrieveNotionContext,
 }));
 
+vi.mock("@/lib/monday/items", () => ({
+  loadRelevantMondayItems: mocks.loadRelevantMondayItems,
+}));
+
 vi.mock("@/lib/cornerstone", () => ({
   CORNERSTONE_URL: "https://cornerstone.test///",
 }));
@@ -49,9 +54,11 @@ import {
   calendarContextItemsToNewsroomSnapshot,
   loadCalendarNewsroomSnapshot,
   loadCornerstoneNewsroomSnapshot,
+  loadMondayNewsroomSnapshot,
   loadNotionNewsroomSnapshot,
   loadReviewNewsroomSnapshot,
   loadWorkbenchNewsroomSnapshot,
+  mondayItemsToNewsroomSnapshot,
   notionContextItemsToNewsroomSnapshot,
 } from "@/lib/newsroom/adapters";
 
@@ -116,6 +123,7 @@ beforeEach(() => {
   mocks.createWorkbenchGoogleTokenStore.mockReset();
   mocks.getUserWorkbenchConfig.mockReset();
   mocks.getWorkbenchGoogleAccessToken.mockReset();
+  mocks.loadRelevantMondayItems.mockReset();
   mocks.listWorkbenchRuns.mockReset();
   mocks.retrieveCalendarContext.mockReset();
   mocks.retrieveNotionContext.mockReset();
@@ -339,6 +347,120 @@ describe("newsroom adapters", () => {
       status: { source: "review", status: "empty", itemsCount: 0 },
       candidates: [],
     });
+  });
+
+  it("returns monday unavailable when the connector is disconnected", async () => {
+    mocks.loadRelevantMondayItems.mockResolvedValue({
+      status: "unavailable",
+      reason: "monday_disconnected",
+      items: [],
+    });
+
+    await expect(loadMondayNewsroomSnapshot(context)).resolves.toEqual({
+      source: "monday",
+      status: {
+        source: "monday",
+        status: "unavailable",
+        reason: "monday_disconnected",
+        itemsCount: 0,
+      },
+      candidates: [],
+    });
+    expect(mocks.loadRelevantMondayItems).toHaveBeenCalledWith({
+      userId: "principal_123",
+      now: context.now,
+    });
+  });
+
+  it("maps a due and blocked monday item into a prioritized Needs Attention candidate", () => {
+    const snapshot = mondayItemsToNewsroomSnapshot(
+      [
+        {
+          itemId: "item_1",
+          boardId: "board_1",
+          groupId: "group_1",
+          name: "Project Atlas client draft",
+          status: "Blocked",
+          owner: "Malik James-Williams",
+          dueDate: "2026-04-30",
+          lastUpdatedAt: "2026-04-29T14:00:00.000Z",
+          isBlocked: true,
+          assignedToUser: true,
+          linkedActiveWork: true,
+          url: "https://example.monday.com/boards/board_1/pulses/item_1",
+        },
+      ],
+      context,
+    );
+
+    expect(snapshot).toEqual({
+      source: "monday",
+      status: { source: "monday", status: "ok", itemsCount: 1 },
+      candidates: [
+        {
+          id: "monday-item-item_1-attention",
+          title: "Project Atlas client draft is blocked and due today",
+          reason:
+            "This monday item is due today, blocked, assigned to you, and linked to active work.",
+          source: "monday",
+          confidence: "high",
+          section: "needsAttention",
+          href: "https://example.monday.com/boards/board_1/pulses/item_1",
+          action: {
+            label: "Open monday",
+            target: "monday",
+            href: "https://example.monday.com/boards/board_1/pulses/item_1",
+          },
+          signals: [
+            "monday_due_today",
+            "monday_blocked",
+            "monday_assigned_to_user",
+            "monday_linked_active_work",
+            "action_available",
+            "active_work",
+            "human_decision",
+          ],
+          sourceRefs: ["monday:item:item_1", "monday:board:board_1", "monday:group:group_1"],
+        },
+      ],
+    });
+  });
+
+  it("maps stale monday items without dumping low-signal tasks", () => {
+    const snapshot = mondayItemsToNewsroomSnapshot(
+      [
+        {
+          itemId: "stale_1",
+          boardId: "board_1",
+          name: "Client X status update",
+          status: "Working on it",
+          dueDate: "2026-05-03",
+          lastUpdatedAt: "2026-04-20T09:00:00.000Z",
+          assignedToUser: true,
+          url: "https://example.monday.com/stale_1",
+        },
+        {
+          itemId: "noise_1",
+          boardId: "board_1",
+          name: "Low signal task",
+          status: "Information only",
+          lastUpdatedAt: "2026-04-20T09:00:00.000Z",
+          assignedToUser: false,
+        },
+      ],
+      context,
+    );
+
+    expect(snapshot.status).toEqual({ source: "monday", status: "ok", itemsCount: 1 });
+    expect(snapshot.candidates).toEqual([
+      expect.objectContaining({
+        id: "monday-item-stale_1-attention",
+        title: "Client X status update looks stale",
+        reason: "This monday item has had no update for 10 days and is assigned to you.",
+        section: "needsAttention",
+        signals: expect.arrayContaining(["monday_stale", "monday_assigned_to_user"]),
+      }),
+    ]);
   });
 
   it("maps recent Workbench runs and attention signals", async () => {
