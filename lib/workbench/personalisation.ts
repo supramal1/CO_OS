@@ -64,7 +64,16 @@ export type WorkbenchOnboardingModelClient = {
 };
 
 export type WorkbenchOnboardingDraftResult =
-  | { status: "drafted"; draft: WorkbenchOnboardingDraft }
+  | {
+      status: "drafted";
+      draft: WorkbenchOnboardingDraft;
+      fallback?: boolean;
+      warning?:
+        | "onboarding_model_unavailable"
+        | "onboarding_draft_failed"
+        | "onboarding_draft_invalid_json";
+      message?: string;
+    }
   | {
       status: "invalid_payload";
       error: "invalid_workbench_onboarding_payload";
@@ -204,7 +213,7 @@ export function normalizeWorkbenchOnboardingPayload(
 
 export async function generateWorkbenchOnboardingDraft(input: {
   payload: WorkbenchOnboardingPayloadInput;
-  modelClient: WorkbenchOnboardingModelClient;
+  modelClient: WorkbenchOnboardingModelClient | null;
 }): Promise<WorkbenchOnboardingDraftResult> {
   const parsed = normalizeWorkbenchOnboardingPayload(input.payload);
   if (!parsed.ok) {
@@ -214,6 +223,13 @@ export async function generateWorkbenchOnboardingDraft(input: {
       fields: parsed.fields,
       message: "Add the missing setup details before generating a preview.",
     };
+  }
+
+  if (!input.modelClient) {
+    return fallbackOnboardingDraftResult(
+      parsed.payload,
+      "onboarding_model_unavailable",
+    );
   }
 
   let raw: string;
@@ -229,25 +245,64 @@ export async function generateWorkbenchOnboardingDraft(input: {
       maxTokens: 900,
     });
   } catch {
-    return {
-      status: "error",
-      error: "onboarding_draft_failed",
-      message:
-        "Workbench could not generate a profile preview right now. Please try again.",
-    };
+    return fallbackOnboardingDraftResult(
+      parsed.payload,
+      "onboarding_draft_failed",
+    );
   }
 
   const draft = parseWorkbenchOnboardingDraft(raw);
   if (!draft) {
-    return {
-      status: "error",
-      error: "onboarding_draft_invalid_json",
-      message:
-        "Workbench could not turn that into a profile preview. Please try again.",
-    };
+    return fallbackOnboardingDraftResult(
+      parsed.payload,
+      "onboarding_draft_invalid_json",
+    );
   }
 
   return { status: "drafted", draft };
+}
+
+function fallbackOnboardingDraftResult(
+  payload: WorkbenchOnboardingPayload,
+  warning:
+    | "onboarding_model_unavailable"
+    | "onboarding_draft_failed"
+    | "onboarding_draft_invalid_json",
+): Extract<WorkbenchOnboardingDraftResult, { status: "drafted" }> {
+  return {
+    status: "drafted",
+    draft: buildFallbackOnboardingDraft(payload),
+    fallback: true,
+    warning,
+    message: "Profile preview generated from your setup details.",
+  };
+}
+
+function buildFallbackOnboardingDraft(
+  payload: WorkbenchOnboardingPayload,
+): WorkbenchOnboardingDraft {
+  const profileBullets = [
+    toSentence(payload.role_title),
+    toSentence(`Communication style: ${payload.communication_style.join("; ")}`),
+    payload.helpful_context.length > 0
+      ? toSentence(`Helpful context: ${payload.helpful_context.join("; ")}`)
+      : "",
+  ].filter(Boolean);
+
+  const workingOnBullets = payload.current_focus
+    .map(toSentence)
+    .slice(0, MAX_DRAFT_BULLETS);
+
+  const voiceBullets = [
+    toSentence(`Preferred style: ${payload.communication_style.join("; ")}`),
+    toSentence(`Challenge style: ${payload.challenge_style.join("; ")}`),
+  ];
+
+  return {
+    personal_profile: { bullets: profileBullets.slice(0, MAX_DRAFT_BULLETS) },
+    working_on: { bullets: workingOnBullets },
+    voice: { bullets: voiceBullets },
+  };
 }
 
 export async function saveWorkbenchOnboarding(input: {
@@ -477,6 +532,12 @@ function normalizeUniqueStringList(
 
 function normalizeString(value: unknown): string {
   return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+}
+
+function toSentence(value: string): string {
+  const text = normalizeString(value);
+  if (!text) return "";
+  return /[.!?]$/.test(text) ? text : `${text}.`;
 }
 
 function limitString(value: string, maxChars: number): string {
