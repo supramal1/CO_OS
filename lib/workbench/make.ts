@@ -4,7 +4,7 @@ import type {
   WorkbenchRetrievedContext,
 } from "./types";
 
-const DEFAULT_MODEL = "claude-3-5-sonnet-latest";
+const DEFAULT_MODEL = "claude-sonnet-4-6";
 const MAX_ASSUMPTIONS = 6;
 const MAX_SOURCE_REFS = 8;
 
@@ -99,21 +99,14 @@ export async function generateWorkbenchArtifact(input: {
           "Anthropic rejected ANTHROPIC_API_KEY. Update the local key and restart the dev server.",
       };
     }
-    return {
-      status: "error",
-      reason: "workbench_make_failed",
-      message:
-        "Workbench could not generate a draft right now. Please try again in a moment.",
-    };
+    console.warn("[workbench] make model failed; using deterministic draft.");
+    return { status: "drafted", artifact: buildDeterministicArtifact(input) };
   }
 
   const artifact = parseWorkbenchArtifact(raw, input.preflightResult);
   if (!artifact) {
-    return {
-      status: "error",
-      reason: "workbench_make_invalid_json",
-      message: "Workbench could not turn that into a draft. Please try again.",
-    };
+    console.warn("[workbench] make model returned invalid JSON; using deterministic draft.");
+    return { status: "drafted", artifact: buildDeterministicArtifact(input) };
   }
 
   return { status: "drafted", artifact };
@@ -226,6 +219,94 @@ function buildWorkbenchMakePrompt(input: {
       2,
     ),
   ].join("\n");
+}
+
+function buildDeterministicArtifact(input: {
+  ask: string;
+  preflightResult: WorkbenchPreflightResult;
+  retrievedContext: WorkbenchRetrievedContext[];
+}): WorkbenchArtifact {
+  const preflight = input.preflightResult;
+  const decoded = preflight.decoded_task;
+  const artifactType = inferWorkbenchArtifactType(preflight);
+  const title =
+    normalizeString(decoded.deliverable_type) ||
+    normalizeString(decoded.summary) ||
+    "Workbench draft";
+  const sourceRefs = contextToSourceRefs([
+    ...input.retrievedContext,
+    ...preflight.retrieved_context,
+  ]);
+  const approach = preflight.suggested_approach
+    .map((step) => normalizeString(step.step))
+    .filter(Boolean);
+  const missingContext = preflight.missing_context
+    .map((item) => normalizeString(item.question))
+    .filter(Boolean);
+  const lines = [
+    `Draft for: ${normalizeString(input.ask) || normalizeString(decoded.summary) || "the task"}`,
+    "",
+    normalizeString(decoded.summary),
+    "",
+    approach.length > 0 ? "Suggested structure:" : "",
+    ...approach.map((step) => `- ${step}`),
+    "",
+    sourceRefs.length > 0 ? "Context used:" : "",
+    ...sourceRefs.map((ref) => `- ${ref.claim}`),
+    "",
+    missingContext.length > 0 ? "Check before using:" : "",
+    ...missingContext.map((question) => `- ${question}`),
+  ].filter((line, index, values) => {
+    if (line !== "") return true;
+    return values[index - 1] !== "" && values[index + 1] !== "";
+  });
+
+  return {
+    type: artifactType,
+    title: titleFromArtifactType(artifactType, title),
+    body: lines.join("\n").trim(),
+    assumptions: missingContext.slice(0, MAX_ASSUMPTIONS),
+    source_refs: sourceRefs,
+  };
+}
+
+function contextToSourceRefs(
+  items: WorkbenchRetrievedContext[],
+): WorkbenchArtifactSourceRef[] {
+  const seen = new Set<string>();
+  const refs: WorkbenchArtifactSourceRef[] = [];
+
+  for (const item of items) {
+    const sourceLabel = normalizeString(item.source_label);
+    const claim = normalizeString(item.claim);
+    if (!sourceLabel || !claim) continue;
+    const key = `${item.source_type}:${sourceLabel}:${claim}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    refs.push({
+      source_type: item.source_type,
+      source_label: sourceLabel,
+      source_url: normalizeNullableString(item.source_url),
+      claim,
+    });
+    if (refs.length >= MAX_SOURCE_REFS) break;
+  }
+
+  return refs;
+}
+
+function titleFromArtifactType(
+  type: WorkbenchArtifactType,
+  fallback: string,
+): string {
+  if (type === "client_email") return "Client email draft";
+  if (type === "brief_outline") return "Brief outline";
+  if (type === "report_section") return "Report section draft";
+  if (type === "research_summary") return "Research summary";
+  if (type === "action_plan") return "Action plan";
+  if (type === "meeting_prep") return "Meeting prep";
+  if (type === "options_recommendation") return "Options and recommendation";
+  return fallback;
 }
 
 function parseWorkbenchArtifact(

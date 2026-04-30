@@ -80,6 +80,68 @@ describe("POST /api/workbench/make", () => {
     });
   });
 
+  it("uses the shared Workbench default model when no model env is set", async () => {
+    mocks.auth.mockResolvedValue({
+      principalId: "principal_user_1",
+      apiKey: "csk_test",
+    });
+    delete process.env.ANTHROPIC_MODEL;
+    mocks.anthropicCreate.mockResolvedValue({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            artifact: {
+              type: "client_email",
+              title: "Client follow-up",
+              body: "Hi Sam,\n\nWe will send the updated plan by Friday.",
+              assumptions: [],
+              source_refs: [],
+            },
+          }),
+        },
+      ],
+    });
+
+    const res = await POST(
+      req({
+        ask: "Draft the client follow-up.",
+        preflight_result: basePreflightResult(),
+        retrieved_context: [],
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(mocks.anthropicCreate.mock.calls[0][0]).toMatchObject({
+      model: "claude-sonnet-4-6",
+    });
+  });
+
+  it("returns a deterministic draft when the provider fails after auth", async () => {
+    mocks.auth.mockResolvedValue({
+      principalId: "principal_user_1",
+      apiKey: "csk_test",
+    });
+    mocks.anthropicCreate.mockRejectedValue(new Error("model_not_found"));
+
+    const res = await POST(
+      req({
+        ask: "Draft the client follow-up.",
+        preflight_result: basePreflightResult(),
+        retrieved_context: [],
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      status: "drafted",
+      artifact: {
+        type: "client_email",
+        title: "Client email draft",
+      },
+    });
+  });
+
   it("rejects unauthenticated requests", async () => {
     mocks.auth.mockResolvedValue(null);
 

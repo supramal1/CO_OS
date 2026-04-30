@@ -406,7 +406,7 @@ export function createWorkbenchOnboardingAnthropicModelClient(input: {
   if (!apiKey) return null;
 
   const client = new Anthropic({ apiKey });
-  const model = input.model?.trim() || "claude-3-5-sonnet-latest";
+  const model = input.model?.trim() || "claude-sonnet-4-6";
 
   return {
     async create(request) {

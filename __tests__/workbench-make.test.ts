@@ -103,6 +103,58 @@ describe("Workbench make stage", () => {
     expect(JSON.stringify(result)).not.toContain("req_secret");
   });
 
+  it("falls back to a deterministic draft when the provider fails after auth", async () => {
+    const modelClient: WorkbenchMakeModelClient = {
+      create: vi.fn(async () => {
+        throw new Error("model_not_found");
+      }),
+    };
+
+    const result = await generateWorkbenchArtifact({
+      ask: "Draft a client email.",
+      preflightResult: basePreflightResult(),
+      retrievedContext: baseContext(),
+      modelClient,
+    });
+
+    expect(result).toMatchObject({
+      status: "drafted",
+      artifact: {
+        type: "client_email",
+        title: "Client email draft",
+        body: expect.stringContaining("Suggested structure:"),
+        source_refs: [
+          expect.objectContaining({
+            source_type: "calendar",
+            source_label: "Client check-in",
+          }),
+        ],
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain("model_not_found");
+  });
+
+  it("falls back to a deterministic draft when model JSON is unusable", async () => {
+    const modelClient: WorkbenchMakeModelClient = {
+      create: vi.fn(async () => "not json"),
+    };
+
+    const result = await generateWorkbenchArtifact({
+      ask: "Draft a client email.",
+      preflightResult: basePreflightResult(),
+      retrievedContext: [],
+      modelClient,
+    });
+
+    expect(result).toMatchObject({
+      status: "drafted",
+      artifact: {
+        type: "client_email",
+        title: "Client email draft",
+      },
+    });
+  });
+
   it("infers V1 artefact types from the decoded task", () => {
     expect(
       inferWorkbenchArtifactType({

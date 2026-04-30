@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { WorkbenchArtifact } from "./make";
 import type { WorkbenchPreflightResult } from "./types";
 
-const DEFAULT_MODEL = "claude-3-5-sonnet-latest";
+const DEFAULT_MODEL = "claude-sonnet-4-6";
 const MAX_REVIEW_ITEMS = 8;
 
 export type WorkbenchReviewStatus =
