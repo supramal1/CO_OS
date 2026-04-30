@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   persistWorkbenchInvocation: vi.fn(),
   persistWorkbenchRun: vi.fn(),
   processWorkbenchRunLearning: vi.fn(),
+  listWorkbenchProfileUpdates: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({
@@ -38,6 +39,8 @@ vi.mock("@/lib/workbench/run-history", () => ({
 }));
 
 vi.mock("@/lib/workbench/learning", () => ({
+  listWorkbenchProfileUpdates: (...args: unknown[]) =>
+    mocks.listWorkbenchProfileUpdates(...args),
   processWorkbenchRunLearning: (...args: unknown[]) =>
     mocks.processWorkbenchRunLearning(...args),
 }));
@@ -71,6 +74,7 @@ beforeEach(() => {
   mocks.persistWorkbenchInvocation.mockReset();
   mocks.persistWorkbenchRun.mockReset();
   mocks.processWorkbenchRunLearning.mockReset();
+  mocks.listWorkbenchProfileUpdates.mockReset();
   process.env.ANTHROPIC_API_KEY = "anthropic-test";
   process.env.ANTHROPIC_MODEL = "claude-sonnet-test";
   mocks.persistWorkbenchRun.mockResolvedValue({
@@ -80,8 +84,13 @@ beforeEach(() => {
   mocks.gatherWorkbenchRetrieval.mockResolvedValue({
     sources: [],
     context: [],
+    statuses: [],
     warnings: [],
     generated_at: "2026-04-29T12:00:00.000Z",
+  });
+  mocks.listWorkbenchProfileUpdates.mockResolvedValue({
+    status: "ok",
+    updates: [],
   });
 });
 

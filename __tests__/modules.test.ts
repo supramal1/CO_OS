@@ -34,7 +34,7 @@ describe("top-level CO OS modules", () => {
       },
       {
         type: "group",
-        id: "workbench",
+        id: "work",
         label: "Workbench",
         children: ["workbench"],
         accentVar: "var(--c-cowork)",

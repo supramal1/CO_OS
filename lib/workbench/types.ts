@@ -1,3 +1,6 @@
+import type { WorkbenchProfileContext } from "./profile";
+import type { WorkbenchWorkflowState } from "./workflow";
+
 export type WorkbenchInvocationType = "preflight" | "presend";
 
 export type WorkbenchTaskType =
@@ -65,6 +68,8 @@ export type WorkbenchInvocationLogRow = {
 
 export type WorkbenchStartResponse = {
   result: WorkbenchPreflightResult;
+  workflow?: WorkbenchWorkflowState;
+  profile?: WorkbenchProfileContext;
   invocation: WorkbenchInvocationLogRow;
   retrieval: {
     context: WorkbenchRetrievedContext[];

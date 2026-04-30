@@ -16,7 +16,7 @@ export type ModuleDef = {
 
 export type ModuleGroupDef = {
   type: "group";
-  id: "dispatch" | "workbench";
+  id: "dispatch" | "work";
   label: string;
   children: ModuleId[];
   accentVar: string;
@@ -78,7 +78,7 @@ export const NAV_ITEMS: ModuleNavItem[] = [
   },
   {
     type: "group",
-    id: "workbench",
+    id: "work",
     label: "Workbench",
     children: ["workbench"],
     accentVar: "var(--c-cowork)",

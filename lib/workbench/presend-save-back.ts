@@ -12,6 +12,7 @@ import { createWorkbenchGoogleTokenStore } from "./google-token-store";
 import type {
   WorkbenchPresendGoogleAccessTokenProvider,
   WorkbenchPresendGoogleAccessTokenProviderResult,
+  WorkbenchPresendReviewedArtifact,
   WorkbenchPresendResult,
   WorkbenchPresendSaveBackResult,
 } from "./presend-types";
@@ -21,6 +22,7 @@ export type RunWorkbenchPresendSaveBackInput = {
   result: WorkbenchPresendResult;
   userId: string;
   now?: Date;
+  reviewedArtifact?: WorkbenchPresendReviewedArtifact | null;
   getUserConfig: (userId: string) => Promise<WorkbenchUserConfig | null>;
   googleAccessTokenProvider?: WorkbenchPresendGoogleAccessTokenProvider;
   googleTokenStore?: WorkbenchGoogleTokenStore;
@@ -35,31 +37,41 @@ export type RunWorkbenchPresendSaveBackInput = {
 export async function runWorkbenchPresendSaveBack(
   input: RunWorkbenchPresendSaveBackInput,
 ): Promise<WorkbenchPresendSaveBackResult> {
+  const reviewedArtifact = normalizeReviewedArtifact(input.reviewedArtifact);
   if (!requiresDriveSaveBack(input.result)) {
-    return {
-      status: "skipped",
-      target: "drive",
-      reason: "drive_save_back_not_required",
-    };
+    return withReviewedArtifact(
+      {
+        status: "skipped",
+        target: "drive",
+        reason: "drive_save_back_not_required",
+      },
+      reviewedArtifact,
+    );
   }
 
   try {
     const config = await input.getUserConfig(input.userId);
     if (!config) {
-      return {
-        status: "unavailable",
-        target: "drive",
-        reason: "user_workbench_config_missing",
-      };
+      return withReviewedArtifact(
+        {
+          status: "unavailable",
+          target: "drive",
+          reason: "user_workbench_config_missing",
+        },
+        reviewedArtifact,
+      );
     }
 
     const driveFolderId = config.drive_folder_id?.trim();
     if (!driveFolderId) {
-      return {
-        status: "unavailable",
-        target: "drive",
-        reason: "missing_drive_folder",
-      };
+      return withReviewedArtifact(
+        {
+          status: "unavailable",
+          target: "drive",
+          reason: "missing_drive_folder",
+        },
+        reviewedArtifact,
+      );
     }
 
     const tokenProvider =
@@ -69,11 +81,14 @@ export async function runWorkbenchPresendSaveBack(
       await tokenProvider({ userId: input.userId, now: input.now }),
     );
     if (!token.accessToken) {
-      return {
-        status: "unavailable",
-        target: "drive",
-        reason: token.reason ?? "missing_access_token",
-      };
+      return withReviewedArtifact(
+        {
+          status: "unavailable",
+          target: "drive",
+          reason: token.reason ?? "missing_access_token",
+        },
+        reviewedArtifact,
+      );
     }
 
     const uploaderResult = (input.createDriveUploader ?? createGoogleDriveUploader)({
@@ -82,11 +97,14 @@ export async function runWorkbenchPresendSaveBack(
       fetch: input.driveFetch,
     });
     if (uploaderResult.status === "unavailable") {
-      return {
-        status: "unavailable",
-        target: "drive",
-        reason: uploaderResult.reason,
-      };
+      return withReviewedArtifact(
+        {
+          status: "unavailable",
+          target: "drive",
+          reason: uploaderResult.reason,
+        },
+        reviewedArtifact,
+      );
     }
 
     const artifact = buildPresendDriveArtifact(input.result);
@@ -96,17 +114,23 @@ export async function runWorkbenchPresendSaveBack(
       uploader: uploaderResult.uploader,
     });
 
-    return {
-      target: "drive",
-      ...saved,
-    };
+    return withReviewedArtifact(
+      {
+        target: "drive",
+        ...saved,
+      },
+      reviewedArtifact,
+    );
   } catch (error) {
-    return {
-      status: "error",
-      target: "drive",
-      reason: "drive_upload_failed",
-      message: errorMessage(error),
-    };
+    return withReviewedArtifact(
+      {
+        status: "error",
+        target: "drive",
+        reason: "drive_upload_failed",
+        message: errorMessage(error),
+      },
+      reviewedArtifact,
+    );
   }
 }
 
@@ -187,6 +211,27 @@ function requiresDriveSaveBack(result: WorkbenchPresendResult): boolean {
   );
 }
 
+function withReviewedArtifact<T extends WorkbenchPresendSaveBackResult>(
+  result: T,
+  reviewedArtifact: WorkbenchPresendReviewedArtifact | null,
+): T {
+  if (!reviewedArtifact) return result;
+  return { ...result, artifact: reviewedArtifact };
+}
+
+function normalizeReviewedArtifact(
+  value: WorkbenchPresendReviewedArtifact | null | undefined,
+): WorkbenchPresendReviewedArtifact | null {
+  if (!value) return null;
+  return {
+    artifact_type: optionalString(value.artifact_type),
+    title: optionalString(value.title),
+    review_status: optionalString(value.review_status),
+    source_count: Math.max(0, Math.trunc(value.source_count || 0)),
+    destination: optionalString(value.destination) ?? "drive",
+  };
+}
+
 function createDefaultGoogleAccessTokenProvider(
   tokenStore?: WorkbenchGoogleTokenStore,
 ): WorkbenchPresendGoogleAccessTokenProvider {
@@ -227,4 +272,9 @@ function slugify(value: string): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function optionalString(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
 }

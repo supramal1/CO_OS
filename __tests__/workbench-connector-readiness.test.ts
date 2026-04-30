@@ -207,24 +207,30 @@ describe("Workbench connector readiness smoke", () => {
     expect(summary.retrievalRows).toEqual([
       {
         source: "cornerstone",
+        label: "Cornerstone",
         status: "available",
         itemsCount: 1,
         reason: null,
+        detail: "Connected",
         warnings: [],
       },
       {
         source: "notion",
+        label: "Notion",
         status: "unavailable",
         itemsCount: 0,
         reason: "notion_parent_page_id_missing",
-        warnings: ["notion_parent_page_id_missing"],
+        detail: "Repair Workbench pages",
+        warnings: ["Repair Workbench pages"],
       },
       {
         source: "calendar",
+        label: "Calendar",
         status: "unavailable",
         itemsCount: 0,
         reason: "google_calendar_access_token_missing",
-        warnings: ["google_calendar_access_token_missing"],
+        detail: "Reconnect Google Workspace",
+        warnings: ["Reconnect Google Workspace"],
       },
     ]);
     expect(summary.warningCount).toBe(4);

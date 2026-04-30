@@ -95,7 +95,11 @@ export function sanitizeWorkbenchDetail(
 
   const lower = detail.toLowerCase();
   if (/notion|page|parent/.test(lower)) return "Repair Workbench pages";
-  if (/google|oauth|token|scope|grant|refresh|calendar/.test(lower)) {
+  if (
+    /google|oauth|token|scope|grant|refresh|calendar|authenticate|authentication|encrypted|decrypt|unsupported state/.test(
+      lower,
+    )
+  ) {
     return "Reconnect Google Workspace";
   }
   if (/drive|folder/.test(lower)) return "Set up Drive folder";
@@ -189,8 +193,20 @@ export function deriveWorkbenchProfileUpdateStatus(
   return {
     state: "error",
     label: "Profile update paused",
-    detail: sanitizeWorkbenchDetail(input.message, "Check profile update"),
+    detail: profileUpdateErrorDetail(input.message),
   };
+}
+
+function profileUpdateErrorDetail(message: string | null | undefined): string {
+  const lower = message?.toLowerCase() ?? "";
+  if (
+    /notion|page|parent|unsupported state|authenticate|authentication|encrypted|decrypt/.test(
+      lower,
+    )
+  ) {
+    return "Reconnect Notion to save profile updates.";
+  }
+  return sanitizeWorkbenchDetail(message, "Check profile update");
 }
 
 function setupDetail(source: WorkbenchStaffConnectorSource): string {

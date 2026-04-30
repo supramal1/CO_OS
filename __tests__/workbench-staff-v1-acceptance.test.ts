@@ -367,7 +367,7 @@ describe("Workbench staff-ready V1 acceptance", () => {
       (item) => item.type === "group" && item.id === "dispatch",
     );
     const workbench = NAV_ITEMS.find(
-      (item) => item.type === "group" && item.id === "workbench",
+      (item) => item.type === "group" && item.id === "work",
     );
 
     expect(dispatch).toMatchObject({
@@ -378,7 +378,7 @@ describe("Workbench staff-ready V1 acceptance", () => {
     });
     expect(workbench).toMatchObject({
       type: "group",
-      id: "workbench",
+      id: "work",
       label: "Workbench",
       children: ["workbench"],
     });

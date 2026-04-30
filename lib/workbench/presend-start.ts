@@ -58,6 +58,7 @@ export async function runWorkbenchPresend(
     result,
     userId: input.userId,
     now: input.now,
+    reviewedArtifact: input.reviewedArtifact,
     getUserConfig: input.getUserConfig ?? getUserWorkbenchConfig,
     googleAccessTokenProvider: input.googleAccessTokenProvider,
     googleTokenStore: input.googleTokenStore,

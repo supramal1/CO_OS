@@ -376,6 +376,69 @@ describe("Workbench onboarding personalisation", () => {
     });
   });
 
+  it("drafts from an existing Notion profile when the staff form is blank", async () => {
+    const modelClient: WorkbenchOnboardingModelClient = {
+      create: vi.fn(async () => JSON.stringify(validDraft())),
+    };
+    mocks.getUserWorkbenchConfig.mockResolvedValue({
+      user_id: "principal_123",
+      notion_parent_page_id: "parent-page",
+      drive_folder_id: null,
+      drive_folder_url: null,
+      google_oauth_grant_status: "granted",
+      google_oauth_scopes: [],
+      voice_register: "Concise",
+      feedback_style: "Challenge assumptions",
+      friction_tasks: ["Client responses"],
+    });
+    mocks.tokenGet.mockResolvedValue({ accessToken: "notion-oauth-token" });
+    mocks.createWorkbenchNotionClient.mockReturnValue({
+      client: {
+        listChildPages: vi.fn(async () => [
+          {
+            id: "profile-page",
+            title: "Personal Profile",
+            url: "https://notion.test/profile",
+          },
+          {
+            id: "working-page",
+            title: "Working On",
+            url: "https://notion.test/work",
+          },
+          {
+            id: "voice-page",
+            title: "Voice",
+            url: "https://notion.test/voice",
+          },
+        ]),
+        getPageContent: vi.fn(async (pageId: string) => {
+          if (pageId === "profile-page") return "Role: Senior Strategist";
+          if (pageId === "working-page") return "Nike QBR narrative";
+          return "Communication style: Source-led bullets";
+        }),
+      },
+      status: { source: "notion", status: "ok", items_count: 3 },
+    });
+
+    const result = await runWorkbenchOnboardingAction({
+      userId: "principal_123",
+      body: { action: "draft", payload: {} },
+      dependencies: { modelClient },
+    });
+
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({
+      status: "drafted",
+      draft: validDraft(),
+    });
+    const prompt = (modelClient.create as ReturnType<typeof vi.fn>).mock.calls[0][0]
+      .prompt as string;
+    expect(prompt).toContain("Senior Strategist");
+    expect(prompt).toContain("Nike QBR narrative");
+    expect(prompt).toContain("Source-led bullets");
+    expect(mocks.tokenGet).toHaveBeenCalledWith("principal_123");
+  });
+
   it("falls back when the onboarding draft action has no model client", async () => {
     const result = await runWorkbenchOnboardingAction({
       userId: "principal_123",
