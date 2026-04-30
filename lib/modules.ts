@@ -1,6 +1,7 @@
 export type ModuleId =
   | "speak-to-charlie"
   | "forge"
+  | "newsroom"
   | "workbench"
   | "cookbook"
   | "workforce"
@@ -41,6 +42,12 @@ export const MODULES: ModuleDef[] = [
     accentVar: "var(--c-forge)",
   },
   {
+    id: "newsroom",
+    label: "Newsroom",
+    path: "/newsroom",
+    accentVar: "var(--c-cornerstone)",
+  },
+  {
     id: "workbench",
     label: "Workbench",
     path: "/workbench",
@@ -76,6 +83,7 @@ export const NAV_ITEMS: ModuleNavItem[] = [
     children: ["speak-to-charlie", "forge", "workforce"],
     accentVar: "var(--c-forge)",
   },
+  { type: "module", id: "newsroom" },
   {
     type: "group",
     id: "workbench",

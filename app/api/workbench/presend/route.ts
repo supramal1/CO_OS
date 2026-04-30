@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { authWithApiKey as auth } from "@/lib/server-auth";
 import { CookbookMcpError } from "@/lib/cookbook-client";
 import { runWorkbenchPresend } from "@/lib/workbench/presend-start";
+import type { WorkbenchPresendReviewedArtifact } from "@/lib/workbench/presend-types";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +10,7 @@ type PresendBody = {
   preflight_result?: unknown;
   draft_input?: unknown;
   artifact_spec_input?: unknown;
+  reviewed_artifact?: unknown;
 };
 
 export async function POST(req: NextRequest) {
@@ -55,6 +57,7 @@ export async function POST(req: NextRequest) {
       preflightResult,
       draftInput,
       artifactSpecInput,
+      reviewedArtifact: normalizeReviewedArtifact(body.reviewed_artifact),
       userId: session.principalId,
       apiKey: session.apiKey,
       anthropicApiKey,
@@ -76,8 +79,29 @@ export async function POST(req: NextRequest) {
   }
 }
 
+function normalizeReviewedArtifact(
+  value: unknown,
+): WorkbenchPresendReviewedArtifact | null {
+  const obj = normalizeObject(value);
+  if (!obj) return null;
+  return {
+    artifact_type: optionalString(obj.artifact_type),
+    title: optionalString(obj.title),
+    review_status: optionalString(obj.review_status),
+    source_count:
+      typeof obj.source_count === "number" && Number.isFinite(obj.source_count)
+        ? Math.max(0, Math.trunc(obj.source_count))
+        : 0,
+    destination: optionalString(obj.destination) ?? "drive",
+  };
+}
+
 function normalizeObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function optionalString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }

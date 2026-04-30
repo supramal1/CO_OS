@@ -253,6 +253,11 @@ describe("Workbench onboarding personalisation", () => {
         working_on: {
           bullets: expect.arrayContaining(["Nike QBR narrative."]),
         },
+        voice: {
+          bullets: expect.arrayContaining([
+            "Preferred style: Concise; Source-led.",
+          ]),
+        },
       },
     });
     expect(JSON.stringify(result)).not.toContain("invalid x-api-key");
@@ -376,19 +381,34 @@ describe("Workbench onboarding personalisation", () => {
     });
   });
 
-  it("falls back when the onboarding draft action has no model client", async () => {
-    const result = await runWorkbenchOnboardingAction({
-      userId: "principal_123",
-      body: { action: "draft", payload: validPayload() },
-      dependencies: { modelClient: null },
-    });
+  it("runs the onboarding draft action with a fallback when the model is unavailable", async () => {
+    const originalApiKey = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = "";
 
-    expect(result.status).toBe(200);
-    expect(result.body).toMatchObject({
-      status: "drafted",
-      fallback: true,
-      warning: "onboarding_model_unavailable",
-    });
+    try {
+      const result = await runWorkbenchOnboardingAction({
+        userId: "principal_123",
+        body: { action: "draft", payload: validPayload() },
+        dependencies: { modelClient: null },
+      });
+
+      expect(result).toMatchObject({
+        status: 200,
+        body: {
+          status: "drafted",
+          fallback: true,
+          warning: "onboarding_model_unavailable",
+          message: "Profile preview generated from your setup details.",
+        },
+      });
+      expect(JSON.stringify(result)).not.toContain("ANTHROPIC_API_KEY");
+    } finally {
+      if (originalApiKey === undefined) {
+        delete process.env.ANTHROPIC_API_KEY;
+      } else {
+        process.env.ANTHROPIC_API_KEY = originalApiKey;
+      }
+    }
   });
 
   it("runs the onboarding save action through stored Notion and config wiring", async () => {

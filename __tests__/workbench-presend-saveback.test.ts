@@ -121,6 +121,13 @@ describe("Workbench presend Drive save-back", () => {
       preflightResult,
       draftInput: "Draft: Thanks for the time today.",
       artifactSpecInput: "Need a client follow-up artifact.",
+      reviewedArtifact: {
+        artifact_type: "client_email",
+        title: "Client delay update",
+        review_status: "approved_with_checks",
+        source_count: 2,
+        destination: "drive",
+      },
       userId: "principal_user_1",
       apiKey: "csk_test",
       anthropicApiKey: "anthropic-test",
@@ -167,6 +174,13 @@ describe("Workbench presend Drive save-back", () => {
         name: "client-follow-up-presend.md",
         mimeType: "text/markdown",
         webUrl: "https://drive.google.com/file/d/drive-file-1/view",
+      },
+      artifact: {
+        artifact_type: "client_email",
+        title: "Client delay update",
+        review_status: "approved_with_checks",
+        source_count: 2,
+        destination: "drive",
       },
     });
     expect(uploads).toHaveLength(1);

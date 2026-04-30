@@ -49,6 +49,14 @@ export type WorkbenchPresendResult = {
   warnings: string[];
 };
 
+export type WorkbenchPresendReviewedArtifact = {
+  artifact_type: string | null;
+  title: string | null;
+  review_status: string | null;
+  source_count: number;
+  destination: string;
+};
+
 export type BuildPresendPromptInput = {
   preflightResult: WorkbenchPreflightResult | Record<string, unknown>;
   draftInput?: string | null;
@@ -59,6 +67,7 @@ export type RunWorkbenchPresendInput = {
   preflightResult: WorkbenchPreflightResult | Record<string, unknown>;
   draftInput?: string | null;
   artifactSpecInput?: string | null;
+  reviewedArtifact?: WorkbenchPresendReviewedArtifact | null;
   userId: string;
   apiKey: string;
   anthropicApiKey: string;
@@ -105,7 +114,9 @@ export type WorkbenchPresendGoogleAccessTokenProvider = (input: {
   now?: Date;
 }) => Promise<WorkbenchPresendGoogleAccessTokenProviderResult>;
 
-export type WorkbenchPresendSaveBackResult =
+export type WorkbenchPresendSaveBackResult = {
+  artifact?: WorkbenchPresendReviewedArtifact;
+} & (
   | {
       status: "skipped";
       target: "drive";
@@ -132,4 +143,5 @@ export type WorkbenchPresendSaveBackResult =
         | "drive_upload_failed"
         | "drive_save_back_failed";
       message: string;
-    };
+    }
+);

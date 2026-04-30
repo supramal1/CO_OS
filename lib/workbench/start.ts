@@ -16,6 +16,7 @@ import { gatherWorkbenchRetrieval } from "./retrieval";
 import { getUserWorkbenchConfig } from "./retrieval/config";
 import { loadWorkbenchSkill } from "./skill-loader";
 import type { WorkbenchStartResponse } from "./types";
+import { buildWorkbenchWorkflowState } from "./workflow";
 
 const MODEL = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6";
 
@@ -75,6 +76,7 @@ export async function runWorkbenchStart(
     estimatedBeforeMinutesFor(taskType);
   result.time_estimate.estimated_before_minutes = estimatedBeforeMinutes;
   result.time_estimate.task_type = taskType;
+  const workflow = buildWorkbenchWorkflowState({ result, retrieval });
 
   const invocation = buildWorkbenchInvocationLog({
     userId: input.userId,
@@ -105,6 +107,7 @@ export async function runWorkbenchStart(
   return {
     result,
     invocation,
+    workflow,
     retrieval,
     run_history: runHistory,
     ...(profileUpdate ? { profile_update: profileUpdate } : {}),

@@ -218,6 +218,30 @@ Empty states:
 - If sources are connected but there is no context, show a concise staff-facing message such as: `No major changes found for today. Workbench and Notion are ready when you need them.`
 - Per-section empty states should be one line, not large panels.
 
+### Changed Since Yesterday Quality Bar
+
+`Changed Since Yesterday` should not render raw Cornerstone fact keys, commit logs, branch names, local worktree paths, or implementation archaeology. It should translate source-backed facts into a short operating brief.
+
+The approved MVP presentation is a hybrid of narrative orientation and judgement routing:
+
+- one narrative item headed by the actual change, not a generic label
+- one short paragraph that explains what changed in staff/product terms
+- a compact `Worth looking at` area for follow-up judgement or setup issues tied to those changes
+- quiet provenance showing the source and confidence
+
+Example shape:
+
+```text
+Workbench and Newsroom moved closer to daily staff use
+Workbench gained a clearer context-needed resume flow, staged make/review handling, and stronger second-brain setup rules. Newsroom now uses Cornerstone facts to explain what changed without exposing graph memory or raw implementation logs.
+
+Worth looking at
+- Connector setup: Calendar and Notion still need connection/setup resolution before Newsroom can fully orient the day.
+- Brief quality: Keep translating implementation facts into product meaning, not branch names or paths.
+```
+
+The summary generator should prefer fact values over fact keys, strip noisy implementation details, and group related changes into a small set of product-level themes. The UI can render newline-separated reason text as compact rows inside the item rather than one dense paragraph.
+
 ## Error Handling
 
 Source failures must not fail the whole brief unless authentication fails. Each adapter should catch and report its own status. The API returns `200` with partial source statuses when one source fails.

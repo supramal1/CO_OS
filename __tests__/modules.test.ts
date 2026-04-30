@@ -16,6 +16,12 @@ describe("top-level CO OS modules", () => {
       label: "Workbench",
       path: "/workbench",
     });
+    expect(byId.get("newsroom")).toMatchObject({
+      label: "Newsroom",
+      path: "/newsroom",
+    });
+    expect(byId.get("newsroom")?.adminOnly).toBeUndefined();
+    expect(ids.indexOf("newsroom")).toBeLessThan(ids.indexOf("workbench"));
     expect(byId.get("admin")).toMatchObject({
       label: "Admin",
       path: "/admin",
@@ -31,6 +37,10 @@ describe("top-level CO OS modules", () => {
         label: "Dispatch",
         children: ["speak-to-charlie", "forge", "workforce"],
         accentVar: "var(--c-forge)",
+      },
+      {
+        type: "module",
+        id: "newsroom",
       },
       {
         type: "group",
