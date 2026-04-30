@@ -58,10 +58,8 @@ function request(jsonBody: unknown): NextRequest {
 
 function validPayload() {
   return {
-    role: " Senior Strategist ",
-    team: " Client Strategy ",
-    tenure: " 1-3 years ",
-    current_work_bullets: [
+    role_title: " Senior Strategist, Client Strategy ",
+    current_focus_bullets: [
       "Nike QBR narrative",
       "AI adoption plan",
       "Weekly client status",
@@ -69,13 +67,13 @@ function validPayload() {
       "New starter support",
       "Extra item that should be trimmed",
     ],
-    friction_chips: ["deck building", "status updates", "deck building"],
-    friction_other: " stakeholder alignment ",
-    feedback_style: "show me what would strengthen this",
-    output_preference: "concise, direct, with next steps",
-    personal_context_bullets: [
-      "Prefers direct language",
-      "Uses bullets for quick scanning",
+    work_type_chips: ["Client responses", "Decks", "Client responses"],
+    work_type_other: " stakeholder comms ",
+    communication_style: ["Concise", "Source-led"],
+    challenge_style: ["Flag weak logic", "Suggest stronger framing"],
+    helpful_context: [
+      "Need source links",
+      "Working across multiple clients",
     ],
   };
 }
@@ -116,26 +114,20 @@ describe("Workbench onboarding personalisation", () => {
     expect(result).toEqual({
       ok: true,
       payload: {
-        role: "Senior Strategist",
-        team: "Client Strategy",
-        tenure: "1-3 years",
-        current_work: [
+        role_title: "Senior Strategist, Client Strategy",
+        current_focus: [
           "Nike QBR narrative",
           "AI adoption plan",
           "Weekly client status",
           "Deck quality bar",
           "New starter support",
         ],
-        friction_tasks: [
-          "deck building",
-          "status updates",
-          "stakeholder alignment",
-        ],
-        feedback_style: "show me what would strengthen this",
-        output_preference: "concise, direct, with next steps",
-        personal_context: [
-          "Prefers direct language",
-          "Uses bullets for quick scanning",
+        work_types: ["Client responses", "Decks", "stakeholder comms"],
+        communication_style: ["Concise", "Source-led"],
+        challenge_style: ["Flag weak logic", "Suggest stronger framing"],
+        helpful_context: [
+          "Need source links",
+          "Working across multiple clients",
         ],
       },
     });
@@ -143,27 +135,23 @@ describe("Workbench onboarding personalisation", () => {
 
   it("returns field-level validation errors when required onboarding signals are missing", () => {
     const result = normalizeWorkbenchOnboardingPayload({
-      role: "",
-      team: "",
-      tenure: "",
-      current_work_bullets: [],
-      friction_chips: [],
-      friction_other: " ",
-      feedback_style: "",
-      output_preference: "",
+      role_title: "",
+      current_focus_bullets: [],
+      work_type_chips: [],
+      work_type_other: " ",
+      communication_style: [],
+      challenge_style: [],
     });
 
     expect(result).toEqual({
       ok: false,
       error: "invalid_workbench_onboarding_payload",
       fields: [
-        "role",
-        "team",
-        "tenure",
-        "current_work_bullets",
-        "friction_tasks",
-        "feedback_style",
-        "output_preference",
+        "role_title",
+        "current_focus_bullets",
+        "work_types",
+        "communication_style",
+        "challenge_style",
       ],
     });
   });
@@ -190,6 +178,17 @@ describe("Workbench onboarding personalisation", () => {
         prompt: expect.stringContaining("Senior Strategist"),
       }),
     );
+    const prompt = (modelClient.create as ReturnType<typeof vi.fn>).mock.calls[0][0]
+      .prompt as string;
+    expect(prompt).toContain("Role/title:");
+    expect(prompt).toContain("Current focus:");
+    expect(prompt).toContain("Work types:");
+    expect(prompt).toContain("Communication style:");
+    expect(prompt).toContain("Challenge style:");
+    expect(prompt).toContain("Helpful working context:");
+    expect(prompt).not.toContain("Tenure:");
+    expect(prompt).not.toContain("Output preference:");
+    expect(prompt).not.toContain("Personal context:");
   });
 
   it("rejects model responses that do not match the strict onboarding draft JSON", async () => {
@@ -282,13 +281,9 @@ describe("Workbench onboarding personalisation", () => {
     ]);
     expect(configStore.save).toHaveBeenCalledWith({
       userId: "principal_123",
-      feedback_style: "show me what would strengthen this",
-      voice_register: "concise, direct, with next steps",
-      friction_tasks: [
-        "deck building",
-        "status updates",
-        "stakeholder alignment",
-      ],
+      feedback_style: "Flag weak logic; Suggest stronger framing",
+      voice_register: "Concise; Source-led",
+      friction_tasks: ["Client responses", "Decks", "stakeholder comms"],
     });
     expect(JSON.stringify(result)).not.toContain("profile-page");
   });
@@ -398,13 +393,9 @@ describe("Workbench onboarding personalisation", () => {
     expect(mocks.patchWorkbenchUserConfig).toHaveBeenCalledWith(
       "principal_123",
       {
-        feedback_style: "show me what would strengthen this",
-        voice_register: "concise, direct, with next steps",
-        friction_tasks: [
-          "deck building",
-          "status updates",
-          "stakeholder alignment",
-        ],
+        feedback_style: "Flag weak logic; Suggest stronger framing",
+        voice_register: "Concise; Source-led",
+        friction_tasks: ["Client responses", "Decks", "stakeholder comms"],
       },
     );
   });

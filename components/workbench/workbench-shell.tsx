@@ -68,12 +68,14 @@ export type WorkbenchConfigForm = {
 };
 
 export type WorkbenchOnboardingForm = {
-  role: string;
-  team: string;
-  tenure: string;
-  current_work_bullets: string;
-  output_preference: string;
-  personal_context_bullets: string;
+  role_title: string;
+  current_focus_bullets: string;
+  work_type_chips: string[];
+  work_type_other: string;
+  communication_style: string[];
+  challenge_style: string[];
+  helpful_context: string[];
+  helpful_context_other: string;
 };
 
 type WorkbenchConfigPayload = {
@@ -315,13 +317,56 @@ const EMPTY_CONFIG_FORM: WorkbenchConfigForm = {
 };
 
 const EMPTY_ONBOARDING_FORM: WorkbenchOnboardingForm = {
-  role: "",
-  team: "",
-  tenure: "",
-  current_work_bullets: "",
-  output_preference: "",
-  personal_context_bullets: "",
+  role_title: "",
+  current_focus_bullets: "",
+  work_type_chips: [],
+  work_type_other: "",
+  communication_style: [],
+  challenge_style: [],
+  helpful_context: [],
+  helpful_context_other: "",
 };
+
+const WORKBENCH_WORK_TYPE_OPTIONS = [
+  "Client responses",
+  "Decks",
+  "Research",
+  "Strategy",
+  "Status updates",
+  "Meeting prep",
+  "QA / review",
+  "Data / sheets",
+  "Stakeholder comms",
+  "Process docs",
+] as const;
+
+const WORKBENCH_COMMUNICATION_STYLE_OPTIONS = [
+  "Concise",
+  "Direct",
+  "Polished",
+  "Source-led",
+  "Action-oriented",
+  "Detailed when needed",
+  "Client-ready",
+] as const;
+
+const WORKBENCH_CHALLENGE_STYLE_OPTIONS = [
+  "Flag weak logic",
+  "Challenge assumptions",
+  "Suggest stronger framing",
+  "Point out missing context",
+  "Be direct",
+  "Show risks/tradeoffs",
+] as const;
+
+const WORKBENCH_HELPFUL_CONTEXT_OPTIONS = [
+  "New to this account/project",
+  "Need source links",
+  "Working across multiple clients",
+  "Often preparing client-ready outputs",
+  "Prefer short next steps",
+  "Tight turnaround work",
+] as const;
 
 const GOOGLE_CONNECT_STATUSES = new Set([
   "grant_missing",
@@ -376,18 +421,32 @@ export function buildWorkbenchOnboardingPayload(
     "voice_register" | "feedback_style" | "friction_tasks"
   >,
 ) {
+  const workTypes = dedupeWorkbenchStrings([
+    ...form.work_type_chips,
+    form.work_type_other,
+  ]);
+  const communicationStyle =
+    form.communication_style.length > 0
+      ? form.communication_style
+      : splitWorkbenchLines(configForm.voice_register);
+  const challengeStyle =
+    form.challenge_style.length > 0
+      ? form.challenge_style
+      : splitWorkbenchLines(configForm.feedback_style);
+
   return {
-    role: form.role.trim(),
-    team: form.team.trim(),
-    tenure: form.tenure.trim(),
-    current_work_bullets: splitWorkbenchLines(form.current_work_bullets),
-    friction_chips: splitWorkbenchLines(configForm.friction_tasks),
-    feedback_style: configForm.feedback_style.trim(),
-    output_preference:
-      form.output_preference.trim() || configForm.voice_register.trim(),
-    personal_context_bullets: splitWorkbenchLines(
-      form.personal_context_bullets,
-    ),
+    role_title: form.role_title.trim(),
+    current_focus_bullets: splitWorkbenchLines(form.current_focus_bullets),
+    work_type_chips:
+      workTypes.length > 0
+        ? workTypes
+        : splitWorkbenchLines(configForm.friction_tasks),
+    communication_style: communicationStyle,
+    challenge_style: challengeStyle,
+    helpful_context: dedupeWorkbenchStrings([
+      ...form.helpful_context,
+      form.helpful_context_other,
+    ]),
   };
 }
 
@@ -2380,11 +2439,28 @@ function WorkbenchSetupPanel({
     onFormChange({ ...form, [field]: value });
   }
 
-  function updateOnboardingField(
-    field: keyof WorkbenchOnboardingForm,
-    value: string,
+  function updateOnboardingField<K extends keyof WorkbenchOnboardingForm>(
+    field: K,
+    value: WorkbenchOnboardingForm[K],
   ) {
     onOnboardingFormChange({ ...onboardingForm, [field]: value });
+  }
+
+  function toggleOnboardingListItem(
+    field:
+      | "work_type_chips"
+      | "communication_style"
+      | "challenge_style"
+      | "helpful_context",
+    value: string,
+  ) {
+    const selected = onboardingForm[field];
+    updateOnboardingField(
+      field,
+      selected.includes(value)
+        ? selected.filter((item) => item !== value)
+        : [...selected, value],
+    );
   }
 
   return (
@@ -2483,38 +2559,10 @@ function WorkbenchSetupPanel({
           <StatusPill status={personalisationSummary.statusLabel} />
         </div>
         <SetupInput
-          label="Role"
-          value={onboardingForm.role}
-          onChange={(value) => updateOnboardingField("role", value)}
+          label="Role / title"
+          value={onboardingForm.role_title}
+          onChange={(value) => updateOnboardingField("role_title", value)}
           required
-        />
-        <SetupInput
-          label="Team"
-          value={onboardingForm.team}
-          onChange={(value) => updateOnboardingField("team", value)}
-          required
-        />
-        <SetupInput
-          label="Tenure"
-          value={onboardingForm.tenure}
-          onChange={(value) => updateOnboardingField("tenure", value)}
-          required
-        />
-        <SetupInput
-          label="Output"
-          value={onboardingForm.output_preference}
-          onChange={(value) => updateOnboardingField("output_preference", value)}
-        />
-        <SetupInput
-          label="Feedback"
-          value={form.feedback_style}
-          onChange={(value) => updateField("feedback_style", value)}
-          required
-        />
-        <SetupInput
-          label="Voice fallback"
-          value={form.voice_register}
-          onChange={(value) => updateField("voice_register", value)}
         />
         <label
           style={{
@@ -2529,67 +2577,55 @@ function WorkbenchSetupPanel({
             textTransform: "uppercase",
           }}
         >
-          Current work
+          Current focus
           <textarea
-            value={onboardingForm.current_work_bullets}
+            value={onboardingForm.current_focus_bullets}
             onChange={(event) =>
-              updateOnboardingField("current_work_bullets", event.target.value)
+              updateOnboardingField("current_focus_bullets", event.target.value)
             }
             rows={2}
             required
             style={setupInputStyle({ minHeight: 52, resize: "vertical" })}
           />
         </label>
-        <label
-          style={{
-            gridColumn: "1 / -1",
-            display: "flex",
-            flexDirection: "column",
-            gap: 4,
-            color: "var(--ink-faint)",
-            fontFamily: "var(--font-plex-mono)",
-            fontSize: 9,
-            letterSpacing: "0.1em",
-            textTransform: "uppercase",
-          }}
-        >
-          Friction tasks
-          <textarea
-            value={form.friction_tasks}
-            onChange={(event) =>
-              updateField("friction_tasks", event.target.value)
-            }
-            rows={2}
-            required
-            style={setupInputStyle({ minHeight: 52, resize: "vertical" })}
-          />
-        </label>
-        <label
-          style={{
-            gridColumn: "1 / -1",
-            display: "flex",
-            flexDirection: "column",
-            gap: 4,
-            color: "var(--ink-faint)",
-            fontFamily: "var(--font-plex-mono)",
-            fontSize: 9,
-            letterSpacing: "0.1em",
-            textTransform: "uppercase",
-          }}
-        >
-          Personal context
-          <textarea
-            value={onboardingForm.personal_context_bullets}
-            onChange={(event) =>
-              updateOnboardingField(
-                "personal_context_bullets",
-                event.target.value,
-              )
-            }
-            rows={2}
-            style={setupInputStyle({ minHeight: 52, resize: "vertical" })}
-          />
-        </label>
+        <SetupCheckboxGroup
+          label="What sorts of things are you working on?"
+          options={WORKBENCH_WORK_TYPE_OPTIONS}
+          selected={onboardingForm.work_type_chips}
+          onToggle={(value) => toggleOnboardingListItem("work_type_chips", value)}
+        />
+        <SetupInput
+          label="Other work"
+          value={onboardingForm.work_type_other}
+          onChange={(value) => updateOnboardingField("work_type_other", value)}
+        />
+        <SetupCheckboxGroup
+          label="Communication style"
+          options={WORKBENCH_COMMUNICATION_STYLE_OPTIONS}
+          selected={onboardingForm.communication_style}
+          onToggle={(value) =>
+            toggleOnboardingListItem("communication_style", value)
+          }
+        />
+        <SetupCheckboxGroup
+          label="How should Workbench challenge you?"
+          options={WORKBENCH_CHALLENGE_STYLE_OPTIONS}
+          selected={onboardingForm.challenge_style}
+          onToggle={(value) => toggleOnboardingListItem("challenge_style", value)}
+        />
+        <SetupCheckboxGroup
+          label="Helpful working context"
+          options={WORKBENCH_HELPFUL_CONTEXT_OPTIONS}
+          selected={onboardingForm.helpful_context}
+          onToggle={(value) => toggleOnboardingListItem("helpful_context", value)}
+        />
+        <SetupInput
+          label="Other context"
+          value={onboardingForm.helpful_context_other}
+          onChange={(value) =>
+            updateOnboardingField("helpful_context_other", value)
+          }
+        />
         <OnboardingPreview state={onboardingState} />
         <div
           style={{
@@ -2684,12 +2720,12 @@ function WorkbenchSetupPanel({
             />
           </div>
           <SetupInput
-            label="Voice"
+            label="Communication style"
             value={form.voice_register}
             onChange={(value) => updateField("voice_register", value)}
           />
           <SetupInput
-            label="Feedback"
+            label="Challenge style"
             value={form.feedback_style}
             onChange={(value) => updateField("feedback_style", value)}
           />
@@ -2706,7 +2742,7 @@ function WorkbenchSetupPanel({
               textTransform: "uppercase",
             }}
           >
-            Friction tasks
+            Work types
             <textarea
               value={form.friction_tasks}
               onChange={(event) =>
@@ -3156,6 +3192,72 @@ function ConnectorManagementStatus({
   );
 }
 
+function SetupCheckboxGroup({
+  label,
+  options,
+  selected,
+  onToggle,
+}: {
+  label: string;
+  options: readonly string[];
+  selected: string[];
+  onToggle: (value: string) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label={label}
+      style={{
+        gridColumn: "1 / -1",
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+      }}
+    >
+      <div
+        style={{
+          color: "var(--ink-faint)",
+          fontFamily: "var(--font-plex-mono)",
+          fontSize: 9,
+          letterSpacing: "0.1em",
+          textTransform: "uppercase",
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        {options.map((option) => {
+          const checked = selected.includes(option);
+          return (
+            <label
+              key={option}
+              style={{
+                border: "1px solid var(--rule)",
+                background: checked ? "var(--bg)" : "var(--panel)",
+                color: checked ? "var(--ink)" : "var(--ink-dim)",
+                padding: "5px 7px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                fontSize: 11,
+                lineHeight: 1.2,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => onToggle(option)}
+                style={{ margin: 0 }}
+              />
+              <span>{option}</span>
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function SetupInput({
   label,
   value,
@@ -3440,6 +3542,20 @@ function splitWorkbenchLines(value: string) {
     .split(/[\n,]/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function dedupeWorkbenchStrings(values: readonly string[]) {
+  const seen = new Set<string>();
+  const items: string[] = [];
+  for (const value of values) {
+    const item = value.trim();
+    if (!item) continue;
+    const key = item.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    items.push(item);
+  }
+  return items;
 }
 
 function setupInputStyle(extra?: React.CSSProperties): React.CSSProperties {

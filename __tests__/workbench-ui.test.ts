@@ -140,12 +140,14 @@ describe("Workbench UI summary", () => {
     expect(
       buildWorkbenchOnboardingPayload(
         {
-          role: " Strategist ",
-          team: " Client Strategy ",
-          tenure: " 1 year ",
-          current_work_bullets: "Nike QBR\nAI adoption",
-          output_preference: "",
-          personal_context_bullets: "Prefers bullets",
+          role_title: " Strategist, Client Strategy ",
+          current_focus_bullets: "Nike QBR\nAI adoption",
+          work_type_chips: ["Client responses", "Decks"],
+          work_type_other: "stakeholder comms",
+          communication_style: ["Concise", "Source-led"],
+          challenge_style: ["Flag weak logic", "Suggest stronger framing"],
+          helpful_context: ["Need source links"],
+          helpful_context_other: "Working across multiple clients",
         },
         {
           voice_register: "concise",
@@ -154,14 +156,12 @@ describe("Workbench UI summary", () => {
         },
       ),
     ).toEqual({
-      role: "Strategist",
-      team: "Client Strategy",
-      tenure: "1 year",
-      current_work_bullets: ["Nike QBR", "AI adoption"],
-      friction_chips: ["status reports", "deck cleanup"],
-      feedback_style: "specific",
-      output_preference: "concise",
-      personal_context_bullets: ["Prefers bullets"],
+      role_title: "Strategist, Client Strategy",
+      current_focus_bullets: ["Nike QBR", "AI adoption"],
+      work_type_chips: ["Client responses", "Decks", "stakeholder comms"],
+      communication_style: ["Concise", "Source-led"],
+      challenge_style: ["Flag weak logic", "Suggest stronger framing"],
+      helpful_context: ["Need source links", "Working across multiple clients"],
     });
   });
 
@@ -838,10 +838,18 @@ describe("Workbench UI summary", () => {
     expect(source).toContain("Clarification");
     expect(source).toContain("None returned.");
     expect(source).toContain("Personalisation");
+    expect(source).toContain("Role / title");
+    expect(source).toContain("What sorts of things are you working on?");
+    expect(source).toContain("Communication style");
+    expect(source).toContain("How should Workbench challenge you?");
+    expect(source).toContain("Helpful working context");
     expect(source).toContain("Preview profile");
     expect(source).toContain("Save to Notion");
     expect(source).toContain("Profile Learning");
     expect(source).toContain("Undo last profile update");
+    expect(source).not.toContain("Voice fallback");
+    expect(source).not.toContain("Personal context");
+    expect(source).not.toContain("Tenure");
 
     [
       `>${["A", "sk"].join("")}<`,

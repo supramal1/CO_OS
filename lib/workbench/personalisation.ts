@@ -9,9 +9,16 @@ const MAX_DRAFT_BULLETS = 5;
 const MAX_DRAFT_BULLET_CHARS = 180;
 
 export type WorkbenchOnboardingPayloadInput = {
+  role_title?: unknown;
+  current_focus_bullets?: unknown;
+  work_type_chips?: unknown;
+  work_type_other?: unknown;
+  communication_style?: unknown;
+  challenge_style?: unknown;
+  helpful_context?: unknown;
+  helpful_context_other?: unknown;
   role?: unknown;
   team?: unknown;
-  tenure?: unknown;
   current_work_bullets?: unknown;
   friction_chips?: unknown;
   friction_other?: unknown;
@@ -21,14 +28,12 @@ export type WorkbenchOnboardingPayloadInput = {
 };
 
 export type WorkbenchOnboardingPayload = {
-  role: string;
-  team: string;
-  tenure: string;
-  current_work: string[];
-  friction_tasks: string[];
-  feedback_style: string;
-  output_preference: string;
-  personal_context: string[];
+  role_title: string;
+  current_focus: string[];
+  work_types: string[];
+  communication_style: string[];
+  challenge_style: string[];
+  helpful_context: string[];
 };
 
 export type WorkbenchOnboardingPayloadValidation =
@@ -130,35 +135,51 @@ export type WorkbenchOnboardingSaveResult =
 export function normalizeWorkbenchOnboardingPayload(
   input: WorkbenchOnboardingPayloadInput,
 ): WorkbenchOnboardingPayloadValidation {
-  const role = normalizeString(input.role);
-  const team = normalizeString(input.team);
-  const tenure = normalizeString(input.tenure);
-  const currentWork = normalizeStringList(
-    input.current_work_bullets,
+  const roleTitle =
+    normalizeString(input.role_title) ||
+    normalizeUniqueStringList(
+      [normalizeString(input.role), normalizeString(input.team)],
+      2,
+    ).join(", ");
+  const currentFocus = normalizeInputStringList(
+    input.current_focus_bullets ?? input.current_work_bullets,
     MAX_ONBOARDING_BULLETS,
   );
-  const frictionTasks = normalizeUniqueStringList(
+  const workTypes = normalizeUniqueStringList(
     [
-      ...normalizeStringList(input.friction_chips, MAX_ONBOARDING_BULLETS),
-      normalizeString(input.friction_other),
+      ...normalizeInputStringList(
+        input.work_type_chips ?? input.friction_chips,
+        MAX_ONBOARDING_BULLETS,
+      ),
+      normalizeString(input.work_type_other ?? input.friction_other),
     ],
     MAX_ONBOARDING_BULLETS,
   );
-  const feedbackStyle = normalizeString(input.feedback_style);
-  const outputPreference = normalizeString(input.output_preference);
-  const personalContext = normalizeStringList(
-    input.personal_context_bullets,
+  const communicationStyle = normalizeInputStringList(
+    input.communication_style ?? input.output_preference,
+    MAX_ONBOARDING_BULLETS,
+  );
+  const challengeStyle = normalizeInputStringList(
+    input.challenge_style ?? input.feedback_style,
+    MAX_ONBOARDING_BULLETS,
+  );
+  const helpfulContext = normalizeUniqueStringList(
+    [
+      ...normalizeInputStringList(
+        input.helpful_context ?? input.personal_context_bullets,
+        MAX_ONBOARDING_BULLETS,
+      ),
+      normalizeString(input.helpful_context_other),
+    ],
     MAX_ONBOARDING_BULLETS,
   );
 
   const fields: string[] = [];
-  if (!role) fields.push("role");
-  if (!team) fields.push("team");
-  if (!tenure) fields.push("tenure");
-  if (currentWork.length === 0) fields.push("current_work_bullets");
-  if (frictionTasks.length === 0) fields.push("friction_tasks");
-  if (!feedbackStyle) fields.push("feedback_style");
-  if (!outputPreference) fields.push("output_preference");
+  if (!roleTitle) fields.push("role_title");
+  if (currentFocus.length === 0) fields.push("current_focus_bullets");
+  if (workTypes.length === 0) fields.push("work_types");
+  if (communicationStyle.length === 0) fields.push("communication_style");
+  if (challengeStyle.length === 0) fields.push("challenge_style");
 
   if (fields.length > 0) {
     return {
@@ -171,14 +192,12 @@ export function normalizeWorkbenchOnboardingPayload(
   return {
     ok: true,
     payload: {
-      role,
-      team,
-      tenure,
-      current_work: currentWork,
-      friction_tasks: frictionTasks,
-      feedback_style: feedbackStyle,
-      output_preference: outputPreference,
-      personal_context: personalContext,
+      role_title: roleTitle,
+      current_focus: currentFocus,
+      work_types: workTypes,
+      communication_style: communicationStyle,
+      challenge_style: challengeStyle,
+      helpful_context: helpfulContext,
     },
   };
 }
@@ -311,9 +330,9 @@ export async function saveWorkbenchOnboarding(input: {
   const config =
     (await input.configStore?.save({
       userId: input.userId,
-      feedback_style: parsed.payload.feedback_style,
-      voice_register: parsed.payload.output_preference,
-      friction_tasks: parsed.payload.friction_tasks,
+      feedback_style: parsed.payload.challenge_style.join("; "),
+      voice_register: parsed.payload.communication_style.join("; "),
+      friction_tasks: parsed.payload.work_types,
     })) ?? ({ status: "skipped" } as const);
 
   return {
@@ -356,16 +375,14 @@ function buildOnboardingDraftPrompt(payload: WorkbenchOnboardingPayload): string
   return [
     "Create Workbench onboarding profile JSON from these staff signals.",
     "",
-    `Role: ${payload.role}`,
-    `Team: ${payload.team}`,
-    `Tenure: ${payload.tenure}`,
-    `Current work: ${payload.current_work.join("; ")}`,
-    `Friction tasks: ${payload.friction_tasks.join("; ")}`,
-    `Feedback style: ${payload.feedback_style}`,
-    `Output preference: ${payload.output_preference}`,
-    `Personal context: ${
-      payload.personal_context.length > 0
-        ? payload.personal_context.join("; ")
+    `Role/title: ${payload.role_title}`,
+    `Current focus: ${payload.current_focus.join("; ")}`,
+    `Work types: ${payload.work_types.join("; ")}`,
+    `Communication style: ${payload.communication_style.join("; ")}`,
+    `Challenge style: ${payload.challenge_style.join("; ")}`,
+    `Helpful working context: ${
+      payload.helpful_context.length > 0
+        ? payload.helpful_context.join("; ")
         : "none provided"
     }`,
     "",
@@ -426,6 +443,18 @@ function onboardingPageWrites(draft: WorkbenchOnboardingDraft): Array<{
 function normalizeStringList(value: unknown, maxItems: number): string[] {
   if (!Array.isArray(value)) return [];
   return value.map(normalizeString).filter(Boolean).slice(0, maxItems);
+}
+
+function normalizeInputStringList(value: unknown, maxItems: number): string[] {
+  if (typeof value === "string") {
+    return value
+      .split(/[\n,]/)
+      .map(normalizeString)
+      .filter(Boolean)
+      .slice(0, maxItems);
+  }
+
+  return normalizeStringList(value, maxItems);
 }
 
 function normalizeUniqueStringList(
