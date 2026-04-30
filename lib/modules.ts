@@ -83,11 +83,12 @@ export const NAV_ITEMS: ModuleNavItem[] = [
     children: ["speak-to-charlie", "forge", "workforce"],
     accentVar: "var(--c-forge)",
   },
+  { type: "module", id: "newsroom" },
   {
     type: "group",
     id: "workbench",
     label: "Workbench",
-    children: ["newsroom", "workbench"],
+    children: ["workbench"],
     accentVar: "var(--c-cowork)",
   },
   { type: "module", id: "cookbook" },
