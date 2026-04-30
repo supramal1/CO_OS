@@ -16,6 +16,7 @@ describe("top-level CO OS modules", () => {
       label: "Workbench",
       path: "/workbench",
     });
+    expect(ids).not.toContain("profile");
     expect(byId.get("admin")).toMatchObject({
       label: "Admin",
       path: "/admin",
