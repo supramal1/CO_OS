@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   CONNECTED_TOOL_ROWS,
+  PROFILE_FACT_ROWS,
   PROFILE_PATH,
   PROFILE_SECTIONS,
+  PROFILE_STATS,
 } from "@/lib/profile/profile-model";
 
 describe("My OS Profile model", () => {
@@ -35,5 +37,22 @@ describe("My OS Profile model", () => {
       role: "Operational task ledger",
       status: "coming_next",
     });
+  });
+
+  it("provides identity-strip stats and fact rows for the redesigned profile structure", () => {
+    expect(PROFILE_STATS.map((stat) => stat.label)).toEqual([
+      "Active projects",
+      "Connected tools",
+      "Default reviewer",
+    ]);
+    expect(PROFILE_FACT_ROWS.map((row) => row.label)).toEqual([
+      "Role",
+      "Team",
+      "Active work",
+      "Output preference",
+      "Private to you",
+      "Visible to team",
+      "Admin only",
+    ]);
   });
 });
