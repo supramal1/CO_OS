@@ -8,7 +8,7 @@
 // that history; the inbox is for "what needs me right now?", not audit.
 
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { authWithApiKey as auth } from "@/lib/server-auth";
 import { listPendingApprovals } from "@/lib/workforce/approvals";
 
 export const dynamic = "force-dynamic";

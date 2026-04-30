@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { auth } from "@/auth";
+import { authWithApiKey as auth } from "@/lib/server-auth";
 
 // PATCH /api/forge/task-runs/:id/scope
 // Reviewer-driven scope edit. Merges the posted fields into

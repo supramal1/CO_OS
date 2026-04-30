@@ -12,6 +12,10 @@ describe("top-level CO OS modules", () => {
       path: "/workforce",
       adminOnly: true,
     });
+    expect(byId.get("workbench")).toMatchObject({
+      label: "Workbench",
+      path: "/workbench",
+    });
     expect(byId.get("admin")).toMatchObject({
       label: "Admin",
       path: "/admin",
@@ -19,7 +23,7 @@ describe("top-level CO OS modules", () => {
     });
   });
 
-  it("groups Dispatch surfaces while keeping Cookbook and Admin top-level", () => {
+  it("keeps Workbench out of Dispatch under its own nav heading", () => {
     expect(NAV_ITEMS).toEqual([
       {
         type: "group",
@@ -27,6 +31,13 @@ describe("top-level CO OS modules", () => {
         label: "Dispatch",
         children: ["speak-to-charlie", "forge", "workforce"],
         accentVar: "var(--c-forge)",
+      },
+      {
+        type: "group",
+        id: "workbench",
+        label: "Workbench",
+        children: ["workbench"],
+        accentVar: "var(--c-cowork)",
       },
       { type: "module", id: "cookbook" },
       { type: "module", id: "admin" },

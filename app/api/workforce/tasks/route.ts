@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { auth } from "@/auth";
+import { authWithApiKey as auth } from "@/lib/server-auth";
 import { listRecentTasks, startTask } from "@/lib/workforce/runner";
 import type { CreateTaskRequest } from "@/lib/workforce/types";
 
