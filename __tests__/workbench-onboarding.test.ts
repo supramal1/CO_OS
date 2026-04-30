@@ -191,7 +191,7 @@ describe("Workbench onboarding personalisation", () => {
     expect(prompt).not.toContain("Personal context:");
   });
 
-  it("rejects model responses that do not match the strict onboarding draft JSON", async () => {
+  it("falls back when model responses do not match the strict onboarding draft JSON", async () => {
     const modelClient: WorkbenchOnboardingModelClient = {
       create: vi.fn(async () =>
         JSON.stringify({
@@ -206,12 +206,57 @@ describe("Workbench onboarding personalisation", () => {
       modelClient,
     });
 
-    expect(result).toEqual({
-      status: "error",
-      error: "onboarding_draft_invalid_json",
-      message:
-        "Workbench could not turn that into a profile preview. Please try again.",
+    expect(result).toMatchObject({
+      status: "drafted",
+      fallback: true,
+      warning: "onboarding_draft_invalid_json",
+      draft: {
+        personal_profile: {
+          bullets: expect.arrayContaining([
+            "Senior Strategist, Client Strategy.",
+          ]),
+        },
+        working_on: {
+          bullets: expect.arrayContaining(["Nike QBR narrative."]),
+        },
+        voice: {
+          bullets: expect.arrayContaining([
+            "Preferred style: Concise; Source-led.",
+          ]),
+        },
+      },
     });
+  });
+
+  it("generates a deterministic fallback draft when the onboarding model request fails", async () => {
+    const modelClient: WorkbenchOnboardingModelClient = {
+      create: vi.fn(async () => {
+        throw new Error("401 invalid x-api-key req_secret");
+      }),
+    };
+
+    const result = await generateWorkbenchOnboardingDraft({
+      payload: validPayload(),
+      modelClient,
+    });
+
+    expect(result).toMatchObject({
+      status: "drafted",
+      fallback: true,
+      warning: "onboarding_draft_failed",
+      draft: {
+        personal_profile: {
+          bullets: expect.arrayContaining([
+            "Senior Strategist, Client Strategy.",
+          ]),
+        },
+        working_on: {
+          bullets: expect.arrayContaining(["Nike QBR narrative."]),
+        },
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain("invalid x-api-key");
+    expect(JSON.stringify(result)).not.toContain("req_secret");
   });
 
   it("saves approved onboarding content through setup, writer, and config boundaries", async () => {
@@ -328,6 +373,21 @@ describe("Workbench onboarding personalisation", () => {
         status: "drafted",
         draft: validDraft(),
       },
+    });
+  });
+
+  it("falls back when the onboarding draft action has no model client", async () => {
+    const result = await runWorkbenchOnboardingAction({
+      userId: "principal_123",
+      body: { action: "draft", payload: validPayload() },
+      dependencies: { modelClient: null },
+    });
+
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({
+      status: "drafted",
+      fallback: true,
+      warning: "onboarding_model_unavailable",
     });
   });
 
