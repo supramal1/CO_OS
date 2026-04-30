@@ -41,21 +41,12 @@ export async function runWorkbenchOnboardingAction(input: {
 
   if (action === "draft") {
     const modelClient =
-      input.dependencies?.modelClient ??
-      createWorkbenchOnboardingAnthropicModelClient({
-        apiKey: process.env.ANTHROPIC_API_KEY,
-        model: process.env.ANTHROPIC_MODEL,
-      });
-    if (!modelClient) {
-      return {
-        status: 503,
-        body: {
-          error: "workbench_onboarding_model_unavailable",
-          message:
-            "Workbench cannot generate a profile preview right now. Please try again later.",
-        },
-      };
-    }
+      input.dependencies?.modelClient === undefined
+        ? createWorkbenchOnboardingAnthropicModelClient({
+            apiKey: process.env.ANTHROPIC_API_KEY,
+            model: process.env.ANTHROPIC_MODEL,
+          })
+        : input.dependencies.modelClient;
 
     const result = await generateWorkbenchOnboardingDraft({
       payload: onboardingPayload(input.body.payload),

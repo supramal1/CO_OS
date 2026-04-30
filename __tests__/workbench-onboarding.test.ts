@@ -214,6 +214,42 @@ describe("Workbench onboarding personalisation", () => {
     });
   });
 
+  it("generates a deterministic fallback draft when the onboarding model request fails", async () => {
+    const modelClient: WorkbenchOnboardingModelClient = {
+      create: vi.fn(async () => {
+        throw new Error("401 invalid x-api-key req_secret");
+      }),
+    };
+
+    const result = await generateWorkbenchOnboardingDraft({
+      payload: validPayload(),
+      modelClient,
+    });
+
+    expect(result).toMatchObject({
+      status: "drafted",
+      fallback: true,
+      warning: "onboarding_draft_failed",
+      draft: {
+        personal_profile: {
+          bullets: expect.arrayContaining([
+            "Senior Strategist, Client Strategy.",
+          ]),
+        },
+        working_on: {
+          bullets: expect.arrayContaining(["Nike QBR narrative."]),
+        },
+        voice: {
+          bullets: expect.arrayContaining([
+            "Preferred style: Concise; Source-led.",
+          ]),
+        },
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain("invalid x-api-key");
+    expect(JSON.stringify(result)).not.toContain("req_secret");
+  });
+
   it("saves approved onboarding content through setup, writer, and config boundaries", async () => {
     const setup = vi.fn(async () => ({
       status: "validated" as const,
@@ -329,6 +365,36 @@ describe("Workbench onboarding personalisation", () => {
         draft: validDraft(),
       },
     });
+  });
+
+  it("runs the onboarding draft action with a fallback when the model is unavailable", async () => {
+    const originalApiKey = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = "";
+
+    try {
+      const result = await runWorkbenchOnboardingAction({
+        userId: "principal_123",
+        body: { action: "draft", payload: validPayload() },
+        dependencies: { modelClient: null },
+      });
+
+      expect(result).toMatchObject({
+        status: 200,
+        body: {
+          status: "drafted",
+          fallback: true,
+          warning: "onboarding_model_unavailable",
+          message: "Profile preview generated from your setup details.",
+        },
+      });
+      expect(JSON.stringify(result)).not.toContain("ANTHROPIC_API_KEY");
+    } finally {
+      if (originalApiKey === undefined) {
+        delete process.env.ANTHROPIC_API_KEY;
+      } else {
+        process.env.ANTHROPIC_API_KEY = originalApiKey;
+      }
+    }
   });
 
   it("runs the onboarding save action through stored Notion and config wiring", async () => {
