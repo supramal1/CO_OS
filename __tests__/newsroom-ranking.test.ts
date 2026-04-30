@@ -91,18 +91,36 @@ describe("Newsroom ranking", () => {
         sourceRefs: ["review:flag-2", "notion:page-1"],
         action: { label: "Open Review", target: "review", href: "/forge/production-review" },
       }),
+      candidate({
+        id: "e",
+        title: "Client X draft is missing evidence",
+        confidence: "high",
+        sourceRefs: ["workbench:run-9"],
+        action: { label: "Open Workbench", target: "workbench", href: "/workbench" },
+      }),
+      candidate({
+        id: "f",
+        title: "Client Y draft is missing evidence",
+        confidence: "high",
+        sourceRefs: ["workbench:run-10"],
+        action: { label: "Open Workbench", target: "workbench", href: "/workbench" },
+      }),
     ]);
 
-    expect(deduped).toHaveLength(2);
+    expect(deduped).toHaveLength(3);
     expect(deduped[0]).toMatchObject({
-      id: "b",
+      id: "e",
       confidence: "high",
-      action: { label: "Open Review" },
+      action: { label: "Open Workbench" },
     });
     expect(deduped[1]).toMatchObject({
       id: "d",
       confidence: "high",
       action: { label: "Open Review" },
+    });
+    expect(deduped[2]).toMatchObject({
+      id: "f",
+      title: "Client Y draft is missing evidence",
     });
   });
 
