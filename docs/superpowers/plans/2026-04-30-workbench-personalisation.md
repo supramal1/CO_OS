@@ -25,11 +25,11 @@
 
 ## Task 1: Notion Canonical Workspace Resolution
 
-- [ ] Write failing tests proving reconnect with stale/null config reuses existing `CO Workbench` instead of creating a duplicate.
-- [ ] Extend Notion setup client boundary with a title search method.
-- [ ] Implement canonical parent scoring by required child count.
-- [ ] Repair missing children and persist canonical parent ID.
-- [ ] Verify targeted Notion setup tests pass.
+- [x] Write failing tests proving reconnect with stale/null config reuses existing `CO Workbench` instead of creating a duplicate.
+- [x] Extend Notion setup client boundary with a title search method.
+- [x] Implement canonical parent scoring by required child count.
+- [x] Repair missing children and persist canonical parent ID.
+- [x] Verify targeted Notion setup tests pass.
 
 ## Task 2: Notion Page Writing Boundary
 
