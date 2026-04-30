@@ -26,7 +26,7 @@ type ProfileLoadState =
   | { status: "error"; message: string };
 
 export function ProfileShell() {
-  const { data: session } = useSession();
+  const { data: session, status: sessionStatus } = useSession();
   const [state, setState] = useState<ProfileLoadState>({ status: "loading" });
   const profile = state.status === "loaded" ? state.profile : null;
   const name =
@@ -40,6 +40,10 @@ export function ProfileShell() {
   const stats = profile?.stats ?? PROFILE_STATS;
   const factRows = profile?.factRows ?? PROFILE_FACT_ROWS;
   const connectedTools = profile?.connectedTools ?? CONNECTED_TOOL_ROWS;
+  const fallbackPersonalisationDetail =
+    state.status === "error"
+      ? `Profile API: ${state.message}`
+      : "Live profile state is still loading.";
   const personalisation = profile?.personalisation ?? {
     cards: [],
     sources: [
@@ -47,7 +51,7 @@ export function ProfileShell() {
         source: "honcho",
         status: "unavailable",
         label: "Honcho",
-        detail: "Live profile state has not loaded yet.",
+        detail: fallbackPersonalisationDetail,
       },
     ],
   };
@@ -56,6 +60,16 @@ export function ProfileShell() {
     const controller = new AbortController();
 
     async function loadProfile() {
+      if (sessionStatus === "loading") return;
+
+      if (sessionStatus === "unauthenticated") {
+        setState({
+          status: "error",
+          message: "unauthenticated",
+        });
+        return;
+      }
+
       try {
         const response = await fetch("/api/profile", {
           cache: "no-store",
@@ -82,7 +96,7 @@ export function ProfileShell() {
 
     void loadProfile();
     return () => controller.abort();
-  }, []);
+  }, [sessionStatus]);
 
   return (
     <div
@@ -125,8 +139,9 @@ export function ProfileShell() {
 
         {state.status === "error" ? (
           <InlineStatus>
-            Live profile state is unavailable. Showing the default Profile
-            structure.
+            {state.message === "unauthenticated"
+              ? "Profile needs a signed-in CO OS session on this localhost port."
+              : `Live profile state is unavailable: ${state.message}. Showing the default Profile structure.`}
           </InlineStatus>
         ) : null}
 
@@ -506,6 +521,24 @@ function PersonalisationCard({
           </span>
         ))}
       </div>
+      {personalisation.sources.some((source) => source.detail) ? (
+        <div
+          style={{
+            marginTop: 9,
+            display: "grid",
+            gap: 4,
+            color: "var(--ink-faint)",
+            fontSize: 12,
+            lineHeight: 1.45,
+          }}
+        >
+          {personalisation.sources
+            .filter((source) => source.detail)
+            .map((source) => (
+              <span key={`${source.source}-detail`}>{source.detail}</span>
+            ))}
+        </div>
+      ) : null}
     </ProfileSection>
   );
 }
