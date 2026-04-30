@@ -3,7 +3,6 @@ export const PROFILE_PATH = "/profile" as const;
 export type ProfileSectionId =
   | "my-work"
   | "connected-tools"
-  | "personalisation"
   | "privacy";
 
 export type ProfileSection = {
@@ -46,20 +45,13 @@ export const PROFILE_SECTIONS: ProfileSection[] = [
   {
     id: "my-work",
     title: "My Work",
-    description:
-      "Active clients, active projects, current workstreams, and default reviewer.",
+    description: "Active clients, active projects, and current workstreams.",
   },
   {
     id: "connected-tools",
     title: "Connected Tools",
     description:
       "Manage the accounts CO OS uses for context, signals, and approved write-backs.",
-  },
-  {
-    id: "personalisation",
-    title: "Personalisation",
-    description:
-      "Preferred output length, tone, useful context pages, and learned preferences.",
   },
   {
     id: "privacy",
@@ -131,11 +123,6 @@ export const PROFILE_STATS: ProfileStat[] = [
     value: "1 / 6",
     subValue: "Connector hub",
   },
-  {
-    label: "Default reviewer",
-    value: "Not set",
-    subValue: "Profile setting",
-  },
 ];
 
 export const PROFILE_FACT_ROWS: ProfileFactRow[] = [
@@ -152,13 +139,8 @@ export const PROFILE_FACT_ROWS: ProfileFactRow[] = [
   {
     label: "Active work",
     value: "No active projects selected",
-    subValue: "Controls relevance and personalisation.",
+    subValue: "Controls relevance across Newsroom, Workbench, and connected tools.",
     actionLabel: "Add work",
-  },
-  {
-    label: "Output preference",
-    value: "Concise operating briefs",
-    subValue: "Workbench and Newsroom default.",
   },
   {
     label: "Private to you",

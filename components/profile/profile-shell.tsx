@@ -18,8 +18,8 @@ const STATUS_COPY: Record<ConnectedToolRow["status"], string> = {
 
 export function ProfileShell() {
   const { data: session } = useSession();
-  const name = session?.user?.name ?? session?.user?.email ?? "CO OS user";
-  const email = session?.user?.email ?? "No email available";
+  const name = session?.user?.name ?? session?.user?.email ?? "Signed-in user";
+  const email = session?.user?.email ?? "Login email unavailable";
   const initials = initialsFromName(name);
 
   return (
@@ -63,15 +63,15 @@ export function ProfileShell() {
             gridTemplateColumns: "minmax(320px, 0.8fr) minmax(0, 1.2fr)",
             gap: 48,
             alignItems: "start",
-            marginTop: 42,
+            marginTop: 54,
           }}
         >
-          <div style={{ display: "grid", gap: 36 }}>
+          <div style={{ display: "grid", gap: 48 }}>
             <ProfileSection title="My Work" meta="Relevance">
               <FactList rows={PROFILE_FACT_ROWS.slice(0, 3)} />
             </ProfileSection>
 
-            <ProfileSection title="Personalisation + Privacy" meta="Rules">
+            <ProfileSection title="Privacy" meta="Visibility">
               <FactList rows={PROFILE_FACT_ROWS.slice(3)} />
             </ProfileSection>
           </div>
@@ -101,6 +101,7 @@ export function ProfileShell() {
             display: "flex",
             justifyContent: "space-between",
             gap: 20,
+            minHeight: 28,
             fontFamily: "var(--font-plex-mono)",
             fontSize: 10,
             letterSpacing: "0.12em",
@@ -116,7 +117,7 @@ export function ProfileShell() {
         @media (max-width: 920px) {
           .profile-layout {
             grid-template-columns: 1fr !important;
-            gap: 36px !important;
+            gap: 48px !important;
           }
 
           .profile-footer {
@@ -143,7 +144,7 @@ function IdentityStrip({
       className="identity-strip"
       style={{
         marginTop: 34,
-        padding: "22px 0",
+        padding: "28px 0",
         borderTop: "1px solid var(--rule)",
         borderBottom: "1px solid var(--rule)",
         display: "grid",
@@ -218,9 +219,9 @@ function IdentityStrip({
             border-left: 0 !important;
             border-top: 1px solid var(--rule);
             padding-left: 0 !important;
-            padding-top: 18px;
+            padding-top: 22px;
             display: grid !important;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
+            grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 16px !important;
           }
         }
@@ -278,14 +279,19 @@ function ProfileSection({
   children: React.ReactNode;
 }) {
   return (
-    <section>
+    <section
+      style={{
+        paddingTop: 24,
+        borderTop: "1px solid var(--rule)",
+      }}
+    >
       <div
         style={{
           display: "flex",
           justifyContent: "space-between",
           alignItems: "baseline",
           gap: 16,
-          marginBottom: 14,
+          marginBottom: 20,
         }}
       >
         <h2
@@ -309,7 +315,7 @@ function ProfileSection({
 
 function FactList({ rows }: { rows: ProfileFactRow[] }) {
   return (
-    <div style={{ borderTop: "1px solid var(--rule)", display: "grid" }}>
+    <div style={{ display: "grid" }}>
       {rows.map((row) => (
         <div
           key={row.label}
@@ -365,7 +371,7 @@ function FactList({ rows }: { rows: ProfileFactRow[] }) {
 
 function ToolList() {
   return (
-    <div style={{ borderTop: "1px solid var(--rule)", display: "grid" }}>
+    <div style={{ display: "grid" }}>
       {CONNECTED_TOOL_ROWS.map((tool) => (
         <ToolRow key={tool.id} tool={tool} />
       ))}
