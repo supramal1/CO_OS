@@ -2300,8 +2300,7 @@ function buildReviewedArtifactForSave(
 function WorkflowStageRail({ rows }: { rows: WorkbenchStageRow[] }) {
   return (
     <aside
-      aria-label="Workbench workflow stages"
-      aria-description={WORKBENCH_WORKFLOW_LABEL}
+      aria-label={`Workbench workflow stages: ${WORKBENCH_WORKFLOW_LABEL}`}
       style={{
         position: "sticky",
         top: 0,
