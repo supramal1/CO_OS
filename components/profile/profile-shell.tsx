@@ -166,8 +166,8 @@ const HELPFUL_CONTEXT_OPTIONS = [
 
 export function ProfileShell() {
   const { data: session } = useSession();
-  const name = session?.user?.name ?? session?.user?.email ?? "CO OS user";
-  const email = session?.user?.email ?? "No email available";
+  const name = session?.user?.name ?? session?.user?.email ?? "Signed-in user";
+  const email = session?.user?.email ?? "Login email unavailable";
   const initials = initialsFromName(name);
   const [connectorState, setConnectorState] =
     useState<WorkbenchConnectorState>({ status: "loading" });
@@ -502,7 +502,7 @@ export function ProfileShell() {
         }}
       >
         <header>
-          <MetaLabel>Profile</MetaLabel>
+          <MetaLabel>My OS Profile</MetaLabel>
           <h1
             style={{
               margin: "8px 0 0",
@@ -514,7 +514,7 @@ export function ProfileShell() {
               color: "var(--ink)",
             }}
           >
-            Personalisation hub
+            Identity, relevance, and connected tools
           </h1>
         </header>
 
@@ -546,7 +546,7 @@ export function ProfileShell() {
                 onSave={handleOnboardingSave}
               />
             ) : (
-              <PersonalisationCard
+              <ProfileContextCard
                 profileState={profileState}
                 profileReady={profileReady}
                 personalisationSummary={personalisationSummary}
@@ -593,7 +593,7 @@ export function ProfileShell() {
   );
 }
 
-function PersonalisationCard({
+function ProfileContextCard({
   profileState,
   profileReady,
   personalisationSummary,
@@ -612,8 +612,8 @@ function PersonalisationCard({
 
   return (
     <ProfileSection
-      title="Personalisation"
-      meta={profileReady ? "Live from Notion" : "Setup"}
+      title="My Work"
+      meta={profileReady ? "Live from Notion" : "Relevance"}
     >
       <div
         style={{
@@ -644,7 +644,7 @@ function PersonalisationCard({
               }}
             >
               {profileReady
-                ? "Workbench uses this profile for tone, context, and judgement prompts. The card refreshes from your Notion second brain."
+                ? "Workbench and Newsroom use this context to understand active work, useful background, and judgement prompts. The card refreshes from your Notion second brain."
                 : personalisationSummary.detail}
             </p>
           </div>
