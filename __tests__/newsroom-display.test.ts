@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   actionLinkAriaLabel,
   deriveNewsroomEmptyMessage,
+  newsroomSectionEmptyMessage,
   dismissItemAriaLabel,
   itemActionAriaLabel,
   sourceStatusDetail,
@@ -31,6 +32,23 @@ describe("Newsroom display helpers", () => {
 
     expect(deriveNewsroomEmptyMessage(statuses)).toBe(
       "No major changes found for today. Workbench and Notion are ready when you need them.",
+    );
+  });
+
+  it("uses section-specific empty states instead of generic change copy everywhere", () => {
+    const statuses: NewsroomSourceStatus[] = [
+      { source: "workbench", status: "ok", itemsCount: 0 },
+      { source: "notion", status: "empty", itemsCount: 0 },
+    ];
+
+    expect(newsroomSectionEmptyMessage("today", statuses)).toBe(
+      "No meetings or active work found for today.",
+    );
+    expect(newsroomSectionEmptyMessage("changedSinceYesterday", statuses)).toBe(
+      "No source-backed changes found since yesterday.",
+    );
+    expect(newsroomSectionEmptyMessage("needsAttention", statuses)).toBe(
+      "No judgement items found right now.",
     );
   });
 

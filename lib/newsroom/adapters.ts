@@ -256,7 +256,7 @@ export async function loadCornerstoneNewsroomSnapshot(
       return errorSnapshot("cornerstone", `Cornerstone returned ${res.status}.`);
     }
 
-    const text = extractCornerstoneText(await res.text()).trim();
+    const text = cleanCornerstoneContextText(extractCornerstoneText(await res.text()));
     if (!text) {
       return {
         source: "cornerstone",
@@ -270,13 +270,13 @@ export async function loadCornerstoneNewsroomSnapshot(
       status: { source: "cornerstone", status: "ok", itemsCount: 1 },
       candidates: [
         {
-          id: "cornerstone-active-context",
-          title: "Active context is available",
+          id: "cornerstone-context-0",
+          title: "Recent Cornerstone context",
           reason: boundedText(firstSentence(text), WORKBENCH_REASON_MAX_LENGTH),
           source: "cornerstone",
           confidence: "medium",
-          section: "today",
-          signals: ["active_work"],
+          section: "changedSinceYesterday",
+          signals: ["changed_since_yesterday"],
           sourceRefs: ["cornerstone:context"],
         },
       ],
@@ -483,6 +483,47 @@ function textFromCornerstonePayload(payload: unknown): string {
 function firstSentence(text: string): string {
   const match = text.trim().match(/^.+?[.!?](?:\s|$)/);
   return (match?.[0] ?? text).trim();
+}
+
+function cleanCornerstoneContextText(text: string): string {
+  const lines = text
+    .replace(/===\s*([^=]+?)\s*===/g, "\n=== $1 ===\n")
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const kept: string[] = [];
+  let inGraphMemory = false;
+
+  for (const line of lines) {
+    if (/^===\s*GRAPH MEMORY/i.test(line)) {
+      inGraphMemory = true;
+      continue;
+    }
+    if (/^===/.test(line)) {
+      inGraphMemory = false;
+      continue;
+    }
+    if (inGraphMemory) continue;
+    if (/^\[IDENTITY\]/i.test(line)) continue;
+    if (/\b(self_entity|user_name|pronoun_mapping|user_role|user_organization)\b/i.test(line)) {
+      continue;
+    }
+
+    const cleaned = cleanCornerstoneMemoryLine(line);
+    if (cleaned) kept.push(cleaned);
+  }
+
+  return normalizeWhitespace(kept.join(" "));
+}
+
+function cleanCornerstoneMemoryLine(line: string): string {
+  const withoutMetadata = line
+    .replace(/^-\s*\[[^\]]+\]\s*[^:]+:\s*/, "")
+    .replace(/\s*\(updated:\s*[^)]+\)\s*$/i, "")
+    .trim();
+
+  if (!withoutMetadata || /^\[[^\]]+\]$/.test(withoutMetadata)) return "";
+  return withoutMetadata;
 }
 
 function errorReason(error: unknown): string {

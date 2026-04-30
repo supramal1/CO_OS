@@ -11,9 +11,9 @@ import type {
 } from "@/lib/newsroom/types";
 import {
   actionLinkAriaLabel,
-  deriveNewsroomEmptyMessage,
   dismissItemAriaLabel,
   itemActionAriaLabel,
+  newsroomSectionEmptyMessage,
   sourceLabel,
   sourceLinkAriaLabel,
   sourceStatusDetail,
@@ -85,7 +85,7 @@ export function NewsroomShell() {
     dismissedIds,
   );
   const visibleAttention = useVisibleItems(brief?.needsAttention ?? [], dismissedIds);
-  const emptyMessage = deriveNewsroomEmptyMessage(brief?.sourceStatuses ?? []);
+  const sourceStatuses = brief?.sourceStatuses ?? [];
 
   return (
     <div
@@ -160,13 +160,16 @@ export function NewsroomShell() {
               <NewsroomSection
                 title="Today"
                 items={visibleToday}
-                emptyMessage={emptyMessage}
+                emptyMessage={newsroomSectionEmptyMessage("today", sourceStatuses)}
                 onDismiss={(id) => dismissItem(id, setDismissedIds)}
               />
               <NewsroomSection
                 title="Changed Since Yesterday"
                 items={visibleChanged}
-                emptyMessage={emptyMessage}
+                emptyMessage={newsroomSectionEmptyMessage(
+                  "changedSinceYesterday",
+                  sourceStatuses,
+                )}
                 onDismiss={(id) => dismissItem(id, setDismissedIds)}
               />
             </>
@@ -198,7 +201,10 @@ export function NewsroomShell() {
             <NewsroomSection
               title="Needs Attention"
               items={visibleAttention}
-              emptyMessage={emptyMessage}
+              emptyMessage={newsroomSectionEmptyMessage(
+                "needsAttention",
+                sourceStatuses,
+              )}
               onDismiss={(id) => dismissItem(id, setDismissedIds)}
               compact
             />

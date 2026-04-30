@@ -546,7 +546,7 @@ describe("newsroom adapters", () => {
     });
   });
 
-  it("maps Cornerstone context text into an active context candidate", async () => {
+  it("maps clean Cornerstone context text into a changed context candidate", async () => {
     const fetchMock = vi.fn(async () =>
       Response.json({
         context: "Client Alpha needs final approval. Recent decisions are available.",
@@ -559,13 +559,13 @@ describe("newsroom adapters", () => {
       status: { source: "cornerstone", status: "ok", itemsCount: 1 },
       candidates: [
         {
-          id: "cornerstone-active-context",
-          title: "Active context is available",
+          id: "cornerstone-context-0",
+          title: "Recent Cornerstone context",
           reason: "Client Alpha needs final approval.",
           source: "cornerstone",
           confidence: "medium",
-          section: "today",
-          signals: ["active_work"],
+          section: "changedSinceYesterday",
+          signals: ["changed_since_yesterday"],
           sourceRefs: ["cornerstone:context"],
         },
       ],
@@ -583,6 +583,53 @@ describe("newsroom adapters", () => {
         detail_level: "minimal",
         max_tokens: 600,
       }),
+    });
+  });
+
+  it("does not expose raw Cornerstone graph memory blocks", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          context:
+            "=== GRAPH MEMORY ===\n[IDENTITY]\n- self_entity_id: Malik James-Williams\n- user_name: Malik James-Williams\n=== RECENT FACTS ===\n- [general] co_newsroom_mvp_built: CO OS Newsroom MVP was implemented on 2026-04-30. (updated: 2026-04-30)",
+        }),
+      ),
+    );
+
+    const snapshot = await loadCornerstoneNewsroomSnapshot(context);
+
+    expect(snapshot).toMatchObject({
+      source: "cornerstone",
+      status: { source: "cornerstone", status: "ok", itemsCount: 1 },
+      candidates: [
+        {
+          title: "Recent Cornerstone context",
+          section: "changedSinceYesterday",
+          reason: "CO OS Newsroom MVP was implemented on 2026-04-30.",
+        },
+      ],
+    });
+    expect(snapshot.candidates[0]?.reason).not.toMatch(
+      /GRAPH MEMORY|IDENTITY|self_entity|user_name/i,
+    );
+  });
+
+  it("returns empty Cornerstone context when only graph memory is available", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          context:
+            "=== GRAPH MEMORY ===\n[IDENTITY]\n- self_entity_id: Malik James-Williams\n- user_name: Malik James-Williams",
+        }),
+      ),
+    );
+
+    await expect(loadCornerstoneNewsroomSnapshot(context)).resolves.toEqual({
+      source: "cornerstone",
+      status: { source: "cornerstone", status: "empty", itemsCount: 0 },
+      candidates: [],
     });
   });
 
