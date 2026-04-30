@@ -41,6 +41,10 @@ export function newsroomSectionEmptyMessage(
 }
 
 export function sourceStatusLabel(status: NewsroomSourceStatus): string {
+  if (isNotConnectedStatus(status)) {
+    return `${SOURCE_LABELS[status.source]} not connected`;
+  }
+
   return `${SOURCE_LABELS[status.source]} ${status.status}`;
 }
 
@@ -56,8 +60,8 @@ export function sourceStatusDetail(
   }
 
   const reason = status.reason?.toLowerCase() ?? "";
-  if (status.source === "calendar" && reason.includes("calendar_scope_missing")) {
-    return "Calendar needs reconnect";
+  if (isNotConnectedStatus(status)) {
+    return `Connect ${SOURCE_LABELS[status.source]} in Workbench`;
   }
 
   if (
@@ -103,5 +107,31 @@ function allSourcesUnavailable(statuses: NewsroomSourceStatus[]): boolean {
     statuses.every(
       (status) => status.status === "unavailable" || status.status === "error",
     )
+  );
+}
+
+function isNotConnectedStatus(status: NewsroomSourceStatus): boolean {
+  if (status.source !== "calendar" && status.source !== "notion") return false;
+  if (status.status !== "unavailable" && status.status !== "error") return false;
+
+  const reason = status.reason?.toLowerCase() ?? "";
+  if (status.source === "calendar") {
+    return (
+      reason.includes("calendar_scope_missing") ||
+      reason.includes("google_calendar_access_token_missing") ||
+      reason.includes("google_access_token_missing") ||
+      reason.includes("google_refresh_token_missing") ||
+      reason.includes("calendar_client_missing") ||
+      reason.includes("token_missing") ||
+      reason.includes("not connected")
+    );
+  }
+
+  return (
+    reason.includes("notion_parent_page_id_missing") ||
+    reason.includes("notion_token_missing") ||
+    reason.includes("notion_access_token_missing") ||
+    reason.includes("notion adapter is not connected") ||
+    reason.includes("not connected")
   );
 }

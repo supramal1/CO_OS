@@ -547,11 +547,21 @@ describe("newsroom adapters", () => {
   });
 
   it("maps clean Cornerstone context text into a changed context candidate", async () => {
-    const fetchMock = vi.fn(async () =>
-      Response.json({
-        context: "Client Alpha needs final approval. Recent decisions are available.",
-      }),
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          facts: [
+            {
+              key: "co_workbench_built",
+              value:
+                "On 2026-04-30, Workbench workflow hardening shipped with staged make/review flows.",
+              updated_at: "2026-04-30T08:00:00.000Z",
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(Response.json({ context: "Fallback context should not be needed." }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(loadCornerstoneNewsroomSnapshot(context)).resolves.toEqual({
@@ -559,42 +569,43 @@ describe("newsroom adapters", () => {
       status: { source: "cornerstone", status: "ok", itemsCount: 1 },
       candidates: [
         {
-          id: "cornerstone-context-0",
-          title: "Recent Cornerstone context",
-          reason: "Client Alpha needs final approval.",
+          id: "cornerstone-fact-co-workbench-built",
+          title: "Workbench built",
+          reason:
+            "On 2026-04-30, Workbench workflow hardening shipped with staged make/review flows.",
           source: "cornerstone",
-          confidence: "medium",
+          confidence: "high",
           section: "changedSinceYesterday",
           signals: ["changed_since_yesterday"],
-          sourceRefs: ["cornerstone:context"],
+          sourceRefs: ["cornerstone:fact:co_workbench_built"],
         },
       ],
     });
-    expect(fetchMock).toHaveBeenCalledWith("https://cornerstone.test/context", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": "cornerstone-key",
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://cornerstone.test/memory/facts?namespace=default&limit=25",
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": "cornerstone-key",
+        },
+        cache: "no-store",
       },
-      body: JSON.stringify({
-        query:
-          "Newsroom daily orientation: active projects, clients, recent decisions, and judgement needs.",
-        namespace: "default",
-        detail_level: "minimal",
-        max_tokens: 600,
-      }),
-    });
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("does not expose raw Cornerstone graph memory blocks", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        Response.json({
-          context:
-            "=== GRAPH MEMORY ===\n[IDENTITY]\n- self_entity_id: Malik James-Williams\n- user_name: Malik James-Williams\n=== RECENT FACTS ===\n- [general] co_newsroom_mvp_built: CO OS Newsroom MVP was implemented on 2026-04-30. (updated: 2026-04-30)",
-        }),
-      ),
+      vi
+        .fn()
+        .mockResolvedValueOnce(Response.json({ facts: [] }))
+        .mockResolvedValueOnce(
+          Response.json({
+            context:
+              "=== GRAPH MEMORY ===\n[IDENTITY]\n- self_entity_id: Malik James-Williams\n- user_name: Malik James-Williams\n=== RECENT FACTS ===\n- [general] co_newsroom_mvp_built: CO OS Newsroom MVP was implemented on 2026-04-30. (updated: 2026-04-30)",
+          }),
+        ),
     );
 
     const snapshot = await loadCornerstoneNewsroomSnapshot(context);
@@ -618,12 +629,15 @@ describe("newsroom adapters", () => {
   it("returns empty Cornerstone context when only graph memory is available", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        Response.json({
-          context:
-            "=== GRAPH MEMORY ===\n[IDENTITY]\n- self_entity_id: Malik James-Williams\n- user_name: Malik James-Williams",
-        }),
-      ),
+      vi
+        .fn()
+        .mockResolvedValueOnce(Response.json({ facts: [] }))
+        .mockResolvedValueOnce(
+          Response.json({
+            context:
+              "=== GRAPH MEMORY ===\n[IDENTITY]\n- self_entity_id: Malik James-Williams\n- user_name: Malik James-Williams",
+          }),
+        ),
     );
 
     await expect(loadCornerstoneNewsroomSnapshot(context)).resolves.toEqual({
@@ -636,12 +650,15 @@ describe("newsroom adapters", () => {
   it("caps and normalizes long Cornerstone reasons without punctuation", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        Response.json({
-          context: `  ${"Client Alpha active renewal context ".repeat(12)}
+      vi
+        .fn()
+        .mockResolvedValueOnce(Response.json({ facts: [] }))
+        .mockResolvedValueOnce(
+          Response.json({
+            context: `  ${"Client Alpha active renewal context ".repeat(12)}
             still needs commercial judgement  `,
-        }),
-      ),
+          }),
+        ),
     );
 
     const snapshot = await loadCornerstoneNewsroomSnapshot(context);
@@ -654,7 +671,10 @@ describe("newsroom adapters", () => {
   it("returns Cornerstone error when the context request is not ok", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => new Response("Nope", { status: 503 })),
+      vi
+        .fn()
+        .mockResolvedValueOnce(Response.json({ facts: [] }))
+        .mockResolvedValueOnce(new Response("Nope", { status: 503 })),
     );
 
     await expect(loadCornerstoneNewsroomSnapshot(context)).resolves.toEqual({

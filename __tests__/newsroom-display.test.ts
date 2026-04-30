@@ -56,6 +56,22 @@ describe("Newsroom display helpers", () => {
     expect(
       sourceStatusLabel({ source: "review", status: "empty", itemsCount: 0 }),
     ).toBe("Review empty");
+    expect(
+      sourceStatusLabel({
+        source: "calendar",
+        status: "unavailable",
+        reason: "calendar_scope_missing",
+        itemsCount: 0,
+      }),
+    ).toBe("Calendar not connected");
+    expect(
+      sourceStatusLabel({
+        source: "notion",
+        status: "unavailable",
+        reason: "notion_parent_page_id_missing",
+        itemsCount: 0,
+      }),
+    ).toBe("Notion not connected");
   });
 
   it("maps known setup reasons to staff-facing source health detail", () => {
@@ -66,7 +82,15 @@ describe("Newsroom display helpers", () => {
         reason: "calendar_scope_missing",
         itemsCount: 0,
       }),
-    ).toBe("Calendar needs reconnect");
+    ).toBe("Connect Calendar in Workbench");
+    expect(
+      sourceStatusDetail({
+        source: "notion",
+        status: "unavailable",
+        reason: "notion_parent_page_id_missing",
+        itemsCount: 0,
+      }),
+    ).toBe("Connect Notion in Workbench");
     expect(
       sourceStatusDetail({
         source: "cornerstone",

@@ -237,6 +237,11 @@ export async function loadCornerstoneNewsroomSnapshot(
   }
 
   try {
+    const factCandidates = await loadCornerstoneFactCandidates(context);
+    if (factCandidates.length > 0) {
+      return snapshotFromCandidates("cornerstone", factCandidates);
+    }
+
     const res = await fetch(`${CORNERSTONE_URL.replace(/\/+$/, "")}/context`, {
       method: "POST",
       headers: {
@@ -284,6 +289,89 @@ export async function loadCornerstoneNewsroomSnapshot(
   } catch (error) {
     return errorSnapshot("cornerstone", errorReason(error));
   }
+}
+
+async function loadCornerstoneFactCandidates(
+  context: NewsroomAdapterContext,
+): Promise<NewsroomSourceSnapshot["candidates"]> {
+  const res = await fetch(
+    `${CORNERSTONE_URL.replace(/\/+$/, "")}/memory/facts?namespace=default&limit=25`,
+    {
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": context.apiKey ?? "",
+      },
+      cache: "no-store",
+    },
+  );
+  if (!res.ok) return [];
+
+  const facts = factsFromCornerstonePayload(await res.json());
+  return facts.flatMap((fact) => cornerstoneFactToCandidate(fact, context));
+}
+
+type CornerstoneFact = {
+  key: string;
+  value: string;
+  updatedAt: string;
+};
+
+function factsFromCornerstonePayload(payload: unknown): CornerstoneFact[] {
+  const record = recordValue(payload);
+  const values =
+    arrayValue(payload) ??
+    arrayValue(record?.facts) ??
+    arrayValue(record?.items) ??
+    arrayValue(record?.data) ??
+    [];
+
+  return values.flatMap((value) => {
+    const record = recordValue(value);
+    const key = stringValue(record?.key);
+    const factValue =
+      stringValue(record?.value) ??
+      stringValue(record?.content) ??
+      stringValue(record?.text) ??
+      stringValue(record?.summary);
+    const updatedAt =
+      stringValue(record?.updated_at) ??
+      stringValue(record?.updatedAt) ??
+      stringValue(record?.updated) ??
+      stringValue(record?.created_at) ??
+      stringValue(record?.createdAt);
+
+    if (!key || !factValue || !updatedAt) return [];
+    return [{ key, value: factValue, updatedAt }];
+  });
+}
+
+function cornerstoneFactToCandidate(
+  fact: CornerstoneFact,
+  context: NewsroomAdapterContext,
+): NewsroomSourceSnapshot["candidates"] {
+  const updatedAt = Date.parse(fact.updatedAt);
+  if (!Number.isFinite(updatedAt)) return [];
+  if (updatedAt < context.range.since.getTime()) return [];
+  if (updatedAt > context.now.getTime()) return [];
+
+  const reason = boundedText(
+    cleanCornerstoneContextText(fact.value),
+    WORKBENCH_REASON_MAX_LENGTH,
+  );
+  if (!reason) return [];
+
+  return [
+    {
+      id: `cornerstone-fact-${slugKey(fact.key)}`,
+      title: boundedText(titleFromCornerstoneFactKey(fact.key), WORKBENCH_TITLE_MAX_LENGTH),
+      reason,
+      source: "cornerstone",
+      confidence: "high",
+      section: "changedSinceYesterday",
+      signals: ["changed_since_yesterday"],
+      sourceRefs: [`cornerstone:fact:${fact.key}`],
+    },
+  ];
 }
 
 function unavailableSnapshot(
@@ -444,6 +532,10 @@ function recordValue(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
+function arrayValue(value: unknown): unknown[] | null {
+  return Array.isArray(value) ? value : null;
+}
+
 function stringValue(value: unknown): string | null {
   return typeof value === "string" ? normalizeWhitespace(value) : null;
 }
@@ -524,6 +616,35 @@ function cleanCornerstoneMemoryLine(line: string): string {
 
   if (!withoutMetadata || /^\[[^\]]+\]$/.test(withoutMetadata)) return "";
   return withoutMetadata;
+}
+
+function slugKey(value: string): string {
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "fact"
+  );
+}
+
+function titleFromCornerstoneFactKey(value: string): string {
+  const words = value
+    .replace(/^co[_-]+/i, "")
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (words.length === 0) return "Cornerstone fact";
+
+  const title = words
+    .map((word, index) => {
+      const lower = word.toLowerCase();
+      if (index === 0) return `${lower.charAt(0).toUpperCase()}${lower.slice(1)}`;
+      return lower;
+    })
+    .join(" ");
+
+  return title || "Cornerstone fact";
 }
 
 function errorReason(error: unknown): string {
