@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   NewsroomAction,
   NewsroomBrief,
@@ -10,8 +10,13 @@ import type {
   NewsroomSourceStatus,
 } from "@/lib/newsroom/types";
 import {
+  actionLinkAriaLabel,
   deriveNewsroomEmptyMessage,
+  dismissItemAriaLabel,
+  itemActionAriaLabel,
   sourceLabel,
+  sourceLinkAriaLabel,
+  sourceStatusDetail,
   sourceStatusLabel,
 } from "./newsroom-display";
 
@@ -28,29 +33,49 @@ type NewsroomBriefResponse = {
 export function NewsroomShell() {
   const [state, setState] = useState<NewsroomState>({ status: "loading" });
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => new Set());
+  const requestSequenceRef = useRef(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const loadBrief = useCallback(async () => {
+    const sequence = requestSequenceRef.current + 1;
+    requestSequenceRef.current = sequence;
+    abortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
     setState({ status: "loading" });
     try {
       const response = await fetch("/api/newsroom/brief", {
         cache: "no-store",
+        signal: abortController.signal,
       });
       const payload = (await response.json()) as NewsroomBriefResponse;
       if (!response.ok || !payload.brief) {
         throw new Error(payload.error ?? "Could not load Newsroom brief.");
       }
+      if (sequence !== requestSequenceRef.current) return;
       setState({ status: "loaded", brief: payload.brief });
     } catch (error) {
+      if (abortController.signal.aborted || sequence !== requestSequenceRef.current) {
+        return;
+      }
       setState({
         status: "error",
         message:
           error instanceof Error ? error.message : "Could not load Newsroom brief.",
       });
+    } finally {
+      if (sequence === requestSequenceRef.current) {
+        abortControllerRef.current = null;
+      }
     }
   }, []);
 
   useEffect(() => {
     void loadBrief();
+    return () => {
+      requestSequenceRef.current += 1;
+      abortControllerRef.current?.abort();
+    };
   }, [loadBrief]);
 
   const brief = state.status === "loaded" ? state.brief : null;
@@ -64,15 +89,19 @@ export function NewsroomShell() {
 
   return (
     <div
+      className="newsroom-shell"
       style={{
         height: "calc(100vh - var(--shell-h))",
         display: "grid",
-        gridTemplateColumns: "minmax(0, 1fr) 360px",
+        gridTemplateColumns: "minmax(0, 1fr) minmax(300px, 360px)",
         minHeight: 0,
+        width: "100%",
+        overflowX: "hidden",
         background: "var(--paper)",
       }}
     >
       <main
+        className="newsroom-main"
         style={{
           display: "flex",
           flexDirection: "column",
@@ -87,9 +116,10 @@ export function NewsroomShell() {
             display: "flex",
             alignItems: "center",
             gap: 14,
+            flexWrap: "wrap",
           }}
         >
-          <div>
+          <div style={{ minWidth: 0 }}>
             <MetaLabel>Newsroom</MetaLabel>
             <h1
               style={{
@@ -145,6 +175,7 @@ export function NewsroomShell() {
       </main>
 
       <aside
+        className="newsroom-aside"
         style={{
           display: "flex",
           flexDirection: "column",
@@ -183,6 +214,23 @@ export function NewsroomShell() {
           </div>
         )}
       </aside>
+      <style jsx>{`
+        @media (max-width: 840px) {
+          .newsroom-shell {
+            grid-template-columns: minmax(0, 1fr) !important;
+            height: auto !important;
+            min-height: calc(100vh - var(--shell-h)) !important;
+          }
+
+          .newsroom-main {
+            border-right: 0 !important;
+          }
+
+          .newsroom-aside {
+            border-top: 1px solid var(--rule);
+          }
+        }
+      `}</style>
     </div>
   );
 }
@@ -289,7 +337,12 @@ function NewsroomItemRow({
             {item.reason}
           </p>
         </div>
-        <button type="button" onClick={onDismiss} style={quietButtonStyle}>
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label={dismissItemAriaLabel(item.title)}
+          style={quietButtonStyle}
+        >
           Dismiss
         </button>
       </div>
@@ -302,9 +355,18 @@ function NewsroomItemRow({
         }}
       >
         <Provenance source={item.source} confidence={item.confidence} />
-        {item.action ? <ActionLink action={item.action} /> : null}
+        {item.action ? (
+          <ActionLink
+            action={item.action}
+            ariaLabel={itemActionAriaLabel(item.action, item.title)}
+          />
+        ) : null}
         {!item.action && item.href ? (
-          <Link href={item.href} style={linkStyle}>
+          <Link
+            href={item.href}
+            aria-label={sourceLinkAriaLabel(item.title)}
+            style={linkStyle}
+          >
             Open source
           </Link>
         ) : null}
@@ -344,7 +406,11 @@ function ActionsPanel({ actions }: { actions: NewsroomAction[] }) {
       ) : (
         <div style={{ display: "grid", gap: 8 }}>
           {actions.map((action) => (
-            <ActionLink key={`${action.target}:${action.href}`} action={action} />
+            <ActionLink
+              key={`${action.target}:${action.href}`}
+              action={action}
+              ariaLabel={actionLinkAriaLabel(action)}
+            />
           ))}
         </div>
       )}
@@ -361,32 +427,7 @@ function SourceHealth({ statuses }: { statuses: NewsroomSourceStatus[] }) {
       ) : (
         <div style={{ display: "grid", gap: 8 }}>
           {statuses.map((status) => (
-            <div
-              key={status.source}
-              style={{
-                borderTop: "1px solid var(--rule)",
-                paddingTop: 8,
-                display: "grid",
-                gap: 3,
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  fontFamily: "var(--font-plex-sans)",
-                  fontSize: 13,
-                  color: "var(--ink)",
-                }}
-              >
-                <span>{sourceStatusLabel(status)}</span>
-                <span style={{ fontFamily: "var(--font-plex-mono)" }}>
-                  {status.itemsCount}
-                </span>
-              </div>
-              {status.reason ? <EmptyLine>{status.reason}</EmptyLine> : null}
-            </div>
+            <SourceHealthRow key={status.source} status={status} />
           ))}
         </div>
       )}
@@ -394,9 +435,47 @@ function SourceHealth({ statuses }: { statuses: NewsroomSourceStatus[] }) {
   );
 }
 
-function ActionLink({ action }: { action: NewsroomAction }) {
+function SourceHealthRow({ status }: { status: NewsroomSourceStatus }) {
+  const detail = sourceStatusDetail(status);
+
   return (
-    <Link href={action.href} style={linkStyle}>
+    <div
+      style={{
+        borderTop: "1px solid var(--rule)",
+        paddingTop: 8,
+        display: "grid",
+        gap: 3,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 12,
+          fontFamily: "var(--font-plex-sans)",
+          fontSize: 13,
+          color: "var(--ink)",
+        }}
+      >
+        <span>{sourceStatusLabel(status)}</span>
+        <span style={{ fontFamily: "var(--font-plex-mono)" }}>
+          {status.itemsCount}
+        </span>
+      </div>
+      {detail ? <EmptyLine>{detail}</EmptyLine> : null}
+    </div>
+  );
+}
+
+function ActionLink({
+  action,
+  ariaLabel,
+}: {
+  action: NewsroomAction;
+  ariaLabel: string;
+}) {
+  return (
+    <Link href={action.href} aria-label={ariaLabel} style={linkStyle}>
       {action.label}
     </Link>
   );
