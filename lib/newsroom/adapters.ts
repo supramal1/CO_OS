@@ -1,16 +1,155 @@
 import type { NewsroomAdapterContext, NewsroomSource, NewsroomSourceSnapshot } from "./types";
 import { CORNERSTONE_URL } from "@/lib/cornerstone";
+import { createGoogleCalendarClient } from "@/lib/workbench/google-calendar";
+import { getWorkbenchGoogleAccessToken } from "@/lib/workbench/google-token";
+import { createWorkbenchGoogleTokenStore } from "@/lib/workbench/google-token-store";
+import { retrieveCalendarContext } from "@/lib/workbench/retrieval/calendar";
+import { getUserWorkbenchConfig } from "@/lib/workbench/retrieval/config";
+import { retrieveNotionContext } from "@/lib/workbench/retrieval/notion";
 import { listWorkbenchRuns } from "@/lib/workbench/run-history";
+import type { WorkbenchRetrievedContext } from "@/lib/workbench/types";
 
 const WORKBENCH_TITLE_MAX_LENGTH = 96;
 const WORKBENCH_REASON_MAX_LENGTH = 220;
+const GOOGLE_CALENDAR_READONLY_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
 
-export async function loadCalendarNewsroomSnapshot(): Promise<NewsroomSourceSnapshot> {
-  return unavailableSnapshot("calendar", "Calendar adapter is not connected yet.");
+export async function loadCalendarNewsroomSnapshot(
+  context: NewsroomAdapterContext,
+): Promise<NewsroomSourceSnapshot> {
+  const config = await getUserWorkbenchConfig(context.userId);
+  if (!(config?.google_oauth_scopes ?? []).includes(GOOGLE_CALENDAR_READONLY_SCOPE)) {
+    return unavailableSnapshot("calendar", "calendar_scope_missing");
+  }
+
+  const token = await getWorkbenchGoogleAccessToken({
+    principalId: context.userId,
+    now: context.now,
+    tokenStore: createWorkbenchGoogleTokenStore(),
+  });
+  if (token.status === "unavailable") {
+    return unavailableSnapshot("calendar", token.reason);
+  }
+  if (token.status === "error") {
+    return errorSnapshot("calendar", token.message);
+  }
+
+  const clientResult = createGoogleCalendarClient({ accessToken: token.accessToken });
+  if (clientResult.status === "unavailable") {
+    return unavailableSnapshot("calendar", clientResult.reason);
+  }
+
+  const result = await retrieveCalendarContext({
+    ask: "Newsroom daily orientation: meetings today and prep needs",
+    now: context.now,
+    client: clientResult.client,
+  });
+  if (result.status.status === "unavailable") {
+    return unavailableSnapshot("calendar", result.status.reason ?? "calendar_unavailable");
+  }
+  if (result.status.status === "error") {
+    return errorSnapshot("calendar", result.status.reason ?? "calendar_error");
+  }
+
+  return calendarContextItemsToNewsroomSnapshot(result.items);
 }
 
-export async function loadNotionNewsroomSnapshot(): Promise<NewsroomSourceSnapshot> {
-  return unavailableSnapshot("notion", "Notion adapter is not connected yet.");
+export async function loadNotionNewsroomSnapshot(
+  context: NewsroomAdapterContext,
+): Promise<NewsroomSourceSnapshot> {
+  const config = await getUserWorkbenchConfig(context.userId);
+  const result = await retrieveNotionContext({
+    ask: "Newsroom daily orientation: Working On, active clients, active projects, profile context",
+    userId: context.userId,
+    config,
+  });
+  if (result.status.status === "unavailable") {
+    return unavailableSnapshot("notion", result.status.reason ?? "notion_unavailable");
+  }
+  if (result.status.status === "error") {
+    return errorSnapshot("notion", result.status.reason ?? "notion_error");
+  }
+
+  return notionContextItemsToNewsroomSnapshot(result.items);
+}
+
+export function calendarContextItemsToNewsroomSnapshot(
+  items: WorkbenchRetrievedContext[],
+): NewsroomSourceSnapshot {
+  const candidates = items.flatMap((item, index): NewsroomSourceSnapshot["candidates"] => {
+    if (item.source_type !== "calendar") return [];
+
+    const title = boundedText(
+      stringValue(item.source_label) ?? stringValue(item.claim) ?? "Calendar event",
+      WORKBENCH_TITLE_MAX_LENGTH,
+    );
+    const reason = boundedText(
+      stringValue(item.claim) ?? "Calendar context is available.",
+      WORKBENCH_REASON_MAX_LENGTH,
+    );
+    const href = stringValue(item.source_url);
+
+    return [
+      {
+        id: `calendar-context-${index}`,
+        title,
+        reason,
+        source: "calendar",
+        confidence: "medium",
+        section: "today",
+        ...(href
+          ? {
+              href,
+              action: { label: "Open Calendar", target: "calendar" as const, href },
+            }
+          : {}),
+        signals: href ? ["meeting_today", "action_available"] : ["meeting_today"],
+        sourceRefs: [`calendar:${title}`],
+      },
+    ];
+  });
+
+  return snapshotFromCandidates("calendar", candidates);
+}
+
+export function notionContextItemsToNewsroomSnapshot(
+  items: WorkbenchRetrievedContext[],
+): NewsroomSourceSnapshot {
+  const candidates = items.flatMap((item, index): NewsroomSourceSnapshot["candidates"] => {
+    if (item.source_type !== "notion") return [];
+
+    const claim = stringValue(item.claim);
+    const sourceLabel = stringValue(item.source_label);
+    const title = boundedText(
+      stripWorkingOnPrefix(claim) ?? sourceLabel ?? "Notion context",
+      WORKBENCH_TITLE_MAX_LENGTH,
+    );
+    const reason = boundedText(
+      sourceLabel ?? claim ?? "Notion context is available.",
+      WORKBENCH_REASON_MAX_LENGTH,
+    );
+    const href = stringValue(item.source_url);
+
+    return [
+      {
+        id: `notion-context-${index}`,
+        title,
+        reason,
+        source: "notion",
+        confidence: "medium",
+        section: "today",
+        ...(href
+          ? {
+              href,
+              action: { label: "Open Notion", target: "notion" as const, href },
+            }
+          : {}),
+        signals: href ? ["active_work", "action_available"] : ["active_work"],
+        sourceRefs: [`notion:${sourceLabel ?? title}`],
+      },
+    ];
+  });
+
+  return snapshotFromCandidates("notion", candidates);
 }
 
 export async function loadWorkbenchNewsroomSnapshot(
@@ -76,7 +215,9 @@ export async function loadWorkbenchNewsroomSnapshot(
   };
 }
 
-export async function loadReviewNewsroomSnapshot(): Promise<NewsroomSourceSnapshot> {
+export async function loadReviewNewsroomSnapshot(
+  _context?: NewsroomAdapterContext,
+): Promise<NewsroomSourceSnapshot> {
   return {
     source: "review",
     status: { source: "review", status: "empty", itemsCount: 0 },
@@ -168,6 +309,26 @@ function errorSnapshot(source: NewsroomSource, reason: string): NewsroomSourceSn
     },
     candidates: [],
   };
+}
+
+function snapshotFromCandidates(
+  source: NewsroomSource,
+  candidates: NewsroomSourceSnapshot["candidates"],
+): NewsroomSourceSnapshot {
+  return {
+    source,
+    status: {
+      source,
+      status: candidates.length > 0 ? "ok" : "empty",
+      itemsCount: candidates.length,
+    },
+    candidates,
+  };
+}
+
+function stripWorkingOnPrefix(value: string | null): string | null {
+  if (!value) return null;
+  return normalizeWhitespace(value.replace(/^Working On:\s*/i, ""));
 }
 
 function attentionReason(

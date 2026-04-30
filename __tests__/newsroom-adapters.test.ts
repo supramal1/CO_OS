@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NewsroomAdapterContext } from "@/lib/newsroom/types";
 import type { WorkbenchRunHistoryRow } from "@/lib/workbench/run-history";
+import type { WorkbenchRetrievedContext } from "@/lib/workbench/types";
 
 const mocks = vi.hoisted(() => ({
   listWorkbenchRuns: vi.fn(),
@@ -15,9 +16,11 @@ vi.mock("@/lib/cornerstone", () => ({
 }));
 
 import {
+  calendarContextItemsToNewsroomSnapshot,
   loadCornerstoneNewsroomSnapshot,
   loadReviewNewsroomSnapshot,
   loadWorkbenchNewsroomSnapshot,
+  notionContextItemsToNewsroomSnapshot,
 } from "@/lib/newsroom/adapters";
 
 const context: NewsroomAdapterContext = {
@@ -82,6 +85,74 @@ beforeEach(() => {
 });
 
 describe("newsroom adapters", () => {
+  it("maps Workbench calendar context into Today calendar candidates", () => {
+    const items: WorkbenchRetrievedContext[] = [
+      {
+        claim: "Prep Client X renewal agenda before the meeting.",
+        source_type: "calendar",
+        source_label: "Client X renewal sync",
+        source_url: "https://calendar.google.com/calendar/event?eid=abc123",
+      },
+    ];
+
+    expect(calendarContextItemsToNewsroomSnapshot(items)).toEqual({
+      source: "calendar",
+      status: { source: "calendar", status: "ok", itemsCount: 1 },
+      candidates: [
+        {
+          id: "calendar-context-0",
+          title: "Client X renewal sync",
+          reason: "Prep Client X renewal agenda before the meeting.",
+          source: "calendar",
+          confidence: "medium",
+          section: "today",
+          href: "https://calendar.google.com/calendar/event?eid=abc123",
+          action: {
+            label: "Open Calendar",
+            target: "calendar",
+            href: "https://calendar.google.com/calendar/event?eid=abc123",
+          },
+          signals: ["meeting_today", "action_available"],
+          sourceRefs: ["calendar:Client X renewal sync"],
+        },
+      ],
+    });
+  });
+
+  it("maps Working On Notion context into Today active-work candidates", () => {
+    const items: WorkbenchRetrievedContext[] = [
+      {
+        claim: "Working On: Project Atlas draft for Client X",
+        source_type: "notion",
+        source_label: "Client X workspace",
+        source_url: "https://notion.so/client-x",
+      },
+    ];
+
+    expect(notionContextItemsToNewsroomSnapshot(items)).toEqual({
+      source: "notion",
+      status: { source: "notion", status: "ok", itemsCount: 1 },
+      candidates: [
+        {
+          id: "notion-context-0",
+          title: "Project Atlas draft for Client X",
+          reason: "Client X workspace",
+          source: "notion",
+          confidence: "medium",
+          section: "today",
+          href: "https://notion.so/client-x",
+          action: {
+            label: "Open Notion",
+            target: "notion",
+            href: "https://notion.so/client-x",
+          },
+          signals: ["active_work", "action_available"],
+          sourceRefs: ["notion:Client X workspace"],
+        },
+      ],
+    });
+  });
+
   it("returns an explicit empty review snapshot", async () => {
     await expect(loadReviewNewsroomSnapshot(context)).resolves.toEqual({
       source: "review",
