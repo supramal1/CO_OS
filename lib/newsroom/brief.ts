@@ -13,7 +13,6 @@ import type {
   NewsroomBrief,
   NewsroomCandidate,
   NewsroomSourceSnapshot,
-  NewsroomAdapterInput,
 } from "./types";
 
 const DEFAULT_ADAPTERS: NewsroomAdapter[] = [
@@ -35,9 +34,7 @@ export async function generateNewsroomBrief(
     now,
     range,
   };
-  const adapters = input.adapters
-    ? input.adapters.map(normalizeAdapter)
-    : DEFAULT_ADAPTERS;
+  const adapters = input.adapters ?? DEFAULT_ADAPTERS;
 
   const snapshots = await Promise.all(adapters.map((adapter) => loadSnapshot(adapter, context)));
   const candidates: NewsroomCandidate[] = snapshots.flatMap((snapshot) => snapshot.candidates);
@@ -77,13 +74,6 @@ async function loadSnapshot(
       candidates: [],
     };
   }
-}
-
-function normalizeAdapter(adapter: NewsroomAdapterInput): NewsroomAdapter {
-  if (typeof adapter === "function") {
-    return { source: "workbench", load: adapter };
-  }
-  return adapter;
 }
 
 function getUtcDayRange(now: Date): NewsroomAdapterContext["range"] {

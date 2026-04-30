@@ -96,27 +96,6 @@ describe("generateNewsroomBrief", () => {
     ]);
   });
 
-  it("uses a conservative fallback source for untagged adapter failures", async () => {
-    const brief = await generateNewsroomBrief({
-      userId: "principal_123",
-      now,
-      adapters: [
-        async () => {
-          throw new Error("Untagged adapter timeout");
-        },
-      ],
-    });
-
-    expect(brief.sourceStatuses).toEqual([
-      {
-        source: "workbench",
-        status: "error",
-        reason: "Untagged adapter timeout",
-        itemsCount: 0,
-      },
-    ]);
-  });
-
   it("launches adapters concurrently", async () => {
     let started = 0;
     let releaseFirst: (snapshot: NewsroomSourceSnapshot) => void = () => {};

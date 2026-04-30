@@ -91,11 +91,9 @@ export type NewsroomAdapter = {
   load: NewsroomAdapterLoad;
 };
 
-export type NewsroomAdapterInput = NewsroomAdapter | NewsroomAdapterLoad;
-
 export type GenerateNewsroomBriefInput = {
   userId: string;
   apiKey?: string | null;
   now?: Date;
-  adapters?: NewsroomAdapterInput[];
+  adapters?: NewsroomAdapter[];
 };
