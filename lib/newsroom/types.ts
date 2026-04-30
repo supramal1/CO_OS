@@ -82,9 +82,20 @@ export type NewsroomAdapterContext = {
   };
 };
 
+export type NewsroomAdapterLoad = (
+  context: NewsroomAdapterContext,
+) => Promise<NewsroomSourceSnapshot>;
+
+export type NewsroomAdapter = {
+  source: NewsroomSource;
+  load: NewsroomAdapterLoad;
+};
+
+export type NewsroomAdapterInput = NewsroomAdapter | NewsroomAdapterLoad;
+
 export type GenerateNewsroomBriefInput = {
   userId: string;
   apiKey?: string | null;
   now?: Date;
-  adapters?: Array<(context: NewsroomAdapterContext) => Promise<NewsroomSourceSnapshot>>;
+  adapters?: NewsroomAdapterInput[];
 };

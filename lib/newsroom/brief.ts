@@ -7,18 +7,16 @@ import {
 } from "./adapters";
 import { buildSuggestedActions, limitNewsroomSections } from "./ranking";
 import type {
+  NewsroomAdapter,
   GenerateNewsroomBriefInput,
   NewsroomAdapterContext,
   NewsroomBrief,
   NewsroomCandidate,
-  NewsroomSource,
   NewsroomSourceSnapshot,
+  NewsroomAdapterInput,
 } from "./types";
 
-type NewsroomAdapter = (context: NewsroomAdapterContext) => Promise<NewsroomSourceSnapshot>;
-type SourceTaggedNewsroomAdapter = NewsroomAdapter & { source?: NewsroomSource };
-
-const DEFAULT_ADAPTERS: Array<{ source: NewsroomSource; load: SourceTaggedNewsroomAdapter }> = [
+const DEFAULT_ADAPTERS: NewsroomAdapter[] = [
   { source: "calendar", load: loadCalendarNewsroomSnapshot },
   { source: "notion", load: loadNotionNewsroomSnapshot },
   { source: "workbench", load: loadWorkbenchNewsroomSnapshot },
@@ -38,10 +36,7 @@ export async function generateNewsroomBrief(
     range,
   };
   const adapters = input.adapters
-    ? input.adapters.map((load) => ({
-        source: (load as SourceTaggedNewsroomAdapter).source,
-        load,
-      }))
+    ? input.adapters.map(normalizeAdapter)
     : DEFAULT_ADAPTERS;
 
   const snapshots = await Promise.all(adapters.map((adapter) => loadSnapshot(adapter, context)));
@@ -65,17 +60,16 @@ export async function generateNewsroomBrief(
 }
 
 async function loadSnapshot(
-  adapter: { source?: NewsroomSource; load: NewsroomAdapter },
+  adapter: NewsroomAdapter,
   context: NewsroomAdapterContext,
 ): Promise<NewsroomSourceSnapshot> {
-  const fallbackSource = adapter.source ?? "cornerstone";
   try {
     return await adapter.load(context);
   } catch (error) {
     return {
-      source: fallbackSource,
+      source: adapter.source,
       status: {
-        source: fallbackSource,
+        source: adapter.source,
         status: "error",
         reason: errorReason(error),
         itemsCount: 0,
@@ -83,6 +77,13 @@ async function loadSnapshot(
       candidates: [],
     };
   }
+}
+
+function normalizeAdapter(adapter: NewsroomAdapterInput): NewsroomAdapter {
+  if (typeof adapter === "function") {
+    return { source: "workbench", load: adapter };
+  }
+  return adapter;
 }
 
 function getUtcDayRange(now: Date): NewsroomAdapterContext["range"] {

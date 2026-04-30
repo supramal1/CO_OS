@@ -1,15 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { generateNewsroomBrief } from "@/lib/newsroom/brief";
-import type {
-  NewsroomAdapterContext,
-  NewsroomSource,
-  NewsroomSourceSnapshot,
-} from "@/lib/newsroom/types";
+import type { NewsroomAdapter, NewsroomSource, NewsroomSourceSnapshot } from "@/lib/newsroom/types";
 
 const now = new Date("2026-04-30T09:00:00.000Z");
-type TestNewsroomAdapter = ((
-  context: NewsroomAdapterContext,
-) => Promise<NewsroomSourceSnapshot>) & { source?: NewsroomSource };
 
 function snapshot(overrides: Partial<NewsroomSourceSnapshot>): NewsroomSourceSnapshot {
   return {
@@ -24,8 +17,8 @@ function snapshot(overrides: Partial<NewsroomSourceSnapshot>): NewsroomSourceSna
   };
 }
 
-function adapter(source: NewsroomSource, load: TestNewsroomAdapter): TestNewsroomAdapter {
-  return Object.assign(load, { source });
+function adapter(source: NewsroomSource, load: NewsroomAdapter["load"]): NewsroomAdapter {
+  return { source, load };
 }
 
 describe("generateNewsroomBrief", () => {
@@ -34,7 +27,7 @@ describe("generateNewsroomBrief", () => {
       userId: "principal_123",
       now,
       adapters: [
-        async () =>
+        adapter("calendar", async () =>
           snapshot({
             source: "calendar",
             status: { source: "calendar", status: "ok", itemsCount: 1 },
@@ -57,6 +50,7 @@ describe("generateNewsroomBrief", () => {
               },
             ],
           }),
+        ),
       ],
     });
 
@@ -79,16 +73,18 @@ describe("generateNewsroomBrief", () => {
         adapter("cornerstone", async () => {
           throw new Error("Cornerstone timeout");
         }),
-        async () =>
+        adapter("review", async () =>
           snapshot({
             source: "review",
             status: { source: "review", status: "empty", itemsCount: 0 },
             candidates: [],
           }),
+        ),
       ],
     });
 
     expect(brief.today).toEqual([]);
+    expect(brief.sourceStatuses[0]?.source).toBe("cornerstone");
     expect(brief.sourceStatuses).toEqual([
       {
         source: "cornerstone",
@@ -97,6 +93,27 @@ describe("generateNewsroomBrief", () => {
         itemsCount: 0,
       },
       { source: "review", status: "empty", itemsCount: 0 },
+    ]);
+  });
+
+  it("uses a conservative fallback source for untagged adapter failures", async () => {
+    const brief = await generateNewsroomBrief({
+      userId: "principal_123",
+      now,
+      adapters: [
+        async () => {
+          throw new Error("Untagged adapter timeout");
+        },
+      ],
+    });
+
+    expect(brief.sourceStatuses).toEqual([
+      {
+        source: "workbench",
+        status: "error",
+        reason: "Untagged adapter timeout",
+        itemsCount: 0,
+      },
     ]);
   });
 
