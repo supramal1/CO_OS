@@ -94,6 +94,9 @@ export function sanitizeWorkbenchDetail(
   if (!detail) return fallback;
 
   const lower = detail.toLowerCase();
+  if (/anthropic|x-api-key|api key|api_key/.test(lower)) {
+    return "Workbench cannot reach the draft generator. Check the local AI key and restart the dev server.";
+  }
   if (/notion|page|parent/.test(lower)) return "Repair Workbench pages";
   if (
     /google|oauth|token|scope|grant|refresh|calendar|authenticate|authentication|encrypted|decrypt|unsupported state/.test(

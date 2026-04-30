@@ -54,7 +54,10 @@ export type WorkbenchMakeResult =
     }
   | {
       status: "error";
-      reason: "workbench_make_failed" | "workbench_make_invalid_json";
+      reason:
+        | "anthropic_api_key_rejected"
+        | "workbench_make_failed"
+        | "workbench_make_invalid_json";
       message: string;
     };
 
@@ -87,11 +90,20 @@ export async function generateWorkbenchArtifact(input: {
       temperature: 0.2,
       maxTokens: 1800,
     });
-  } catch {
+  } catch (error) {
+    if (isAnthropicAuthError(error)) {
+      return {
+        status: "error",
+        reason: "anthropic_api_key_rejected",
+        message:
+          "Anthropic rejected ANTHROPIC_API_KEY. Update the local key and restart the dev server.",
+      };
+    }
     return {
       status: "error",
       reason: "workbench_make_failed",
-      message: "Workbench could not generate a draft. Please try again.",
+      message:
+        "Workbench could not reach the draft generator. Check the local server logs and try again.",
     };
   }
 
@@ -105,6 +117,15 @@ export async function generateWorkbenchArtifact(input: {
   }
 
   return { status: "drafted", artifact };
+}
+
+function isAnthropicAuthError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const status =
+    typeof error === "object" && error !== null && "status" in error
+      ? Number((error as { status?: unknown }).status)
+      : null;
+  return status === 401 || /invalid x-api-key|authentication_error/i.test(message);
 }
 
 export function createWorkbenchMakeAnthropicModelClient(input: {

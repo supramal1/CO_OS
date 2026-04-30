@@ -112,13 +112,13 @@ export async function GET(req: NextRequest) {
   });
 
   if (setup.status === "failed") {
-    const redirectUrl = new URL("/workbench", req.url);
+    const redirectUrl = new URL("/profile", req.url);
     redirectUrl.searchParams.set("notion_setup", "failed");
     redirectUrl.searchParams.set("reason", setup.reason);
     return NextResponse.redirect(redirectUrl);
   }
 
-  return NextResponse.redirect(new URL("/workbench", req.url));
+  return NextResponse.redirect(new URL("/profile?notion_setup=connected", req.url));
 }
 
 function workbenchConfigErrorMessage(

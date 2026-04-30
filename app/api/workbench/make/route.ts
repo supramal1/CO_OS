@@ -61,6 +61,7 @@ function statusCodeForMakeResult(
 ): number {
   if (result.status === "drafted") return 200;
   if (result.status === "unavailable") return 503;
+  if (result.reason === "anthropic_api_key_rejected") return 401;
   return 502;
 }
 

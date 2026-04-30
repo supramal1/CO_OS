@@ -341,17 +341,6 @@ type WorkbenchConnectorManagementState =
   | { status: "loaded"; actionId: string; message: string }
   | { status: "error"; actionId: string; message: string };
 
-type WorkbenchConnectorManagementResponse = {
-  source?: WorkbenchConnectorManagementSource;
-  status?: string;
-  action?: string;
-  next_url?: string;
-  message?: string;
-  reason?: string;
-  error?: string;
-  detail?: string;
-};
-
 const CALENDAR_READONLY_SCOPE =
   "https://www.googleapis.com/auth/calendar.readonly";
 const NOTION_SETUP_HREF = "/api/workbench/notion/start";
@@ -380,17 +369,6 @@ const EMPTY_CONFIG_FORM: WorkbenchConfigForm = {
   voice_register: "",
   feedback_style: "",
   friction_tasks: "",
-};
-
-const EMPTY_ONBOARDING_FORM: WorkbenchOnboardingForm = {
-  role_title: "",
-  current_focus_bullets: "",
-  work_type_chips: [],
-  work_type_other: "",
-  communication_style: [],
-  challenge_style: [],
-  helpful_context: [],
-  helpful_context_other: "",
 };
 
 const WORKBENCH_WORK_TYPE_OPTIONS = [
@@ -654,6 +632,14 @@ export function deriveWorkbenchOAuthNotice(
         params.get("reason"),
         "Repair Workbench pages",
       ),
+    };
+  }
+
+  if (params.get("notion_setup") === "connected") {
+    return {
+      tone: "info",
+      label: "Notion connected",
+      detail: "Workbench pages are ready.",
     };
   }
 
@@ -1248,24 +1234,8 @@ export function WorkbenchShell() {
   const [state, setState] = useState<RunState>({ status: "idle" });
   const [connectorState, setConnectorState] =
     useState<WorkbenchConnectorState>({ status: "loading" });
-  const [configForm, setConfigForm] = useState<WorkbenchConfigForm>(
-    EMPTY_CONFIG_FORM,
-  );
-  const [onboardingForm, setOnboardingForm] = useState<WorkbenchOnboardingForm>(
-    EMPTY_ONBOARDING_FORM,
-  );
-  const [onboardingState, setOnboardingState] =
-    useState<WorkbenchOnboardingState>({ status: "idle" });
-  const [setupState, setSetupState] = useState<SetupState>({ status: "idle" });
-  const [healthRows, setHealthRows] = useState<WorkbenchHealthRow[]>([]);
-  const [healthGeneratedAt, setHealthGeneratedAt] = useState<string | null>(null);
-  const [oauthNotice, setOauthNotice] = useState<WorkbenchOAuthNotice | null>(
-    null,
-  );
   const [runHistoryState, setRunHistoryState] =
     useState<WorkbenchRunHistoryState>({ status: "loading" });
-  const [connectorManagementState, setConnectorManagementState] =
-    useState<WorkbenchConnectorManagementState>({ status: "idle" });
   const [wizardStep, setWizardStep] =
     useState<WorkbenchWizardStepId>("setup");
 
@@ -1275,13 +1245,9 @@ export function WorkbenchShell() {
     loadedResponse?.run_history?.status === "stored"
       ? loadedResponse.run_history.id
       : null;
-  const connectorSummary = useMemo(
-    () => deriveWorkbenchConnectorSummary(connectorState),
-    [connectorState],
-  );
   const setupAffordances = useMemo(
-    () => deriveWorkbenchSetupAffordances({ connectorState, healthRows }),
-    [connectorState, healthRows],
+    () => deriveWorkbenchSetupAffordances({ connectorState, healthRows: [] }),
+    [connectorState],
   );
   const setupSummary = useMemo(
     () => deriveWorkbenchSetupSummary(setupAffordances),
@@ -1344,7 +1310,6 @@ export function WorkbenchShell() {
         config,
         google_readiness: payload?.google_readiness ?? null,
       });
-      setConfigForm(getInitialWorkbenchConfigForm(config));
     } catch (err) {
       setConnectorState({
         status: "error",
@@ -1369,8 +1334,6 @@ export function WorkbenchShell() {
 
   useEffect(() => {
     const search = window.location.search;
-    setOauthNotice(deriveWorkbenchOAuthNotice(search));
-
     if (isGoogleOAuthStartUrl(`${window.location.pathname}${search}`)) {
       window.history.replaceState(null, "", "/workbench");
       void signIn("google", { callbackUrl: WORKBENCH_CALLBACK_URL });
@@ -1476,237 +1439,6 @@ export function WorkbenchShell() {
     setWizardStep("context");
   }
 
-  async function handleConfigSave(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSetupState({ status: "saving" });
-    try {
-      const res = await fetch("/api/workbench/config", {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify(buildWorkbenchConfigPayload(configForm)),
-      });
-      const body = (await res.json().catch(() => null)) as
-        | WorkbenchConfigResponse
-        | { error?: string; detail?: string }
-        | null;
-
-      if (!res.ok) {
-        const detail =
-          body && "detail" in body && body.detail
-            ? body.detail
-            : body && "error" in body && body.error
-              ? body.error
-              : `HTTP ${res.status}`;
-        throw new Error(detail);
-      }
-
-      const payload = body as WorkbenchConfigResponse | null;
-      const config = payload?.config ?? null;
-      setConnectorState({
-        status: "loaded",
-        config,
-        google_readiness: payload?.google_readiness ?? null,
-      });
-      setConfigForm(getInitialWorkbenchConfigForm(config));
-      await loadConfig({ silent: true });
-      setSetupState({ status: "saved" });
-    } catch (err) {
-      setSetupState({
-        status: "error",
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  async function handleOnboardingDraft(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setOnboardingState({ status: "drafting" });
-    try {
-      const res = await fetch("/api/workbench/onboarding", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify({
-          action: "draft",
-          payload: buildWorkbenchOnboardingPayload(onboardingForm, configForm),
-        }),
-      });
-      const body = (await res.json().catch(() => null)) as
-        | { status?: string; draft?: WorkbenchOnboardingDraft; message?: string }
-        | { error?: string; fields?: string[]; message?: string }
-        | null;
-
-      if (!res.ok || !body || !("draft" in body) || !body.draft) {
-        const detail =
-          body && "message" in body && body.message
-            ? body.message
-            : body && "fields" in body && body.fields?.length
-              ? `Add ${body.fields.join(", ")}.`
-              : body && "error" in body && body.error
-                ? body.error
-                : `HTTP ${res.status}`;
-        throw new Error(detail);
-      }
-
-      setOnboardingState({ status: "drafted", draft: body.draft });
-    } catch (err) {
-      setOnboardingState({
-        status: "error",
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  async function handleOnboardingSave() {
-    if (onboardingState.status !== "drafted") return;
-    const draft = onboardingState.draft;
-    setOnboardingState({ status: "saving", draft });
-    try {
-      const res = await fetch("/api/workbench/onboarding", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify({
-          action: "save",
-          payload: buildWorkbenchOnboardingPayload(onboardingForm, configForm),
-          draft,
-        }),
-      });
-      const body = (await res.json().catch(() => null)) as
-        | { status?: string; message?: string }
-        | { error?: string; message?: string }
-        | null;
-
-      if (!res.ok) {
-        const detail =
-          body && "message" in body && body.message
-            ? body.message
-            : body && "error" in body && body.error
-              ? body.error
-              : `HTTP ${res.status}`;
-        throw new Error(detail);
-      }
-
-      await loadConfig({ silent: true });
-      setOnboardingState({
-        status: "saved",
-        message:
-          body && "message" in body && body.message
-            ? body.message
-            : "Your Workbench profile is set up.",
-      });
-    } catch (err) {
-      setOnboardingState({
-        status: "error",
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  async function handleCheck() {
-    setSetupState({ status: "checking" });
-    try {
-      const res = await fetch("/api/workbench/check", {
-        method: "GET",
-        headers: { Accept: "application/json" },
-      });
-      const body = (await res.json().catch(() => null)) as
-        | WorkbenchCheckResponse
-        | { error?: string; detail?: string }
-        | null;
-
-      if (!res.ok) {
-        const detail =
-          body && "detail" in body && body.detail
-            ? body.detail
-            : body && "error" in body && body.error
-              ? body.error
-              : `HTTP ${res.status}`;
-        throw new Error(detail);
-      }
-
-      const payload = body as WorkbenchCheckResponse | null;
-      setHealthRows(toWorkbenchHealthRows(payload));
-      setHealthGeneratedAt(payload?.generated_at ?? null);
-      setSetupState({ status: "idle" });
-    } catch (err) {
-      setSetupState({
-        status: "error",
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  async function handleConnectorManagementAction(
-    action: WorkbenchConnectorManagementAction,
-  ) {
-    setConnectorManagementState({ status: "running", actionId: action.id });
-    try {
-      const res = await fetch(action.endpoint, {
-        method: action.method,
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify(action.payload),
-      });
-      const body = (await res.json().catch(() => null)) as
-        | WorkbenchConnectorManagementResponse
-        | null;
-
-      if (!res.ok) {
-        const detail =
-          body && body.detail
-            ? body.detail
-            : body && body.message
-              ? body.message
-              : body && body.error
-                ? body.error
-                : `HTTP ${res.status}`;
-        throw new Error(detail);
-      }
-
-      const message =
-        body?.message ??
-        body?.reason ??
-        `${action.label} request accepted.`;
-      setConnectorManagementState({
-        status: "loaded",
-        actionId: action.id,
-        message,
-      });
-
-      if (body?.next_url) {
-        if (isGoogleOAuthStartUrl(body.next_url)) {
-          void signIn("google", { callbackUrl: WORKBENCH_CALLBACK_URL });
-          return;
-        }
-        window.location.assign(body.next_url);
-        return;
-      }
-
-      await loadConfig({ silent: true });
-      await handleCheck();
-    } catch (err) {
-      setConnectorManagementState({
-        status: "error",
-        actionId: action.id,
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  function handleNotionSetup() {
-    window.location.assign(NOTION_SETUP_HREF);
-  }
-
   return (
     <div
       style={{
@@ -1749,33 +1481,10 @@ export function WorkbenchShell() {
               canSubmit={canSubmit}
               runState={state}
               runPaneSummary={runPaneSummary}
-              connectorSummary={connectorSummary}
-              configForm={configForm}
-              config={
-                connectorState.status === "loaded" ? connectorState.config : null
-              }
-              onboardingForm={onboardingForm}
-              onboardingState={onboardingState}
               onAskChange={setAsk}
               onStart={handleStart}
-              onFormChange={setConfigForm}
-              onOnboardingFormChange={setOnboardingForm}
-              onSave={handleConfigSave}
-              onOnboardingDraft={handleOnboardingDraft}
-              onOnboardingSave={handleOnboardingSave}
-              onSetupNotion={handleNotionSetup}
-              onCheck={handleCheck}
-              onConnectorManagementAction={handleConnectorManagementAction}
-              onConnectGoogle={() =>
-                signIn("google", { callbackUrl: WORKBENCH_CALLBACK_URL })
-              }
-              setupState={setupState}
-              connectorManagementState={connectorManagementState}
-              setupAffordances={setupAffordances}
               setupSummary={setupSummary}
-              oauthNotice={oauthNotice}
-              healthRows={healthRows}
-              healthGeneratedAt={healthGeneratedAt}
+              profileSummary={setupProfileSummary}
             />
           ) : loadedResponse ? (
             <ResultView
@@ -1783,7 +1492,6 @@ export function WorkbenchShell() {
               ask={ask}
               activeStep={wizardStep}
               onStepChange={setWizardStep}
-              onRestartWithContext={runWorkbenchAsk}
             />
           ) : (
             <RunPaneStateView summary={runPaneSummary} />
@@ -1791,7 +1499,6 @@ export function WorkbenchShell() {
         </main>
 
         <WorkbenchWizardSideRail
-          connectorSummary={connectorSummary}
           profileSummary={setupProfileSummary}
           response={loadedResponse}
           uiSummary={loadedUiSummary}
@@ -1926,59 +1633,19 @@ function WorkbenchSetupStep({
   canSubmit,
   runState,
   runPaneSummary,
-  connectorSummary,
-  configForm,
-  config,
-  onboardingForm,
-  onboardingState,
   onAskChange,
   onStart,
-  onFormChange,
-  onOnboardingFormChange,
-  onSave,
-  onOnboardingDraft,
-  onOnboardingSave,
-  onSetupNotion,
-  onCheck,
-  onConnectorManagementAction,
-  onConnectGoogle,
-  setupState,
-  connectorManagementState,
-  setupAffordances,
   setupSummary,
-  oauthNotice,
-  healthRows,
-  healthGeneratedAt,
+  profileSummary,
 }: {
   ask: string;
   canSubmit: boolean;
   runState: RunState;
   runPaneSummary: WorkbenchRunPaneSummary;
-  connectorSummary: WorkbenchConnectorSummary;
-  configForm: WorkbenchConfigForm;
-  config: WorkbenchStaffConfig | null;
-  onboardingForm: WorkbenchOnboardingForm;
-  onboardingState: WorkbenchOnboardingState;
   onAskChange: (ask: string) => void;
   onStart: () => void;
-  onFormChange: (form: WorkbenchConfigForm) => void;
-  onOnboardingFormChange: (form: WorkbenchOnboardingForm) => void;
-  onSave: (event: FormEvent<HTMLFormElement>) => void;
-  onOnboardingDraft: (event: FormEvent<HTMLFormElement>) => void;
-  onOnboardingSave: () => void;
-  onSetupNotion: () => void;
-  onCheck: () => void;
-  onConnectorManagementAction: (
-    action: WorkbenchConnectorManagementAction,
-  ) => void;
-  onConnectGoogle: () => void;
-  setupState: SetupState;
-  connectorManagementState: WorkbenchConnectorManagementState;
-  setupAffordances: WorkbenchSetupAffordanceSummary;
   setupSummary: WorkbenchSetupSummary;
-  oauthNotice: WorkbenchOAuthNotice | null;
-  healthRows: WorkbenchHealthRow[];
-  healthGeneratedAt: string | null;
+  profileSummary: ReturnType<typeof deriveWorkbenchPersonalisationSummary>;
 }) {
   return (
     <div
@@ -2052,63 +1719,18 @@ function WorkbenchSetupStep({
           </div>
 
           <div style={{ marginTop: 24 }}>
-            <ConnectorReadinessPanel summary={connectorSummary} />
-          </div>
-
-          <details
-            open={setupSummary.state !== "ready"}
-            style={{
-              marginTop: 18,
-              border: "1px solid var(--rule)",
-              background: "var(--panel)",
-            }}
-          >
-            <summary
-              style={{
-                cursor: "pointer",
-                padding: "12px 14px",
-                color: "var(--ink)",
-                fontFamily: "var(--font-plex-mono)",
-                fontSize: 10,
-                letterSpacing: "0.12em",
-                textTransform: "uppercase",
-              }}
-            >
-              Setup connections and profile
-              <span style={{ color: "var(--ink-faint)", marginLeft: 10 }}>
-                {setupSummary.label}
-              </span>
-            </summary>
-            <WorkbenchSetupPanel
-              form={configForm}
-              config={config}
-              onboardingForm={onboardingForm}
-              onboardingState={onboardingState}
-              onFormChange={onFormChange}
-              onOnboardingFormChange={onOnboardingFormChange}
-              onSave={onSave}
-              onOnboardingDraft={onOnboardingDraft}
-              onOnboardingSave={onOnboardingSave}
-              onSetupNotion={onSetupNotion}
-              onCheck={onCheck}
-              onConnectorManagementAction={onConnectorManagementAction}
-              onConnectGoogle={onConnectGoogle}
-              setupState={setupState}
-              connectorManagementState={connectorManagementState}
-              setupAffordances={setupAffordances}
+            <ProfileHubCallout
               setupSummary={setupSummary}
-              oauthNotice={oauthNotice}
-              healthRows={healthRows}
-              healthGeneratedAt={healthGeneratedAt}
+              profileSummary={profileSummary}
             />
-          </details>
+          </div>
         </div>
       </div>
 
       <WorkbenchWizardActionBar
         summary={[
           setupSummary.label,
-          `${connectedConnectorCount(connectorSummary)} sources connected`,
+          "Profile manages connections",
         ]}
         primaryAction={{
           label: runState.status === "loading" ? "Starting" : "Start Workbench",
@@ -2120,8 +1742,73 @@ function WorkbenchSetupStep({
   );
 }
 
+function ProfileHubCallout({
+  setupSummary,
+  profileSummary,
+}: {
+  setupSummary: WorkbenchSetupSummary;
+  profileSummary: ReturnType<typeof deriveWorkbenchPersonalisationSummary>;
+}) {
+  return (
+    <section
+      aria-label="Profile hub"
+      style={{
+        border: "1px solid var(--rule)",
+        background: "var(--panel)",
+        padding: "13px 14px",
+        display: "grid",
+        gridTemplateColumns: "minmax(0, 1fr) auto",
+        gap: 14,
+        alignItems: "center",
+      }}
+    >
+      <div style={{ minWidth: 0 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flexWrap: "wrap",
+            marginBottom: 7,
+          }}
+        >
+          <StatusPill status={profileSummary.statusLabel} />
+          <StatusPill status={setupSummary.label} />
+        </div>
+        <div style={{ color: "var(--ink)", fontSize: 13, lineHeight: 1.35 }}>
+          Profile is where Workbench connections and personalisation live.
+        </div>
+        <div
+          style={{
+            color: "var(--ink-dim)",
+            fontSize: 12,
+            lineHeight: 1.35,
+            marginTop: 3,
+          }}
+        >
+          {profileSummary.detail}
+        </div>
+      </div>
+      <a
+        href="/profile"
+        style={{
+          border: "1px solid var(--rule-2)",
+          color: "var(--ink)",
+          padding: "7px 10px",
+          fontFamily: "var(--font-plex-mono)",
+          fontSize: 10,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          whiteSpace: "nowrap",
+        }}
+      >
+        Open Profile
+      </a>
+    </section>
+  );
+}
+
 function WorkbenchWizardSideRail({
-  connectorSummary,
   profileSummary,
   response,
   uiSummary,
@@ -2131,7 +1818,6 @@ function WorkbenchWizardSideRail({
   onRefreshRuns,
   onOpenRun,
 }: {
-  connectorSummary: WorkbenchConnectorSummary;
   profileSummary: ReturnType<typeof deriveWorkbenchPersonalisationSummary>;
   response: WorkbenchStartResponse | null;
   uiSummary: ReturnType<typeof deriveWorkbenchUiSummary> | null;
@@ -2181,15 +1867,19 @@ function WorkbenchWizardSideRail({
 
       <section style={{ padding: "14px 20px" }}>
         <SectionEyebrow>
-          Sources (
-          {uiSummary ? uiSummary.retrievalRows.length : connectorSummary.rows.length}
-          )
+          {uiSummary ? `Sources (${uiSummary.retrievalRows.length})` : "Sources"}
         </SectionEyebrow>
         <div style={{ marginTop: 10 }}>
           {uiSummary ? (
             <RetrievalStatusList rows={uiSummary.retrievalRows} compact />
           ) : (
-            <ConnectorRailRows rows={connectorSummary.rows} />
+            <div style={{ color: "var(--ink-dim)", fontSize: 12, lineHeight: 1.4 }}>
+              Connections are managed in{" "}
+              <a href="/profile" style={{ color: "var(--ink)" }}>
+                Profile
+              </a>
+              . Workbench will show sources here after a run.
+            </div>
           )}
         </div>
       </section>
@@ -2327,42 +2017,6 @@ function WorkbenchWizardActionBar({
   );
 }
 
-function ConnectorRailRows({ rows }: { rows: WorkbenchConnectorRow[] }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {rows.map((row) => (
-        <div
-          key={row.id}
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 1fr) auto",
-            gap: 10,
-            alignItems: "center",
-          }}
-        >
-          <span
-            title={row.detail}
-            style={{
-              color: "var(--ink)",
-              fontSize: 13,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {row.label}
-          </span>
-          <StatusPill status={row.status} />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function connectedConnectorCount(summary: WorkbenchConnectorSummary) {
-  return summary.rows.filter((row) => row.status === "ready").length;
-}
-
 function canOpenWorkbenchWizardStep(
   step: WorkbenchWizardStepId,
   response: WorkbenchStartResponse | null,
@@ -2493,6 +2147,18 @@ export function buildWorkbenchContextAugmentedAsk(
   ].join("\n");
 }
 
+function buildWorkbenchMakeAsk(
+  baseAsk: string,
+  fallbackAsk: string,
+  contextResumeState: ContextResumeState,
+): string {
+  const answers =
+    contextResumeState.status === "loaded"
+      ? contextResumeState.resume.context_answers
+      : [];
+  return buildWorkbenchContextAugmentedAsk(baseAsk || fallbackAsk, answers);
+}
+
 function buildWorkbenchFeedbackActions(
   response: WorkbenchStartResponse,
 ): WorkbenchPostRunAction[] {
@@ -2567,13 +2233,11 @@ function ResultView({
   ask,
   activeStep,
   onStepChange,
-  onRestartWithContext,
 }: {
   response: WorkbenchStartResponse;
   ask: string;
   activeStep: Exclude<WorkbenchWizardStepId, "setup">;
   onStepChange: (step: WorkbenchWizardStepId) => void;
-  onRestartWithContext: (ask: string) => Promise<void>;
 }) {
   const result = response.result;
   const storedRunId =
@@ -2705,13 +2369,9 @@ function ResultView({
       setContextResumeState({ status: "loaded", resume });
       if (
         resume.status === "resumed" &&
-        resume.unresolved_context.length === 0 &&
         (action === "answer_context" ||
           action === "continue_with_assumptions")
       ) {
-        await onRestartWithContext(
-          buildWorkbenchContextAugmentedAsk(ask, resume.context_answers),
-        );
         onStepChange("generate");
       }
     } catch (err) {
@@ -2734,7 +2394,11 @@ function ResultView({
           Accept: "application/json",
         },
         body: JSON.stringify({
-          ask: ask.trim() || result.decoded_task.summary,
+          ask: buildWorkbenchMakeAsk(
+            ask,
+            result.decoded_task.summary,
+            contextResumeState,
+          ),
           preflight_result: result,
           retrieved_context:
             response.retrieval.context.length > 0
@@ -2756,7 +2420,12 @@ function ResultView({
               : body && "error" in body && body.error
                 ? body.error
                 : `HTTP ${res.status}`;
-        throw new Error(detail);
+        throw new Error(
+          sanitizeWorkbenchDetail(
+            detail,
+            "Workbench could not generate a draft. Check the local server logs and try again.",
+          ),
+        );
       }
 
       setMakeState({ status: "loaded", result: body });
@@ -2869,8 +2538,6 @@ function ResultView({
 
           {activeStep === "generate" ? (
             <GenerateWizardStep
-              result={result}
-              workflow={workflow}
               makeState={makeState}
             />
           ) : null}
@@ -2954,12 +2621,8 @@ function ContextWizardStep({
 }
 
 function GenerateWizardStep({
-  result,
-  workflow,
   makeState,
 }: {
-  result: WorkbenchPreflightResult;
-  workflow: WorkbenchWorkflowState;
   makeState: MakeState;
 }) {
   return (
@@ -2971,9 +2634,6 @@ function GenerateWizardStep({
       />
 
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        <CompactPanel title="Draft brief">
-          <CompactTaskSummary result={result} workflow={workflow} />
-        </CompactPanel>
         <CompactPanel title="Generated draft" scroll>
           {makeState.status === "idle" ? (
             <TextBlock text="Generate a draft when the brief looks right." />
@@ -3925,7 +3585,7 @@ function SectionEyebrow({ children }: { children: React.ReactNode }) {
   );
 }
 
-function ConnectorReadinessPanel({
+export function ConnectorReadinessPanel({
   summary,
 }: {
   summary: WorkbenchConnectorSummary;
@@ -3989,7 +3649,7 @@ function ConnectorReadinessPanel({
   );
 }
 
-function WorkbenchSetupPanel({
+export function WorkbenchSetupPanel({
   form,
   config,
   onboardingForm,

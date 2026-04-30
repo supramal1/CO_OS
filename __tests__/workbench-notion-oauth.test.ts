@@ -230,7 +230,9 @@ describe("Workbench Notion OAuth foundation", () => {
     );
 
     expect(res.status).toBe(307);
-    expect(res.headers.get("location")).toBe("https://co-os.test/workbench");
+    expect(res.headers.get("location")).toBe(
+      "https://co-os.test/profile?notion_setup=connected",
+    );
     expect(fetchCalls).toEqual([
       {
         url: "https://api.notion.com/v1/oauth/token",
