@@ -11,6 +11,16 @@ const { auth } = NextAuth(authConfig);
 const authProxy = auth as NextMiddleware;
 
 export function proxy(req: NextRequest, event: NextFetchEvent) {
+  if (req.nextUrl.pathname.startsWith("/api/auth/signin/")) {
+    const callbackUrl =
+      req.nextUrl.searchParams.get("callbackUrl") ??
+      req.nextUrl.searchParams.get("redirectTo") ??
+      "/cookbook";
+    const url = new URL("/api/auth/signin", req.url);
+    url.searchParams.set("callbackUrl", callbackUrl);
+    return NextResponse.redirect(url, 307);
+  }
+
   if (
     req.nextUrl.pathname === "/agents" ||
     req.nextUrl.pathname.startsWith("/agents/")
@@ -29,5 +39,6 @@ export const config = {
     "/agents/:path*",
     "/workforce/:path*",
     "/admin/:path*",
+    "/api/auth/signin/:path*",
   ],
 };
