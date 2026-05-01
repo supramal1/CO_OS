@@ -50,6 +50,27 @@ export async function buildProfileSnapshot(input: {
   };
 }
 
+export function buildFastProfileSnapshot(session: Session): ProfileSnapshot {
+  const identity = buildProfileIdentity(session);
+  return {
+    identity,
+    stats: PROFILE_STATS,
+    factRows: PROFILE_FACT_ROWS,
+    connectedTools: CONNECTED_TOOL_ROWS,
+    personalisation: {
+      cards: [],
+      sources: [
+        {
+          source: "honcho",
+          status: "unavailable",
+          label: "Honcho",
+          detail: "Profile personalisation is loading.",
+        },
+      ],
+    },
+  };
+}
+
 function buildProfileIdentity(session: Session): ProfileIdentity {
   const email = session.user?.email ?? "Login email unavailable";
   const name = session.user?.name ?? email;

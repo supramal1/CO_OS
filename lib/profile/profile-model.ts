@@ -43,6 +43,15 @@ export type ConnectedToolDisplay = {
   detail?: string;
   actionLabel: string;
   href?: string;
+  actions?: ConnectedToolAction[];
+};
+
+export type ConnectedToolAction = {
+  label: string;
+  kind: "link" | "post" | "refresh";
+  href?: string;
+  endpoint?: string;
+  payload?: Record<string, unknown>;
 };
 
 export type ProfileStat = {
@@ -196,6 +205,7 @@ export function getConnectedToolDisplay(
       detail: tool.connectedAs,
       actionLabel: tool.actionLabel,
       href: tool.href,
+      actions: connectorActions(tool),
     };
   }
 
@@ -211,6 +221,7 @@ export function getConnectedToolDisplay(
         "An admin needs to finish monday setup before staff can connect.",
       actionLabel: "Check status",
       href: "/api/monday/status",
+      actions: [{ label: "Check status", kind: "link", href: "/api/monday/status" }],
     };
   }
 
@@ -224,6 +235,7 @@ export function getConnectedToolDisplay(
         "Connect once and CO OS will resolve your monday identity.",
       actionLabel: "Connect",
       href: "/api/monday/start",
+      actions: [{ label: "Connect", kind: "link", href: "/api/monday/start" }],
     };
   }
 
@@ -237,6 +249,7 @@ export function getConnectedToolDisplay(
         "Confirm the monday account CO OS found before it uses task context.",
       actionLabel: "Confirm",
       href: mondayStatusHref(tool.href),
+      actions: [{ label: "Confirm", kind: "link", href: mondayStatusHref(tool.href) }],
     };
   }
 
@@ -250,6 +263,7 @@ export function getConnectedToolDisplay(
         "Reconnect monday so CO OS can continue reading task signals.",
       actionLabel: tool.actionLabel === "Connect" ? "Reconnect" : tool.actionLabel,
       href: mondayStartHref(tool.href),
+      actions: [{ label: "Reconnect", kind: "link", href: mondayStartHref(tool.href) }],
     };
   }
 
@@ -260,7 +274,52 @@ export function getConnectedToolDisplay(
     detail: tool.connectedAs,
     actionLabel: tool.actionLabel === "Connect" ? "View" : tool.actionLabel,
     href: mondayStatusHref(tool.href),
+    actions: [
+      { label: "View", kind: "link", href: mondayStatusHref(tool.href) },
+      { label: "Reconnect", kind: "link", href: "/api/monday/start" },
+      { label: "Disconnect", kind: "link", href: "/api/monday/status" },
+    ],
   };
+}
+
+function connectorActions(tool: ConnectedToolRow): ConnectedToolAction[] {
+  const source = workbenchConnectorSource(tool.id);
+  if (!source) {
+    return tool.href ? [{ label: tool.actionLabel, kind: "link", href: tool.href }] : [];
+  }
+
+  const endpoint = `/api/workbench/connectors/${source}`;
+  if (tool.status === "connected") {
+    return [
+      { label: "Disconnect", kind: "post", endpoint, payload: { action: "disconnect" } },
+      { label: "Repair", kind: "post", endpoint, payload: { action: "repair" } },
+      { label: "Reconnect", kind: "link", href: reconnectHref(tool, source) },
+    ];
+  }
+
+  const primary =
+    tool.actionLabel.toLowerCase() === "reconnect"
+      ? "Reconnect"
+      : tool.actionLabel.toLowerCase() === "repair"
+        ? "Repair"
+        : "Connect";
+  return [
+    primary === "Repair"
+      ? { label: "Repair", kind: "post", endpoint, payload: { action: "repair" } }
+      : { label: primary, kind: "link", href: reconnectHref(tool, source) },
+    { label: "Check", kind: "link", href: endpoint },
+  ];
+}
+
+function workbenchConnectorSource(id: ConnectedToolId): "notion" | "google_workspace" | null {
+  if (id === "notion") return "notion";
+  if (id === "google" || id === "calendar" || id === "drive") return "google_workspace";
+  return null;
+}
+
+function reconnectHref(tool: ConnectedToolRow, source: "notion" | "google_workspace"): string {
+  if (tool.href && tool.href !== "/profile") return tool.href;
+  return source === "notion" ? "/api/workbench/notion/start" : "/workbench?google_oauth=start";
 }
 
 function inferMondayDisplayState(

@@ -1,9 +1,35 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildProfileSnapshot } from "@/lib/profile/profile-snapshot";
+import {
+  buildFastProfileSnapshot,
+  buildProfileSnapshot,
+} from "@/lib/profile/profile-snapshot";
 
 describe("Profile snapshot", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("builds a fast shell snapshot without connector or Honcho lookups", () => {
+    const snapshot = buildFastProfileSnapshot({
+      principalId: "principal_123",
+      isAdmin: false,
+      expires: "2026-05-30T00:00:00.000Z",
+      user: {
+        name: "Malik James-Williams",
+        email: "malik@example.com",
+      },
+    });
+
+    expect(snapshot.identity).toMatchObject({
+      userId: "principal_123",
+      name: "Malik James-Williams",
+      email: "malik@example.com",
+    });
+    expect(snapshot.connectedTools).toBeTruthy();
+    expect(snapshot.personalisation.sources[0]).toMatchObject({
+      source: "honcho",
+      detail: "Profile personalisation is loading.",
+    });
   });
 
   it("builds identity and connected-tool state from the signed-in session", async () => {

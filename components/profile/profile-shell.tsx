@@ -7,6 +7,7 @@ import {
   PROFILE_FACT_ROWS,
   PROFILE_STATS,
   getConnectedToolDisplay,
+  type ConnectedToolAction,
   type ConnectedToolRow,
   type ProfileFactRow,
   type ProfilePersonalisationCard,
@@ -22,8 +23,10 @@ type ProfileLoadState =
 
 export function ProfileShell({
   initialProfile = null,
+  refreshOnMount = false,
 }: {
   initialProfile?: ProfileSnapshot | null;
+  refreshOnMount?: boolean;
 }) {
   const { data: session, status: sessionStatus } = useSession();
   const [state, setState] = useState<ProfileLoadState>(
@@ -31,6 +34,7 @@ export function ProfileShell({
       ? { status: "loaded", profile: initialProfile }
       : { status: "loading" },
   );
+  const [isRefreshing, setIsRefreshing] = useState(refreshOnMount);
   const profile = state.status === "loaded" ? state.profile : null;
   const name =
     profile?.identity.name ??
@@ -63,10 +67,10 @@ export function ProfileShell({
     const controller = new AbortController();
 
     async function loadProfile() {
-      if (initialProfile) return;
-      if (sessionStatus === "loading") return;
+      if (initialProfile && !refreshOnMount) return;
+      if (!initialProfile && sessionStatus === "loading") return;
 
-      if (sessionStatus === "unauthenticated") {
+      if (!initialProfile && sessionStatus === "unauthenticated") {
         setState({
           status: "error",
           message: "unauthenticated",
@@ -75,6 +79,7 @@ export function ProfileShell({
       }
 
       try {
+        setIsRefreshing(true);
         const response = await fetch("/api/profile", {
           cache: "no-store",
           signal: controller.signal,
@@ -95,12 +100,16 @@ export function ProfileShell({
             message: error instanceof Error ? error.message : String(error),
           });
         }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsRefreshing(false);
+        }
       }
     }
 
     void loadProfile();
     return () => controller.abort();
-  }, [initialProfile, sessionStatus]);
+  }, [initialProfile, refreshOnMount, sessionStatus]);
 
   return (
     <div
@@ -149,6 +158,10 @@ export function ProfileShell({
           </InlineStatus>
         ) : null}
 
+        {isRefreshing ? (
+          <InlineStatus>Refreshing connector and personalisation state.</InlineStatus>
+        ) : null}
+
         <div
           className="profile-layout"
           style={{
@@ -181,7 +194,6 @@ export function ProfileShell({
                 marginTop: 18,
               }}
             >
-              <QuietLink href="/workbench">Open Workbench setup</QuietLink>
               <QuietButton onClick={() => window.location.reload()}>
                 Refresh state
               </QuietButton>
@@ -618,6 +630,9 @@ function ToolList({ tools }: { tools: ConnectedToolRow[] }) {
 
 function ToolRow({ tool }: { tool: ConnectedToolRow }) {
   const display = getConnectedToolDisplay(tool);
+  const actions = display.actions ?? [
+    { label: display.actionLabel, kind: "link" as const, href: display.href },
+  ];
 
   return (
     <div
@@ -696,7 +711,14 @@ function ToolRow({ tool }: { tool: ConnectedToolRow }) {
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <StatusPill status={display.statusKind} label={display.statusLabel} />
-        <RowAction href={display.href}>{display.actionLabel}</RowAction>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          {actions.map((action) => (
+            <ToolActionButton
+              key={`${tool.id}-${action.label}-${action.href ?? action.endpoint ?? "refresh"}`}
+              action={action}
+            />
+          ))}
+        </div>
       </div>
       <style jsx>{`
         @media (max-width: 720px) {
@@ -713,6 +735,60 @@ function ToolRow({ tool }: { tool: ConnectedToolRow }) {
         }
       `}</style>
     </div>
+  );
+}
+
+function ToolActionButton({ action }: { action: ConnectedToolAction }) {
+  const [state, setState] = useState<"idle" | "working">("idle");
+
+  async function runAction() {
+    if (action.kind === "link" && action.href) {
+      window.location.href = action.href;
+      return;
+    }
+    if (action.kind === "refresh") {
+      window.location.reload();
+      return;
+    }
+    if (action.kind !== "post" || !action.endpoint) return;
+
+    setState("working");
+    try {
+      const response = await fetch(action.endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(action.payload ?? {}),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { next_url?: string }
+        | null;
+      if (payload?.next_url) {
+        window.location.href = payload.next_url;
+        return;
+      }
+      window.location.reload();
+    } finally {
+      setState("idle");
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={runAction}
+      disabled={state === "working"}
+      style={{
+        fontFamily: "var(--font-plex-mono)",
+        fontSize: 10,
+        letterSpacing: "0.08em",
+        color: "var(--ink-dim)",
+        borderBottom: "1px solid var(--rule-2)",
+        whiteSpace: "nowrap",
+        opacity: state === "working" ? 0.55 : 1,
+      }}
+    >
+      {state === "working" ? "Working" : action.label}
+    </button>
   );
 }
 
@@ -763,31 +839,6 @@ function QuietButton({
     >
       {children}
     </button>
-  );
-}
-
-function QuietLink({
-  children,
-  href,
-}: {
-  children: React.ReactNode;
-  href: string;
-}) {
-  return (
-    <a
-      href={href}
-      style={{
-        fontFamily: "var(--font-plex-mono)",
-        fontSize: 11,
-        letterSpacing: "0.06em",
-        color: "var(--ink-dim)",
-        padding: "7px 11px",
-        border: "1px solid var(--rule-2)",
-        textDecoration: "none",
-      }}
-    >
-      {children}
-    </a>
   );
 }
 

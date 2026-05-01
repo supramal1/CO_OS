@@ -129,6 +129,54 @@ describe("My OS Profile model", () => {
     });
   });
 
+  it("offers self-service connector actions from Profile", () => {
+    expect(
+      getConnectedToolDisplay({
+        id: "notion",
+        label: "Notion",
+        role: "Second-brain context",
+        status: "connected",
+        meta: "Workbench",
+        actionLabel: "View",
+        connectedAs: "Notion workspace ready.",
+      }).actions,
+    ).toEqual([
+      {
+        label: "Disconnect",
+        kind: "post",
+        endpoint: "/api/workbench/connectors/notion",
+        payload: { action: "disconnect" },
+      },
+      {
+        label: "Repair",
+        kind: "post",
+        endpoint: "/api/workbench/connectors/notion",
+        payload: { action: "repair" },
+      },
+      {
+        label: "Reconnect",
+        kind: "link",
+        href: "/api/workbench/notion/start",
+      },
+    ]);
+
+    expect(
+      getConnectedToolDisplay({
+        id: "google",
+        label: "Google account",
+        role: "Identity and OAuth foundation",
+        status: "needs_setup",
+        meta: "OAuth",
+        actionLabel: "Reconnect",
+        href: "/workbench?google_oauth=start",
+      }).actions?.[0],
+    ).toEqual({
+      label: "Reconnect",
+      kind: "link",
+      href: "/workbench?google_oauth=start",
+    });
+  });
+
   it("provides identity-strip stats and fact rows for the redesigned profile structure", () => {
     expect(PROFILE_STATS.map((stat) => stat.label)).toEqual([
       "Active projects",
