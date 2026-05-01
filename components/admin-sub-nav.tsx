@@ -7,6 +7,7 @@ import { WorkspaceSelector } from "@/components/admin/workspace-selector";
 const NAV: Array<{ href: string; label: string }> = [
   { href: "/admin/workspaces", label: "Workspaces" },
   { href: "/admin/team", label: "Team" },
+  { href: "/admin/deck-templates", label: "Deck Templates" },
   { href: "/admin/audit-log", label: "Audit Log" },
   { href: "/admin/setup", label: "Setup" },
 ];
