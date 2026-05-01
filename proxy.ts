@@ -11,10 +11,9 @@ const { auth } = NextAuth(authConfig);
 const authProxy = auth as NextMiddleware;
 
 export function proxy(req: NextRequest, event: NextFetchEvent) {
-  if (
-    req.method === "GET" &&
-    req.nextUrl.pathname.startsWith("/api/auth/signin/")
-  ) {
+  if (req.nextUrl.pathname.startsWith("/api/auth/signin/")) {
+    if (req.method !== "GET") return NextResponse.next();
+
     const callbackUrl =
       req.nextUrl.searchParams.get("callbackUrl") ??
       req.nextUrl.searchParams.get("redirectTo") ??
