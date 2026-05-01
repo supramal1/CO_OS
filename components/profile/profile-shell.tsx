@@ -21,6 +21,8 @@ type ProfileLoadState =
   | { status: "loaded"; profile: ProfileSnapshot }
   | { status: "error"; message: string };
 
+type ProfileUpdater = (profile: ProfileSnapshot) => ProfileSnapshot;
+
 export function ProfileShell({
   initialProfile = null,
   refreshOnMount = false,
@@ -84,56 +86,61 @@ export function ProfileShell({
 
       try {
         setIsRefreshing(true);
-        const [connectorsPayload, personalisationPayload] = await Promise.all([
-          fetchProfileSegment<{
-            connectors?: {
-              connectedTools: ProfileSnapshot["connectedTools"];
-              stats: ProfileSnapshot["stats"];
-              metadata: NonNullable<ProfileSnapshot["metadata"]>["connectors"];
-            };
-          }>("/api/profile/connectors", signal),
-          fetchProfileSegment<{
-            personalisation?: {
-              personalisation: ProfileSnapshot["personalisation"];
-              metadata: NonNullable<ProfileSnapshot["metadata"]>["personalisation"];
-            };
-          }>("/api/profile/personalisation", signal),
-        ]);
-
-        setState((current) => {
-          const base =
-            current.status === "loaded" ? current.profile : initialProfile ?? null;
-          if (!base) {
-            return {
-              status: "error",
-              message: "profile shell unavailable",
-            };
-          }
-
-          return {
-            status: "loaded",
-            profile: {
+        const connectorsPromise = fetchProfileSegment<{
+          connectors?: {
+            connectedTools: ProfileSnapshot["connectedTools"];
+            stats: ProfileSnapshot["stats"];
+            metadata: NonNullable<ProfileSnapshot["metadata"]>["connectors"];
+          };
+        }>("/api/profile/connectors", signal).then((payload) => {
+          if (signal?.aborted || !payload.connectors) return;
+          setState((current) =>
+            updateLoadedProfile(current, initialProfile, (base) => ({
               ...base,
-              stats: connectorsPayload.connectors?.stats ?? base.stats,
+              stats: payload.connectors?.stats ?? base.stats,
               connectedTools:
-                connectorsPayload.connectors?.connectedTools ??
-                base.connectedTools,
-              personalisation:
-                personalisationPayload.personalisation?.personalisation ??
-                base.personalisation,
+                payload.connectors?.connectedTools ?? base.connectedTools,
               metadata: {
                 connectors:
-                  connectorsPayload.connectors?.metadata ??
+                  payload.connectors?.metadata ??
                   base.metadata?.connectors ??
                   fallbackFreshness(),
                 personalisation:
-                  personalisationPayload.personalisation?.metadata ??
+                  base.metadata?.personalisation ?? fallbackFreshness(),
+              },
+            })),
+          );
+        });
+
+        const personalisationPromise = fetchProfileSegment<{
+          personalisation?: {
+            personalisation: ProfileSnapshot["personalisation"];
+            metadata: NonNullable<ProfileSnapshot["metadata"]>["personalisation"];
+          };
+        }>("/api/profile/personalisation", signal).then((payload) => {
+          if (signal?.aborted || !payload.personalisation) return;
+          setState((current) =>
+            updateLoadedProfile(current, initialProfile, (base) => ({
+              ...base,
+              personalisation:
+                payload.personalisation?.personalisation ?? base.personalisation,
+              metadata: {
+                connectors: base.metadata?.connectors ?? fallbackFreshness(),
+                personalisation:
+                  payload.personalisation?.metadata ??
                   base.metadata?.personalisation ??
                   fallbackFreshness(),
               },
-            },
-          };
+            })),
+          );
         });
+
+        const results = await Promise.allSettled([
+          connectorsPromise,
+          personalisationPromise,
+        ]);
+        const rejected = results.find((result) => result.status === "rejected");
+        if (rejected) throw rejected.reason;
       } catch (error) {
         if (!signal?.aborted) {
           setState((current) =>
@@ -1095,8 +1102,10 @@ function sourceStatusDetail(
       ? `Loading latest state - last checked ${lastChecked}`
       : "Loading latest state";
   }
+  const detail = detailText(source);
+  if (detail) return lastChecked ? `${detail} Last checked ${lastChecked}.` : detail;
   if (lastChecked) return `Last checked ${lastChecked}`;
-  return detailText(source) ?? "";
+  return "";
 }
 
 function lastCheckedText(item: unknown): string | null {
@@ -1180,5 +1189,23 @@ function fallbackFreshness() {
     generatedAt: now,
     lastChecked: now,
     status: "cached" as const,
+  };
+}
+
+function updateLoadedProfile(
+  current: ProfileLoadState,
+  initialProfile: ProfileSnapshot | null,
+  update: ProfileUpdater,
+): ProfileLoadState {
+  const base = current.status === "loaded" ? current.profile : initialProfile;
+  if (!base) {
+    return {
+      status: "error",
+      message: "profile shell unavailable",
+    };
+  }
+  return {
+    status: "loaded",
+    profile: update(base),
   };
 }

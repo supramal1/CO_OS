@@ -170,18 +170,18 @@ describe("Profile snapshot", () => {
     expect(snapshot.identity.role).toBe("admin");
     expect(snapshot.connectedTools.find((tool) => tool.id === "notion")).toMatchObject({
       status: "needs_setup",
-      actionLabel: "Try again",
-      connectedAs: "Connection state unavailable.",
+      actionLabel: "Connect",
+      connectedAs: "Loading latest connection state.",
     });
     expect(snapshot.connectedTools.find((tool) => tool.id === "google")).toMatchObject({
       status: "needs_setup",
-      actionLabel: "Try again",
-      connectedAs: "Connection state unavailable.",
+      actionLabel: "Connect",
+      connectedAs: "Loading latest connection state.",
     });
     expect(snapshot.connectedTools.find((tool) => tool.id === "drive")).toMatchObject({
       status: "needs_setup",
       actionLabel: "Try again",
-      connectedAs: "Connection state unavailable.",
+      connectedAs: "Loading latest connection state.",
     });
   });
 
@@ -211,8 +211,8 @@ describe("Profile snapshot", () => {
 
     expect(snapshot.connectedTools.find((tool) => tool.id === "notion")).toMatchObject({
       status: "needs_setup",
-      actionLabel: "Try again",
-      connectedAs: "Connection state unavailable.",
+      actionLabel: "Connect",
+      connectedAs: "Loading latest connection state.",
     });
     expect(snapshot.connectedTools.find((tool) => tool.id === "monday")).toMatchObject({
       status: "connected",
@@ -255,8 +255,8 @@ describe("Profile snapshot", () => {
 
     expect(snapshot.connectedTools.find((tool) => tool.id === "google")).toMatchObject({
       status: "needs_setup",
-      actionLabel: "Try again",
-      connectedAs: "Connection state unavailable.",
+      actionLabel: "Connect",
+      connectedAs: "Loading latest connection state.",
     });
     expect(snapshot.connectedTools.find((tool) => tool.id === "monday")).toMatchObject({
       status: "connected",

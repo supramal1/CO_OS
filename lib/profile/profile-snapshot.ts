@@ -47,9 +47,9 @@ export type BuildProfileSnapshotDependencies = {
   clock?: ProfileCacheClock;
 };
 
-const DEFAULT_CONNECTOR_STATUS_TIMEOUT_MS = 1500;
-const DEFAULT_MONDAY_STATUS_TIMEOUT_MS = 1500;
-const DEFAULT_PERSONALISATION_TIMEOUT_MS = 1800;
+const DEFAULT_CONNECTOR_STATUS_TIMEOUT_MS = 8000;
+const DEFAULT_MONDAY_STATUS_TIMEOUT_MS = 3000;
+const DEFAULT_PERSONALISATION_TIMEOUT_MS = 8000;
 
 export type ProfileShellSnapshot = {
   identity: ProfileIdentity;
@@ -295,8 +295,8 @@ function applyConnectorUnavailable(tool: ConnectedToolRow): ConnectedToolRow {
   return {
     ...tool,
     status: "needs_setup",
-    actionLabel: "Try again",
-    connectedAs: "Connection state unavailable.",
+    actionLabel: tool.actionLabel === "Connect" ? "Connect" : "Try again",
+    connectedAs: "Loading latest connection state.",
   };
 }
 
@@ -307,7 +307,7 @@ function applyMondayUnavailable(tool: ConnectedToolRow): ConnectedToolRow {
     meta: "Status unavailable",
     actionLabel: "Try again",
     href: "/api/monday/status",
-    connectedAs: "monday connection state unavailable.",
+    connectedAs: "Loading latest monday connection state.",
     displayState: "repair_needed",
   };
 }
@@ -380,7 +380,9 @@ function isUsableConnectedToolsSnapshot(tools: ConnectedToolRow[]): boolean {
     tools.every(
       (tool) =>
         tool.connectedAs !== "Connection state unavailable." &&
-        tool.connectedAs !== "monday connection state unavailable.",
+        tool.connectedAs !== "monday connection state unavailable." &&
+        tool.connectedAs !== "Loading latest connection state." &&
+        tool.connectedAs !== "Loading latest monday connection state.",
     )
   );
 }
