@@ -196,6 +196,51 @@ describe("Workbench connector management", () => {
     expect(ensureDriveSetup).not.toHaveBeenCalled();
   });
 
+  it("routes reconnect directly to OAuth setup without requiring stored local credentials", async () => {
+    const notionSetup = vi.fn();
+    const googleReadiness = vi.fn();
+
+    await expect(
+      manageWorkbenchConnector({
+        userId: "principal_123",
+        source: "notion",
+        action: "reconnect",
+        deps: {
+          notionTokenStore: { get: async () => null },
+          ensureNotionSetup: notionSetup,
+        },
+      }),
+    ).resolves.toEqual({
+      source: "notion",
+      status: "reauth_required",
+      action: "repair_redirect",
+      next_url: "/api/workbench/notion/start",
+      message: "Connect Notion to repair Workbench pages.",
+      reason: "notion_reconnect_requested",
+    });
+
+    await expect(
+      manageWorkbenchConnector({
+        userId: "principal_123",
+        source: "google_workspace",
+        action: "reconnect",
+        deps: {
+          getGoogleReadiness: googleReadiness,
+        },
+      }),
+    ).resolves.toEqual({
+      source: "google_workspace",
+      status: "reauth_required",
+      action: "repair_redirect",
+      next_url: "/workbench?google_oauth=start",
+      message: "Reconnect Google Workspace to repair Drive and Calendar.",
+      reason: "google_reconnect_requested",
+    });
+
+    expect(notionSetup).not.toHaveBeenCalled();
+    expect(googleReadiness).not.toHaveBeenCalled();
+  });
+
   it("runs idempotent Google Workspace repair without returning token values", async () => {
     const config = {
       user_id: "principal_123",
@@ -262,21 +307,23 @@ describe("Workbench connector management", () => {
       config: null,
       google_readiness: readyGoogleReadiness,
     }));
+    const clearNotionCredentials = vi.fn(async () => ({ status: "ok" as const }));
 
     const result = await manageWorkbenchConnector({
       userId: "principal_123",
       source: "notion",
       action: "disconnect",
-      deps: { patchConfig },
+      deps: { patchConfig, clearNotionCredentials },
     });
 
     expect(result).toEqual({
       source: "notion",
       status: "accepted",
       action: "disconnect",
-      message: "Notion config disconnected.",
-      reason: "token_revocation_not_supported_v1",
+      message: "Notion disconnected.",
+      reason: "local_credentials_cleared",
     });
+    expect(clearNotionCredentials).toHaveBeenCalledWith("principal_123");
     expect(patchConfig).toHaveBeenCalledWith("principal_123", {
       notion_parent_page_id: null,
     });
@@ -288,26 +335,55 @@ describe("Workbench connector management", () => {
       config: null,
       google_readiness: readyGoogleReadiness,
     }));
+    const clearGoogleCredentials = vi.fn(async () => ({ status: "ok" as const }));
 
     const result = await manageWorkbenchConnector({
       userId: "principal_123",
       source: "google_workspace",
       action: "disconnect",
-      deps: { patchConfig },
+      deps: { patchConfig, clearGoogleCredentials },
     });
 
     expect(result).toEqual({
       source: "google_workspace",
       status: "accepted",
       action: "disconnect",
-      message: "Google Workspace config disconnected.",
-      reason: "token_revocation_not_supported_v1",
+      message: "Google Workspace disconnected.",
+      reason: "local_credentials_cleared",
     });
+    expect(clearGoogleCredentials).toHaveBeenCalledWith("principal_123");
     expect(patchConfig).toHaveBeenCalledWith("principal_123", {
       drive_folder_id: null,
       drive_folder_url: null,
       google_oauth_grant_status: "revoked",
       google_oauth_scopes: [],
     });
+  });
+
+  it("does not mark Notion disconnected when stored credential clearing fails", async () => {
+    const patchConfig = vi.fn();
+
+    const result = await manageWorkbenchConnector({
+      userId: "principal_123",
+      source: "notion",
+      action: "disconnect",
+      deps: {
+        patchConfig,
+        clearNotionCredentials: vi.fn(async () => ({
+          status: "error" as const,
+          reason: "workbench_connector_credentials_clear_failed",
+          message: "delete failed",
+        })),
+      },
+    });
+
+    expect(result).toEqual({
+      source: "notion",
+      status: "error",
+      action: "disconnect",
+      reason: "workbench_connector_credentials_clear_failed",
+      message: "delete failed",
+    });
+    expect(patchConfig).not.toHaveBeenCalled();
   });
 });

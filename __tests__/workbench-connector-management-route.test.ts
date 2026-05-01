@@ -18,13 +18,14 @@ vi.mock("@/lib/workbench/connector-management", () => {
     ["google_workspace", "google_workspace"],
     ["google-workspace", "google_workspace"],
   ]);
-  const actions = new Set(["status", "repair", "disconnect"]);
+  const actions = new Set(["status", "repair", "reconnect", "disconnect"]);
 
   return {
     WORKBENCH_MANAGED_CONNECTOR_SOURCES: ["notion", "google_workspace"],
     WORKBENCH_CONNECTOR_MANAGEMENT_ACTIONS: [
       "status",
       "repair",
+      "reconnect",
       "disconnect",
     ],
     normalizeWorkbenchConnectorSource: (source: string) =>
@@ -141,7 +142,7 @@ describe("/api/workbench/connectors/[source]", () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({
       error: "invalid_connector_action",
-      allowed: ["status", "repair", "disconnect"],
+      allowed: ["status", "repair", "reconnect", "disconnect"],
     });
     expect(mocks.manageWorkbenchConnector).not.toHaveBeenCalled();
   });
@@ -259,14 +260,47 @@ describe("/api/workbench/connectors/[source]", () => {
     });
   });
 
+  it("returns a reconnect OAuth redirect action", async () => {
+    mocks.auth.mockResolvedValue({ principalId: "principal_123" });
+    mocks.manageWorkbenchConnector.mockResolvedValue({
+      source: "notion",
+      status: "reauth_required",
+      action: "repair_redirect",
+      next_url: "/api/workbench/notion/start",
+      message: "Connect Notion to repair Workbench pages.",
+      reason: "notion_reconnect_requested",
+    });
+
+    const res = await POST_SOURCE(
+      request({ action: "reconnect" }),
+      context("notion"),
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      source: "notion",
+      status: "reauth_required",
+      action: "repair_redirect",
+      next_url: "/api/workbench/notion/start",
+      message: "Connect Notion to repair Workbench pages.",
+      reason: "notion_reconnect_requested",
+    });
+    expect(mocks.manageWorkbenchConnector).toHaveBeenCalledWith({
+      userId: "principal_123",
+      source: "notion",
+      action: "reconnect",
+      requestUrl: "http://localhost/api/workbench/connectors/notion",
+    });
+  });
+
   it("returns accepted disconnect responses without exposing token values", async () => {
     mocks.auth.mockResolvedValue({ principalId: "principal_123" });
     mocks.manageWorkbenchConnector.mockResolvedValue({
       source: "google_workspace",
       status: "accepted",
       action: "disconnect",
-      message: "Google Workspace config disconnected.",
-      reason: "token_revocation_not_supported_v1",
+      message: "Google Workspace disconnected.",
+      reason: "local_credentials_cleared",
     });
 
     const res = await POST_SOURCE(
@@ -280,8 +314,8 @@ describe("/api/workbench/connectors/[source]", () => {
       source: "google_workspace",
       status: "accepted",
       action: "disconnect",
-      message: "Google Workspace config disconnected.",
-      reason: "token_revocation_not_supported_v1",
+      message: "Google Workspace disconnected.",
+      reason: "local_credentials_cleared",
     });
     expect(JSON.stringify(body)).not.toMatch(/token-[a-z0-9]/i);
   });
