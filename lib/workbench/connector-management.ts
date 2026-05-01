@@ -31,6 +31,16 @@ import {
   type WorkbenchUserConfigPatchInput,
 } from "./user-config";
 
+type SupabaseDeleteResult = PromiseLike<{ error: { message?: string } | null }>;
+
+type SupabaseLike = {
+  from(table: string): {
+    delete(): {
+      eq(column: string, value: string): SupabaseDeleteResult;
+    };
+  };
+};
+
 export const WORKBENCH_MANAGED_CONNECTOR_SOURCES = [
   "notion",
   "google_workspace",
@@ -39,12 +49,13 @@ export const WORKBENCH_MANAGED_CONNECTOR_SOURCES = [
 export const WORKBENCH_CONNECTOR_MANAGEMENT_ACTIONS = [
   "status",
   "repair",
+  "reconnect",
   "disconnect",
 ] as const;
 
 const NOTION_REPAIR_URL = "/api/workbench/notion/start";
 const GOOGLE_REPAIR_URL = "/workbench?google_oauth=start";
-const TOKEN_REVOCATION_UNSUPPORTED_REASON = "token_revocation_not_supported_v1";
+const LOCAL_CREDENTIALS_CLEARED_REASON = "local_credentials_cleared";
 
 export type WorkbenchManagedConnectorSource =
   (typeof WORKBENCH_MANAGED_CONNECTOR_SOURCES)[number];
@@ -74,6 +85,11 @@ export type WorkbenchConnectorManagementResponse = {
   reason?: string;
 };
 
+export type WorkbenchConnectorCredentialClearResult =
+  | { status: "ok" }
+  | { status: "unavailable"; reason: "workbench_connector_credentials_unavailable" }
+  | { status: "error"; reason: string; message: string };
+
 export type WorkbenchConnectorManagementDependencies = {
   getHealth?: (input: {
     userId: string;
@@ -89,6 +105,12 @@ export type WorkbenchConnectorManagementDependencies = {
   googleAccessTokenProvider?: WorkbenchGoogleAccessTokenProvider;
   googleTokenStore?: WorkbenchGoogleTokenStore;
   ensureDriveSetup?: typeof ensureWorkbenchDriveSetup;
+  clearNotionCredentials?: (
+    userId: string,
+  ) => Promise<WorkbenchConnectorCredentialClearResult>;
+  clearGoogleCredentials?: (
+    userId: string,
+  ) => Promise<WorkbenchConnectorCredentialClearResult>;
 };
 
 export function normalizeWorkbenchConnectorSource(
@@ -159,6 +181,12 @@ export async function manageWorkbenchConnector(input: {
     return input.source === "notion"
       ? disconnectNotion(input)
       : disconnectGoogleWorkspace(input);
+  }
+
+  if (input.action === "reconnect") {
+    return input.source === "notion"
+      ? notionRepairRedirect("notion_reconnect_requested")
+      : googleRepairRedirect("google_reconnect_requested");
   }
 
   return input.source === "notion"
@@ -283,6 +311,12 @@ async function disconnectNotion(input: {
   userId: string;
   deps?: WorkbenchConnectorManagementDependencies;
 }): Promise<WorkbenchConnectorManagementResponse> {
+  const credentialClear = await clearConnectorCredentials(input.deps, {
+    userId: input.userId,
+    source: "notion",
+  });
+  if (credentialClear) return credentialClear;
+
   const patch = await patchConfig(input.deps, input.userId, {
     notion_parent_page_id: null,
   });
@@ -292,8 +326,8 @@ async function disconnectNotion(input: {
     source: "notion",
     status: "accepted",
     action: "disconnect",
-    message: "Notion config disconnected.",
-    reason: TOKEN_REVOCATION_UNSUPPORTED_REASON,
+    message: "Notion disconnected.",
+    reason: LOCAL_CREDENTIALS_CLEARED_REASON,
   };
 }
 
@@ -301,6 +335,12 @@ async function disconnectGoogleWorkspace(input: {
   userId: string;
   deps?: WorkbenchConnectorManagementDependencies;
 }): Promise<WorkbenchConnectorManagementResponse> {
+  const credentialClear = await clearConnectorCredentials(input.deps, {
+    userId: input.userId,
+    source: "google_workspace",
+  });
+  if (credentialClear) return credentialClear;
+
   const patch = await patchConfig(input.deps, input.userId, {
     drive_folder_id: null,
     drive_folder_url: null,
@@ -313,8 +353,8 @@ async function disconnectGoogleWorkspace(input: {
     source: "google_workspace",
     status: "accepted",
     action: "disconnect",
-    message: "Google Workspace config disconnected.",
-    reason: TOKEN_REVOCATION_UNSUPPORTED_REASON,
+    message: "Google Workspace disconnected.",
+    reason: LOCAL_CREDENTIALS_CLEARED_REASON,
   };
 }
 
@@ -400,14 +440,16 @@ function googleWorkspaceStatusMessage(
   return check.message;
 }
 
-function notionRepairRedirect(): WorkbenchConnectorManagementResponse {
+function notionRepairRedirect(
+  reason = "notion_oauth_required",
+): WorkbenchConnectorManagementResponse {
   return {
     source: "notion",
     status: "reauth_required",
     action: "repair_redirect",
     next_url: NOTION_REPAIR_URL,
     message: "Connect Notion to repair Workbench pages.",
-    reason: "notion_oauth_required",
+    reason,
   };
 }
 
@@ -539,6 +581,79 @@ async function patchConfig(
       message: errorMessage(error),
     };
   }
+}
+
+async function clearConnectorCredentials(
+  deps: WorkbenchConnectorManagementDependencies | undefined,
+  input: {
+    userId: string;
+    source: WorkbenchManagedConnectorSource;
+  },
+): Promise<WorkbenchConnectorManagementResponse | null> {
+  const clear =
+    input.source === "notion"
+      ? deps?.clearNotionCredentials ?? clearStoredNotionCredentials
+      : deps?.clearGoogleCredentials ?? clearStoredGoogleCredentials;
+
+  try {
+    const result = await clear(input.userId);
+    if (result.status === "ok") return null;
+    return {
+      source: input.source,
+      status: result.status === "unavailable" ? "unavailable" : "error",
+      action: "disconnect",
+      reason: result.reason,
+      message: result.status === "error" ? result.message : undefined,
+    };
+  } catch (error) {
+    return {
+      source: input.source,
+      status: "error",
+      action: "disconnect",
+      reason: "workbench_connector_credentials_clear_failed",
+      message: errorMessage(error),
+    };
+  }
+}
+
+async function clearStoredNotionCredentials(
+  userId: string,
+): Promise<WorkbenchConnectorCredentialClearResult> {
+  return deleteStoredConnectorCredentials("workbench_notion_tokens", userId);
+}
+
+async function clearStoredGoogleCredentials(
+  userId: string,
+): Promise<WorkbenchConnectorCredentialClearResult> {
+  return deleteStoredConnectorCredentials("workbench_google_tokens", userId);
+}
+
+async function deleteStoredConnectorCredentials(
+  table: "workbench_notion_tokens" | "workbench_google_tokens",
+  userId: string,
+): Promise<WorkbenchConnectorCredentialClearResult> {
+  const sb = await getConnectorManagementSupabase();
+  if (!sb) {
+    return {
+      status: "unavailable",
+      reason: "workbench_connector_credentials_unavailable",
+    };
+  }
+
+  const { error } = await sb.from(table).delete().eq("user_id", userId);
+  if (error) {
+    return {
+      status: "error",
+      reason: "workbench_connector_credentials_clear_failed",
+      message: error.message ?? "Unknown connector credential clear error.",
+    };
+  }
+  return { status: "ok" };
+}
+
+async function getConnectorManagementSupabase(): Promise<SupabaseLike | null> {
+  const { getWorkbenchSupabase } = await import("./supabase");
+  return getWorkbenchSupabase() as unknown as SupabaseLike | null;
 }
 
 async function patchConfigOrThrow(

@@ -4,11 +4,24 @@ import {
   PROFILE_FACT_ROWS,
   PROFILE_STATS,
   type ConnectedToolRow,
+  type ProfileFactRow,
   type ProfilePersonalisationSnapshot,
   type ProfileIdentity,
   type ProfileSnapshot,
+  type ProfileStateFreshness,
   type ProfileStat,
 } from "./profile-model";
+import {
+  cleanPersonalisationContextText,
+  extractPersonalisationContextText,
+} from "./personalisation-context";
+import {
+  profileStateCacheKey,
+  readProfileStateCache,
+  type ProfileCacheClock,
+  type ProfileCachedState,
+} from "./profile-cache";
+import { withProfileTiming } from "./profile-observability";
 import { CORNERSTONE_URL } from "@/lib/cornerstone";
 import {
   listWorkbenchConnectorManagementStatuses,
@@ -28,6 +41,35 @@ export type BuildProfileSnapshotDependencies = {
     apiKey?: string | null;
   }) => Promise<ProfilePersonalisationSnapshot>;
   getMondayStatus?: (input: { userId: string }) => MondayConnectionStatus;
+  connectorStatusTimeoutMs?: number;
+  mondayStatusTimeoutMs?: number;
+  personalisationTimeoutMs?: number;
+  clock?: ProfileCacheClock;
+};
+
+const DEFAULT_CONNECTOR_STATUS_TIMEOUT_MS = 1500;
+const DEFAULT_MONDAY_STATUS_TIMEOUT_MS = 1500;
+const DEFAULT_PERSONALISATION_TIMEOUT_MS = 1800;
+
+export type ProfileShellSnapshot = {
+  identity: ProfileIdentity;
+  stats: ProfileStat[];
+  factRows: ProfileFactRow[];
+};
+
+export type ProfileConnectorsSnapshot = {
+  connectedTools: ConnectedToolRow[];
+  stats: ProfileStat[];
+  metadata: ProfileStateFreshness;
+};
+
+export type ProfilePersonalisationSegmentSnapshot = {
+  personalisation: ProfilePersonalisationSnapshot;
+  metadata: ProfileStateFreshness;
+};
+
+export type ProfilePrivacySnapshot = {
+  factRows: ProfileFactRow[];
 };
 
 export async function buildProfileSnapshot(input: {
@@ -36,21 +78,105 @@ export async function buildProfileSnapshot(input: {
   deps?: BuildProfileSnapshotDependencies;
 }): Promise<ProfileSnapshot> {
   const identity = buildProfileIdentity(input.session);
-  const [connectedTools, personalisation] = await Promise.all([
-    buildConnectedTools(identity.userId, input.deps),
-    buildPersonalisation(identity.userId, input.apiKey, input.deps),
+  const [connectors, personalisation] = await Promise.all([
+    buildProfileConnectorsSnapshot({ session: input.session, deps: input.deps }),
+    buildProfilePersonalisationSegmentSnapshot({
+      session: input.session,
+      apiKey: input.apiKey,
+      deps: input.deps,
+    }),
   ]);
 
   return {
     identity,
-    stats: buildProfileStats(connectedTools),
+    stats: connectors.stats,
     factRows: PROFILE_FACT_ROWS,
-    connectedTools,
-    personalisation,
+    connectedTools: connectors.connectedTools,
+    personalisation: personalisation.personalisation,
+    metadata: {
+      connectors: connectors.metadata,
+      personalisation: personalisation.metadata,
+    },
   };
 }
 
-export function buildFastProfileSnapshot(session: Session): ProfileSnapshot {
+export function buildProfileShellSnapshot(session: Session): ProfileShellSnapshot {
+  return {
+    identity: buildProfileIdentity(session),
+    stats: PROFILE_STATS,
+    factRows: PROFILE_FACT_ROWS.slice(0, 3),
+  };
+}
+
+export async function buildProfileConnectorsSnapshot(input: {
+  session: Session;
+  deps?: BuildProfileSnapshotDependencies;
+}): Promise<ProfileConnectorsSnapshot> {
+  const userId = buildProfileIdentity(input.session).userId;
+  const cached = await readProfileStateCache({
+    key: profileStateCacheKey(userId, "connectors"),
+    load: () =>
+      withProfileTiming(
+        { area: "profile", label: "connectors", userId },
+        () => buildConnectedTools(userId, input.deps),
+      ),
+    clock: input.deps?.clock,
+    isUsable: isUsableConnectedToolsSnapshot,
+  });
+  const connectedTools = withLastChecked(cached.value, cached.lastChecked);
+  return {
+    connectedTools,
+    stats: buildProfileStats(connectedTools),
+    metadata: freshnessFromCached(cached),
+  };
+}
+
+export async function buildProfilePersonalisationSnapshot(input: {
+  session: Session;
+  apiKey?: string | null;
+  deps?: BuildProfileSnapshotDependencies;
+}): Promise<ProfilePersonalisationSnapshot> {
+  const segment = await buildProfilePersonalisationSegmentSnapshot(input);
+  return segment.personalisation;
+}
+
+export async function buildProfilePersonalisationSegmentSnapshot(input: {
+  session: Session;
+  apiKey?: string | null;
+  deps?: BuildProfileSnapshotDependencies;
+}): Promise<ProfilePersonalisationSegmentSnapshot> {
+  const userId = buildProfileIdentity(input.session).userId;
+  const cached = await readProfileStateCache({
+    key: profileStateCacheKey(userId, "personalisation"),
+    load: () =>
+      withProfileTiming(
+        { area: "profile", label: "personalisation", userId, slowMs: 900 },
+        () => buildPersonalisation(userId, input.apiKey, input.deps),
+      ),
+    clock: input.deps?.clock,
+    isUsable: (personalisation) =>
+      personalisation.cards.length > 0 ||
+      personalisation.sources.some((source) => source.status === "ok"),
+  });
+  return {
+    personalisation: withPersonalisationLastChecked(
+      cached.value,
+      cached.lastChecked,
+    ),
+    metadata: freshnessFromCached(cached),
+  };
+}
+
+export function buildProfilePrivacySnapshot(): ProfilePrivacySnapshot {
+  return {
+    factRows: PROFILE_FACT_ROWS.slice(3),
+  };
+}
+
+export function buildFastProfileSnapshot(
+  session: Session,
+  deps: Pick<BuildProfileSnapshotDependencies, "clock"> = {},
+): ProfileSnapshot {
   const identity = buildProfileIdentity(session);
   return {
     identity,
@@ -62,11 +188,15 @@ export function buildFastProfileSnapshot(session: Session): ProfileSnapshot {
       sources: [
         {
           source: "honcho",
-          status: "unavailable",
+          status: "empty",
           label: "Honcho",
           detail: "Profile personalisation is loading.",
         },
       ],
+    },
+    metadata: {
+      connectors: initialFreshness(deps.clock),
+      personalisation: initialFreshness(deps.clock),
     },
   };
 }
@@ -96,48 +226,90 @@ async function buildConnectedTools(
   const listConnectorStatuses =
     deps.listConnectorStatuses ?? listWorkbenchConnectorManagementStatuses;
   const resolveMondayStatus = deps.getMondayStatus ?? getMondayConnectionStatus;
+  const [connectorResult, mondayResult] = await Promise.all([
+    loadBoundedSource(
+      () => listConnectorStatuses({ userId }),
+      deps.connectorStatusTimeoutMs ?? DEFAULT_CONNECTOR_STATUS_TIMEOUT_MS,
+    ),
+    loadBoundedSource(
+      () => Promise.resolve(resolveMondayStatus({ userId })),
+      deps.mondayStatusTimeoutMs ?? DEFAULT_MONDAY_STATUS_TIMEOUT_MS,
+    ),
+  ]);
+
+  return CONNECTED_TOOL_ROWS.map((tool) => {
+    if (tool.id === "notion") {
+      return connectorResult.ok
+        ? applyConnectorStatus(
+            tool,
+            connectorResult.value.find((status) => status.source === "notion"),
+          )
+        : applyConnectorUnavailable(tool);
+    }
+    if (tool.id === "google" || tool.id === "calendar" || tool.id === "drive") {
+      return connectorResult.ok
+        ? applyConnectorStatus(
+            tool,
+            connectorResult.value.find(
+              (status) => status.source === "google_workspace",
+            ),
+          )
+        : applyConnectorUnavailable(tool);
+    }
+    if (tool.id === "monday") {
+      return mondayResult.ok
+        ? applyMondayStatus(tool, mondayResult.value)
+        : applyMondayUnavailable(tool);
+    }
+    return tool;
+  });
+}
+
+type BoundedSourceResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; reason: "error" | "timeout" };
+
+async function loadBoundedSource<T>(
+  load: () => Promise<T>,
+  timeoutMs: number,
+): Promise<BoundedSourceResult<T>> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<BoundedSourceResult<T>>((resolve) => {
+    timeout = setTimeout(() => resolve({ ok: false, reason: "timeout" }), timeoutMs);
+  });
+  const sourcePromise = Promise.resolve()
+    .then(load)
+    .then(
+      (value) => ({ ok: true, value }) as const,
+      () => ({ ok: false, reason: "error" }) as const,
+    );
 
   try {
-    const [statuses, mondayStatus] = await Promise.all([
-      listConnectorStatuses({ userId }),
-      Promise.resolve(resolveMondayStatus({ userId })),
-    ]);
-    return CONNECTED_TOOL_ROWS.map((tool) => {
-      if (tool.id === "notion") {
-        return applyConnectorStatus(
-          tool,
-          statuses.find((status) => status.source === "notion"),
-        );
-      }
-      if (tool.id === "google" || tool.id === "calendar" || tool.id === "drive") {
-        return applyConnectorStatus(
-          tool,
-          statuses.find((status) => status.source === "google_workspace"),
-        );
-      }
-      if (tool.id === "monday") {
-        return applyMondayStatus(tool, mondayStatus);
-      }
-      return tool;
-    });
-  } catch {
-    return CONNECTED_TOOL_ROWS.map((tool) => {
-      if (
-        tool.id === "notion" ||
-        tool.id === "google" ||
-        tool.id === "calendar" ||
-        tool.id === "drive"
-      ) {
-        return {
-          ...tool,
-          status: "needs_setup",
-          actionLabel: "Try again",
-          connectedAs: "Connection state unavailable.",
-        };
-      }
-      return tool;
-    });
+    return await Promise.race([sourcePromise, timeoutPromise]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
+}
+
+function applyConnectorUnavailable(tool: ConnectedToolRow): ConnectedToolRow {
+  return {
+    ...tool,
+    status: "needs_setup",
+    actionLabel: "Try again",
+    connectedAs: "Connection state unavailable.",
+  };
+}
+
+function applyMondayUnavailable(tool: ConnectedToolRow): ConnectedToolRow {
+  return {
+    ...tool,
+    status: "needs_setup",
+    meta: "Status unavailable",
+    actionLabel: "Try again",
+    href: "/api/monday/status",
+    connectedAs: "monday connection state unavailable.",
+    displayState: "repair_needed",
+  };
 }
 
 function applyMondayStatus(
@@ -202,6 +374,17 @@ function buildProfileStats(connectedTools: ConnectedToolRow[]): ProfileStat[] {
   );
 }
 
+function isUsableConnectedToolsSnapshot(tools: ConnectedToolRow[]): boolean {
+  return (
+    tools.length > 0 &&
+    tools.every(
+      (tool) =>
+        tool.connectedAs !== "Connection state unavailable." &&
+        tool.connectedAs !== "monday connection state unavailable.",
+    )
+  );
+}
+
 async function buildPersonalisation(
   userId: string,
   apiKey: string | null | undefined,
@@ -209,7 +392,22 @@ async function buildPersonalisation(
 ): Promise<ProfilePersonalisationSnapshot> {
   const loadPersonalisationCards =
     deps.loadPersonalisationCards ?? loadCornerstonePersonalisationCards;
-  return loadPersonalisationCards({ userId, apiKey });
+  const result = await loadBoundedSource(
+    () => loadPersonalisationCards({ userId, apiKey }),
+    deps.personalisationTimeoutMs ?? DEFAULT_PERSONALISATION_TIMEOUT_MS,
+  );
+  if (result.ok) return result.value;
+  return {
+    cards: [],
+    sources: [
+      {
+        source: "honcho",
+        status: "empty",
+        label: "Honcho",
+        detail: "Loading latest personalisation state.",
+      },
+    ],
+  };
 }
 
 async function loadCornerstonePersonalisationCards(input: {
@@ -236,13 +434,20 @@ async function loadCornerstonePersonalisationCards(input: {
     };
   }
 
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
+    const controller = new AbortController();
+    timeout = setTimeout(
+      () => controller.abort(),
+      DEFAULT_PERSONALISATION_TIMEOUT_MS,
+    );
     const response = await fetch(`${CORNERSTONE_URL.replace(/\/+$/, "")}/context`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "X-API-Key": input.apiKey,
       },
+      signal: controller.signal,
       body: JSON.stringify({
         query:
           "CO OS staff personalisation: brief style, working preferences, do-not-assume rules, useful context, and recurring feedback patterns.",
@@ -266,7 +471,9 @@ async function loadCornerstonePersonalisationCards(input: {
       };
     }
 
-    const text = cleanPersonalisationText(extractCornerstoneText(await response.text()));
+    const text = cleanPersonalisationContextText(
+      extractPersonalisationContextText(await response.text()),
+    );
     if (!text) {
       return {
         cards: [],
@@ -313,47 +520,9 @@ async function loadCornerstonePersonalisationCards(input: {
         },
       ],
     };
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
-}
-
-function extractCornerstoneText(raw: string): string {
-  if (!raw.trim()) return "";
-  try {
-    return textFromCornerstonePayload(JSON.parse(raw));
-  } catch {
-    return raw;
-  }
-}
-
-function textFromCornerstonePayload(payload: unknown): string {
-  if (typeof payload === "string") return payload;
-  if (!payload || typeof payload !== "object") return "";
-
-  const record = payload as Record<string, unknown>;
-  for (const key of ["context", "result", "answer", "content", "text"]) {
-    const text = textFromCornerstonePayload(record[key]);
-    if (text.trim()) return text;
-  }
-  return "";
-}
-
-function cleanPersonalisationText(text: string): string {
-  const withoutRawMemory = text
-    .replace(/\s*\[(?:IDENTITY|FACTS|RELATIONS|GRAPH MEMORY|MEMORY)\][\s\S]*$/i, "")
-    .replace(/\s*===\s*GRAPH MEMORY\s*===[\s\S]*$/i, "");
-
-  return withoutRawMemory
-    .split(/\n+/)
-    .map((line) => line.trim())
-    .filter(
-      (line) =>
-        line &&
-        !/^===/.test(line) &&
-        !/^\[(?:IDENTITY|FACTS|RELATIONS|GRAPH MEMORY|MEMORY)\]/i.test(line),
-    )
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function personalisationTitle(text: string): string {
@@ -384,4 +553,42 @@ function boundedText(text: string, maxLength: number): string {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (normalized.length <= maxLength) return normalized;
   return `${normalized.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+function initialFreshness(
+  clock: ProfileCacheClock = () => new Date(),
+): ProfileStateFreshness {
+  const now = clock().toISOString();
+  return {
+    generatedAt: now,
+    lastChecked: now,
+    status: "live",
+  };
+}
+
+function freshnessFromCached<T>(
+  cached: ProfileCachedState<T>,
+): ProfileStateFreshness {
+  return {
+    generatedAt: cached.generatedAt,
+    lastChecked: cached.lastChecked,
+    status: cached.status,
+  };
+}
+
+function withLastChecked(
+  tools: ConnectedToolRow[],
+  lastCheckedAt: string,
+): ConnectedToolRow[] {
+  return tools.map((tool) => ({ ...tool, lastCheckedAt }));
+}
+
+function withPersonalisationLastChecked(
+  snapshot: ProfilePersonalisationSnapshot,
+  lastCheckedAt: string,
+): ProfilePersonalisationSnapshot {
+  return {
+    cards: snapshot.cards.map((card) => ({ ...card, lastCheckedAt })),
+    sources: snapshot.sources.map((source) => ({ ...source, lastCheckedAt })),
+  };
 }

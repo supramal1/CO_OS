@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import {
   CONNECTED_TOOL_ROWS,
@@ -47,69 +47,119 @@ export function ProfileShell({
   const stats = profile?.stats ?? PROFILE_STATS;
   const factRows = profile?.factRows ?? PROFILE_FACT_ROWS;
   const connectedTools = profile?.connectedTools ?? CONNECTED_TOOL_ROWS;
+  const connectorsFreshness = profile?.metadata?.connectors;
+  const personalisationFreshness = profile?.metadata?.personalisation;
   const fallbackPersonalisationDetail =
     state.status === "error"
       ? `Profile API: ${state.message}`
-      : "Live profile state is still loading.";
+      : "Loading latest state.";
   const personalisation = profile?.personalisation ?? {
     cards: [],
     sources: [
       {
         source: "honcho",
-        status: "unavailable",
+        status: "empty",
         label: "Honcho",
         detail: fallbackPersonalisationDetail,
       },
     ],
   };
+  const showLoadingState = state.status === "loading" || isRefreshing;
 
-  useEffect(() => {
-    const controller = new AbortController();
-
-    async function loadProfile() {
-      if (initialProfile && !refreshOnMount) return;
+  const refreshProfile = useCallback(
+    async (signal?: AbortSignal) => {
       if (!initialProfile && sessionStatus === "loading") return;
 
       if (!initialProfile && sessionStatus === "unauthenticated") {
-        setState({
-          status: "error",
-          message: "unauthenticated",
-        });
+        setState((current) =>
+          current.status === "loaded"
+            ? current
+            : {
+                status: "error",
+                message: "unauthenticated",
+              },
+        );
         return;
       }
 
       try {
         setIsRefreshing(true);
-        const response = await fetch("/api/profile", {
-          cache: "no-store",
-          signal: controller.signal,
+        const [connectorsPayload, personalisationPayload] = await Promise.all([
+          fetchProfileSegment<{
+            connectors?: {
+              connectedTools: ProfileSnapshot["connectedTools"];
+              stats: ProfileSnapshot["stats"];
+              metadata: NonNullable<ProfileSnapshot["metadata"]>["connectors"];
+            };
+          }>("/api/profile/connectors", signal),
+          fetchProfileSegment<{
+            personalisation?: {
+              personalisation: ProfileSnapshot["personalisation"];
+              metadata: NonNullable<ProfileSnapshot["metadata"]>["personalisation"];
+            };
+          }>("/api/profile/personalisation", signal),
+        ]);
+
+        setState((current) => {
+          const base =
+            current.status === "loaded" ? current.profile : initialProfile ?? null;
+          if (!base) {
+            return {
+              status: "error",
+              message: "profile shell unavailable",
+            };
+          }
+
+          return {
+            status: "loaded",
+            profile: {
+              ...base,
+              stats: connectorsPayload.connectors?.stats ?? base.stats,
+              connectedTools:
+                connectorsPayload.connectors?.connectedTools ??
+                base.connectedTools,
+              personalisation:
+                personalisationPayload.personalisation?.personalisation ??
+                base.personalisation,
+              metadata: {
+                connectors:
+                  connectorsPayload.connectors?.metadata ??
+                  base.metadata?.connectors ??
+                  fallbackFreshness(),
+                personalisation:
+                  personalisationPayload.personalisation?.metadata ??
+                  base.metadata?.personalisation ??
+                  fallbackFreshness(),
+              },
+            },
+          };
         });
-        const payload = (await response.json().catch(() => null)) as
-          | { profile?: ProfileSnapshot; error?: string }
-          | null;
-
-        if (!response.ok || !payload?.profile) {
-          throw new Error(payload?.error ?? `HTTP ${response.status}`);
-        }
-
-        setState({ status: "loaded", profile: payload.profile });
       } catch (error) {
-        if (!controller.signal.aborted) {
-          setState({
-            status: "error",
-            message: error instanceof Error ? error.message : String(error),
-          });
+        if (!signal?.aborted) {
+          setState((current) =>
+            current.status === "loaded"
+              ? current
+              : {
+                  status: "error",
+                  message: error instanceof Error ? error.message : String(error),
+                },
+          );
         }
       } finally {
-        if (!controller.signal.aborted) {
+        if (!signal?.aborted) {
           setIsRefreshing(false);
         }
       }
-    }
+    },
+    [initialProfile, sessionStatus],
+  );
 
-    void loadProfile();
+  useEffect(() => {
+    const controller = new AbortController();
+    if (initialProfile && !refreshOnMount) return () => controller.abort();
+    void refreshProfile(controller.signal);
     return () => controller.abort();
-  }, [initialProfile, refreshOnMount, sessionStatus]);
+  }, [initialProfile, refreshOnMount, refreshProfile]);
 
   return (
     <div
@@ -158,10 +208,6 @@ export function ProfileShell({
           </InlineStatus>
         ) : null}
 
-        {isRefreshing ? (
-          <InlineStatus>Refreshing connector and personalisation state.</InlineStatus>
-        ) : null}
-
         <div
           className="profile-layout"
           style={{
@@ -174,18 +220,27 @@ export function ProfileShell({
         >
           <div style={{ display: "grid", gap: 52 }}>
             <ProfileSection title="My Work" meta="Relevance">
-              <FactList rows={factRows.slice(0, 3)} />
+              <FactList rows={factRows.slice(0, 3)} isRefreshing={showLoadingState} />
             </ProfileSection>
 
-            <PersonalisationCard personalisation={personalisation} />
+            <PersonalisationCard
+              personalisation={personalisation}
+              isRefreshing={showLoadingState}
+              freshness={personalisationFreshness}
+            />
 
             <ProfileSection title="Privacy" meta="Visibility">
-              <FactList rows={factRows.slice(3)} />
+              <FactList rows={factRows.slice(3)} isRefreshing={showLoadingState} />
             </ProfileSection>
           </div>
 
           <ProfileSection title="Connected Tools" meta="Infrastructure">
-            <ToolList tools={connectedTools} />
+            <ToolList
+              tools={connectedTools}
+              isRefreshing={showLoadingState}
+              freshness={connectorsFreshness}
+              onRefreshProfile={refreshProfile}
+            />
             <div
               style={{
                 display: "flex",
@@ -194,8 +249,8 @@ export function ProfileShell({
                 marginTop: 18,
               }}
             >
-              <QuietButton onClick={() => window.location.reload()}>
-                Refresh state
+              <QuietButton onClick={() => void refreshProfile()} disabled={isRefreshing}>
+                {isRefreshing ? "Loading latest state" : "Refresh state"}
               </QuietButton>
             </div>
           </ProfileSection>
@@ -424,7 +479,13 @@ function ProfileSection({
   );
 }
 
-function FactList({ rows }: { rows: ProfileFactRow[] }) {
+function FactList({
+  rows,
+  isRefreshing,
+}: {
+  rows: ProfileFactRow[];
+  isRefreshing: boolean;
+}) {
   return (
     <div style={{ display: "grid" }}>
       {rows.map((row) => (
@@ -463,6 +524,7 @@ function FactList({ rows }: { rows: ProfileFactRow[] }) {
                 {row.subValue}
               </span>
             ) : null}
+            <RowFreshness item={row} isRefreshing={isRefreshing} />
           </div>
           {row.actionLabel ? <RowAction>{row.actionLabel}</RowAction> : <span />}
         </div>
@@ -482,15 +544,24 @@ function FactList({ rows }: { rows: ProfileFactRow[] }) {
 
 function PersonalisationCard({
   personalisation,
+  isRefreshing,
+  freshness,
 }: {
   personalisation: ProfilePersonalisationSnapshot;
+  isRefreshing: boolean;
+  freshness?: unknown;
 }) {
   return (
     <ProfileSection title="What CO OS has learned" meta="Personalisation">
       <div style={{ display: "grid" }}>
         {personalisation.cards.length > 0 ? (
           personalisation.cards.map((card) => (
-            <PersonalisationRow key={card.id} card={card} />
+            <PersonalisationRow
+              key={card.id}
+              card={card}
+              isRefreshing={isRefreshing}
+              freshness={freshness}
+            />
           ))
         ) : (
           <div
@@ -533,11 +604,11 @@ function PersonalisationCard({
                   : "var(--ink-dim)",
             }}
           >
-            {source.label} / {source.status}
+            {source.label} / {sourceStatusLabel(source.status, isRefreshing)}
           </span>
         ))}
       </div>
-      {personalisation.sources.some((source) => source.detail) ? (
+      {personalisation.sources.some((source) => source.detail || isRefreshing) ? (
         <div
           style={{
             marginTop: 9,
@@ -549,9 +620,11 @@ function PersonalisationCard({
           }}
         >
           {personalisation.sources
-            .filter((source) => source.detail)
+            .filter((source) => source.detail || isRefreshing)
             .map((source) => (
-              <span key={`${source.source}-detail`}>{source.detail}</span>
+              <span key={`${source.source}-detail`}>
+                {sourceStatusDetail(source, isRefreshing, freshness)}
+              </span>
             ))}
         </div>
       ) : null}
@@ -559,7 +632,15 @@ function PersonalisationCard({
   );
 }
 
-function PersonalisationRow({ card }: { card: ProfilePersonalisationCard }) {
+function PersonalisationRow({
+  card,
+  isRefreshing,
+  freshness,
+}: {
+  card: ProfilePersonalisationCard;
+  isRefreshing: boolean;
+  freshness?: unknown;
+}) {
   return (
     <div
       style={{
@@ -607,6 +688,7 @@ function PersonalisationRow({ card }: { card: ProfilePersonalisationCard }) {
       >
         {card.detail}
       </p>
+      <RowFreshness item={card} isRefreshing={isRefreshing} freshness={freshness} />
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
         {card.actions.map((action) => (
           <RowAction key={`${card.id}-${action}`}>
@@ -618,17 +700,43 @@ function PersonalisationRow({ card }: { card: ProfilePersonalisationCard }) {
   );
 }
 
-function ToolList({ tools }: { tools: ConnectedToolRow[] }) {
+function ToolList({
+  tools,
+  isRefreshing,
+  freshness,
+  onRefreshProfile,
+}: {
+  tools: ConnectedToolRow[];
+  isRefreshing: boolean;
+  freshness?: unknown;
+  onRefreshProfile: () => Promise<void>;
+}) {
   return (
     <div style={{ display: "grid" }}>
       {tools.map((tool) => (
-        <ToolRow key={tool.id} tool={tool} />
+        <ToolRow
+          key={tool.id}
+          tool={tool}
+          isRefreshing={isRefreshing}
+          freshness={freshness}
+          onRefreshProfile={onRefreshProfile}
+        />
       ))}
     </div>
   );
 }
 
-function ToolRow({ tool }: { tool: ConnectedToolRow }) {
+function ToolRow({
+  tool,
+  isRefreshing,
+  freshness,
+  onRefreshProfile,
+}: {
+  tool: ConnectedToolRow;
+  isRefreshing: boolean;
+  freshness?: unknown;
+  onRefreshProfile: () => Promise<void>;
+}) {
   const display = getConnectedToolDisplay(tool);
   const actions = display.actions ?? [
     { label: display.actionLabel, kind: "link" as const, href: display.href },
@@ -696,6 +804,7 @@ function ToolRow({ tool }: { tool: ConnectedToolRow }) {
             {display.detail}
           </span>
         ) : null}
+        <RowFreshness item={tool} isRefreshing={isRefreshing} freshness={freshness} />
       </div>
       <div
         style={{
@@ -716,6 +825,7 @@ function ToolRow({ tool }: { tool: ConnectedToolRow }) {
             <ToolActionButton
               key={`${tool.id}-${action.label}-${action.href ?? action.endpoint ?? "refresh"}`}
               action={action}
+              onRefreshProfile={onRefreshProfile}
             />
           ))}
         </div>
@@ -738,7 +848,13 @@ function ToolRow({ tool }: { tool: ConnectedToolRow }) {
   );
 }
 
-function ToolActionButton({ action }: { action: ConnectedToolAction }) {
+function ToolActionButton({
+  action,
+  onRefreshProfile,
+}: {
+  action: ConnectedToolAction;
+  onRefreshProfile: () => Promise<void>;
+}) {
   const [state, setState] = useState<"idle" | "working">("idle");
 
   async function runAction() {
@@ -747,7 +863,12 @@ function ToolActionButton({ action }: { action: ConnectedToolAction }) {
       return;
     }
     if (action.kind === "refresh") {
-      window.location.reload();
+      setState("working");
+      try {
+        await onRefreshProfile();
+      } finally {
+        setState("idle");
+      }
       return;
     }
     if (action.kind !== "post" || !action.endpoint) return;
@@ -766,7 +887,7 @@ function ToolActionButton({ action }: { action: ConnectedToolAction }) {
         window.location.href = payload.next_url;
         return;
       }
-      window.location.reload();
+      await onRefreshProfile();
     } finally {
       setState("idle");
     }
@@ -820,14 +941,17 @@ function StatusPill({
 function QuietButton({
   children,
   onClick,
+  disabled = false,
 }: {
   children: React.ReactNode;
   onClick: () => void;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       style={{
         fontFamily: "var(--font-plex-mono)",
         fontSize: 11,
@@ -835,6 +959,7 @@ function QuietButton({
         color: "var(--ink-dim)",
         padding: "7px 11px",
         border: "1px solid var(--rule-2)",
+        opacity: disabled ? 0.62 : 1,
       }}
     >
       {children}
@@ -869,6 +994,41 @@ function RowAction({
     <button type="button" style={style}>
       {children}
     </button>
+  );
+}
+
+function RowFreshness({
+  item,
+  isRefreshing,
+  freshness,
+}: {
+  item: unknown;
+  isRefreshing: boolean;
+  freshness?: unknown;
+}) {
+  const lastChecked = lastCheckedText(freshness) ?? lastCheckedText(item);
+  if (!isRefreshing && !lastChecked) return null;
+
+  return (
+    <span
+      role={isRefreshing ? "status" : undefined}
+      style={{
+        display: "block",
+        marginTop: 4,
+        fontFamily: "var(--font-plex-mono)",
+        fontSize: 10,
+        lineHeight: 1.35,
+        letterSpacing: "0.06em",
+        textTransform: "uppercase",
+        color: "var(--ink-faint)",
+      }}
+    >
+      {isRefreshing
+        ? lastChecked
+          ? `Loading latest state - last checked ${lastChecked}`
+          : "Loading latest state"
+        : `Last checked ${lastChecked}`}
+    </span>
   );
 }
 
@@ -917,4 +1077,108 @@ function initialsFromName(name: string): string {
     .map((part) => part.charAt(0).toUpperCase())
     .join("");
   return initials || "CO";
+}
+
+function sourceStatusLabel(status: string, isRefreshing: boolean): string {
+  if (isRefreshing) return "Loading latest state";
+  return status;
+}
+
+function sourceStatusDetail(
+  source: unknown,
+  isRefreshing: boolean,
+  freshness?: unknown,
+): string {
+  const lastChecked = lastCheckedText(freshness) ?? lastCheckedText(source);
+  if (isRefreshing) {
+    return lastChecked
+      ? `Loading latest state - last checked ${lastChecked}`
+      : "Loading latest state";
+  }
+  if (lastChecked) return `Last checked ${lastChecked}`;
+  return detailText(source) ?? "";
+}
+
+function lastCheckedText(item: unknown): string | null {
+  const timestamp = optionalTimestamp(item);
+  if (!timestamp) return null;
+
+  const date = new Date(timestamp);
+  if (!Number.isFinite(date.getTime())) return null;
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function optionalTimestamp(item: unknown): string | null {
+  if (!item || typeof item !== "object") return null;
+  const record = item as Record<string, unknown>;
+  const direct = firstString(
+    record.lastCheckedAt,
+    record.last_checked_at,
+    record.lastChecked,
+    record.last_checked,
+    record.checkedAt,
+    record.checked_at,
+    record.updatedAt,
+    record.updated_at,
+  );
+  if (direct) return direct;
+
+  const metadata = record.metadata;
+  if (!metadata || typeof metadata !== "object") return null;
+  const meta = metadata as Record<string, unknown>;
+  return firstString(
+    meta.lastCheckedAt,
+    meta.last_checked_at,
+    meta.lastChecked,
+    meta.last_checked,
+    meta.checkedAt,
+    meta.checked_at,
+    meta.updatedAt,
+    meta.updated_at,
+  );
+}
+
+function detailText(item: unknown): string | null {
+  if (!item || typeof item !== "object") return null;
+  const detail = (item as Record<string, unknown>).detail;
+  return typeof detail === "string" ? detail : null;
+}
+
+function firstString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return null;
+}
+
+async function fetchProfileSegment<T>(
+  href: string,
+  signal?: AbortSignal,
+): Promise<T> {
+  const response = await fetch(href, {
+    cache: "no-store",
+    signal,
+  });
+  const payload = (await response.json().catch(() => null)) as
+    | (T & { error?: string })
+    | null;
+  if (!response.ok || !payload) {
+    throw new Error(payload?.error ?? `${href} HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+function fallbackFreshness() {
+  const now = new Date().toISOString();
+  return {
+    generatedAt: now,
+    lastChecked: now,
+    status: "cached" as const,
+  };
 }

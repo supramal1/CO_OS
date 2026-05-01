@@ -1,25 +1,14 @@
-import { NextResponse } from "next/server";
-import { authWithApiKey } from "@/lib/server-auth";
+import { withProfileSession } from "@/lib/profile/profile-route";
 import { buildProfileSnapshot } from "@/lib/profile/profile-snapshot";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const session = await authWithApiKey();
-  if (!session?.principalId) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
-  }
-
-  const profile = await buildProfileSnapshot({
-    session,
-    apiKey: session.apiKey,
+  return withProfileSession(async (session) => {
+    const profile = await buildProfileSnapshot({
+      session,
+      apiKey: session.apiKey,
+    });
+    return { profile };
   });
-  return NextResponse.json(
-    { profile },
-    {
-      headers: {
-        "Cache-Control": "private, no-store",
-      },
-    },
-  );
 }

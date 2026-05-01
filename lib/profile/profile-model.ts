@@ -34,6 +34,7 @@ export type ConnectedToolRow = {
     | "confirmation_needed"
     | "connected"
     | "repair_needed";
+  lastCheckedAt?: string;
 };
 
 export type ConnectedToolDisplay = {
@@ -76,6 +77,7 @@ export type ProfilePersonalisationCard = {
   source: ProfilePersonalisationSource;
   confidence: "high" | "medium" | "low";
   actions: Array<"keep" | "correct" | "remove">;
+  lastCheckedAt?: string;
 };
 
 export type ProfilePersonalisationSourceStatus = {
@@ -83,11 +85,18 @@ export type ProfilePersonalisationSourceStatus = {
   status: "ok" | "empty" | "unavailable" | "error";
   label: string;
   detail?: string;
+  lastCheckedAt?: string;
 };
 
 export type ProfilePersonalisationSnapshot = {
   cards: ProfilePersonalisationCard[];
   sources: ProfilePersonalisationSourceStatus[];
+};
+
+export type ProfileStateFreshness = {
+  generatedAt: string;
+  lastChecked: string;
+  status: "live" | "cached";
 };
 
 export type ProfileIdentity = {
@@ -113,6 +122,10 @@ export type ProfileSnapshot = {
   factRows: ProfileFactRow[];
   connectedTools: ConnectedToolRow[];
   personalisation: ProfilePersonalisationSnapshot;
+  metadata?: {
+    connectors: ProfileStateFreshness;
+    personalisation: ProfileStateFreshness;
+  };
 };
 
 export const PROFILE_SECTIONS: ProfileSection[] = [
